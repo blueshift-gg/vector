@@ -1,0 +1,13 @@
+[package]
+name = "vector-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Client-side helpers for building Vector program instructions"
+
+[dependencies]
+solana-address = { workspace = true, features = ["curve25519", "decode"] }
+solana-instruction = { workspace = true }
+solana-instructions-sysvar = "3.0.0"
+ed25519-dalek = "=2.1.1"
+sha2 = "0.10"

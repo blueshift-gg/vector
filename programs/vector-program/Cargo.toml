@@ -1,0 +1,23 @@
+[package]
+name = "vector-program"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector Solana Program"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+pinocchio = { workspace = true }
+pinocchio-log = { workspace = true }
+pinocchio-system = { workspace = true }
+solana-sha256-hasher = { workspace = true }
+solana-address = { workspace = true, features = ["curve25519"] }
+brine-ed25519 = { workspace = true }
+
+[target.'cfg(any(target_os = "solana", target_arch = "bpf"))'.dependencies]
+solana-define-syscall = { workspace = true }
