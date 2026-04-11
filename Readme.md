@@ -32,6 +32,11 @@ The signer is authorizing a concrete transaction buffer, not a reusable nonce an
 
 This sharply limits relayer authority. A relayer cannot swap programs, rewrite accounts, alter amounts, or append alternative logic while preserving validity. Its role is limited to transport and fee payment.
 
+## Privacy
+Vector never materializes the authorized transaction buffer onchain ahead of execution. Signing is a purely computation over the `(seed, address, transaction)` tuple. This means the contents of the transaction itself remain private until the moment a relayer pays to submit it.
+
+This sets Vector apart from other onchain signing primitives which typically require onchain transaction buffer accounts — a smart scaling solution, but also an undesirable property for transactions revealing actionable economic data onchain long before it is executed.
+
 ## Seed Progression
 Vector advances state by reusing the same SHA-256 digest that was just verified as the next seed:
 
@@ -56,6 +61,13 @@ Vector avoids this breakdown of security assumptions entirely by deriving each V
 
 In addition to reducing exposure to such attacks from N+i to N+1, if at any point the immediate next state, or any chain of future states derived from it are believed to be compromised, it is sufficient to simply advance the Vector state with a single, inert transition. This invalidates every hypothetical future signature derived from the previous seed, permanently orphaning the entire branch of potential future states.
 
+## Transaction Expiration
+Vector only invalidates a signature once the Vector seed advances. This means signatures revealed in transactions that failed due to transient conditions such as slippage could later become valid and be replayed. Furthermore, a malicious relayer could withold the transaction, waiting until conditions move in their favor, such as a stale quote, a shift in the market market or a liquidation threshold, before submitting.
+
+The mitigation is a small timeout instruction placed as a top-level instruction alongside `advance`. Because the signature commits to the entire instructions sysvar, the timeout is part of the authorized buffer. A minimal program such as [sbpf-asm-timeout](https://github.com/deanmlittle/sbpf-asm-timeout) reads a deadline from its instruction data, reads the current slot or unix timestamp from the clock sysvar, and aborts if the deadline has passed. Any submission attempt after the deadline fails, invalidating the signature.
+
+Vector deliberately remains unopinionated about expiration so users can compose with whatever deadline primitive suits their needs (slot-based, unix-time-based, oracle-based) without bloating the core protocol.
+
 ## Relayers and EOAs
 Vector constrains a relayer from modifying a user’s transaction. It makes no attempt to eliminate the relayer’s own trust and custody risks towards the user. Relayers may fail operationally even though Vector’s transaction authorization remains intact.
 
@@ -75,10 +87,10 @@ Because the signed digest commits to the entire transaction, the recipient and s
 The `vector-core` crate provides off-chain helpers for constructing Vector transactions:
 
 - `find_vector_pda(address)` — derive the canonical Vector PDA.
-- `create_initialize_instruction(payer, seed, address)` — build an `InitializeVector` instruction.
-- `advance_vector_digest(seed, address, sub_ixs, pre, post)` — recompute the SHA-256 digest of the `advance_vector_buffer` that the on-chain program will verify for `AdvanceVector`.
-- `sign_advance_instruction(signing_key, seed, sub_ixs, pre, post)` — sign the `advance_vector_digest` and return a ready-to-submit `AdvanceVector` instruction.
-- `close_vector_digest(seed, address, close_to, pre, post)` — recompute the SHA-256 digest of the `close_vector_buffer` that the on-chain program will verify for `CloseVector`.
-- `sign_close_instruction(signing_key, seed, close_to, pre, post)` — sign the `close_vector_digest` and return a ready-to-submit `CloseVector` instruction.
+- `create_initialize_instruction(payer, seed, address)` — build an `initialize` instruction.
+- `advance_sighash_digest(seed, address, sub_ixs, pre, post)` — recompute the SHA-256 digest the on-chain program will verify for `advance`.
+- `sign_advance_instruction(signing_key, seed, sub_ixs, pre, post)` — sign the digest and return a ready-to-submit `advance` instruction.
+- `close_sighash_digest(seed, address, close_to, pre, post)` — recompute the SHA-256 digest the on-chain program will verify for `close`.
+- `sign_close_instruction(signing_key, seed, close_to, pre, post)` — sign the digest and return a ready-to-submit `close` instruction.
 
-The signed `advance_vector_digest` doubles as the next on-chain seed, so a successful advance always replaces `seed` with the digest that authorized it. `CloseVector` shares the same signature scheme but skips the seed update because the account is reclaimed in the same instruction.
+The signed digest doubles as the next on-chain seed, so a successful advance always replaces `seed` with the digest that authorized it. `close` shares the same signature scheme but skips the seed update because the account is reclaimed in the same instruction.

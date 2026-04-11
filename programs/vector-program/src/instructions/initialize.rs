@@ -8,9 +8,9 @@ use solana_address::bytes_are_curve_point;
 
 use crate::state::VectorAccount;
 
-/// Create a new vector account at the canonical PDA for `pubkey`.
+/// Create a new vector account at the canonical PDA for `address`.
 ///
-/// Instruction data: `seed: [u8; 32] || pubkey: [u8; 32]`.
+/// Instruction data: `seed: [u8; 32] || address: [u8; 32]`.
 ///
 /// Accounts:
 /// 0. `[signer, writable]` payer
@@ -25,15 +25,15 @@ pub fn process(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    let (seed, pubkey) = parse_init_data(instruction_data)?;
+    let (seed, address) = parse_init_data(instruction_data)?;
 
-    // Off-curve "pubkeys" can never be satisfied by an Ed25519 signature, so
+    // Off-curve "addresss" can never be satisfied by an Ed25519 signature, so
     // the resulting PDA would be unusable.
-    if !bytes_are_curve_point(pubkey) {
+    if !bytes_are_curve_point(address) {
         return Err(ProgramError::InvalidInstructionData);
     }
 
-    let (expected_pda, bump) = Address::find_program_address(&[b"vector", pubkey], &crate::ID);
+    let (expected_pda, bump) = Address::find_program_address(&[b"vector", address], &crate::ID);
     if vector.address() != &expected_pda {
         return Err(ProgramError::InvalidAccountData);
     }
@@ -41,7 +41,7 @@ pub fn process(
     let bump_arr = [bump];
     let seeds = [
         Seed::from(b"vector"),
-        Seed::from(pubkey),
+        Seed::from(address),
         Seed::from(&bump_arr),
     ];
     let signers = [Signer::from(&seeds)];
@@ -57,7 +57,7 @@ pub fn process(
 
     let vector_account: &mut VectorAccount = vector.try_into()?;
     vector_account.seed = *seed;
-    vector_account.address = *pubkey;
+    vector_account.address = *address;
     vector_account.bump = bump;
 
     Ok(())
@@ -68,11 +68,11 @@ fn parse_init_data(data: &[u8]) -> Result<(&[u8; 32], &[u8; 32]), ProgramError> 
     let (seed, rest) = data
         .split_first_chunk::<32>()
         .ok_or(ProgramError::InvalidInstructionData)?;
-    let (pubkey, rest) = rest
+    let (address, rest) = rest
         .split_first_chunk::<32>()
         .ok_or(ProgramError::InvalidInstructionData)?;
     if !rest.is_empty() {
         return Err(ProgramError::InvalidInstructionData);
     }
-    Ok((seed, pubkey))
+    Ok((seed, address))
 }

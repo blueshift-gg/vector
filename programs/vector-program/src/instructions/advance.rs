@@ -34,7 +34,7 @@ const MAX_CPI_INSTRUCTION_ACCOUNTS: usize = 32;
 /// Trailing accounts are consumed in order: each compiled instruction takes
 /// the next `1 + num_accounts` views as `program_id + metas`. Signer/writable
 /// flags are inherited from the outer transaction. Every CPI is signed with
-/// `["vector", vector.pubkey, [bump]]`.
+/// `["vector", vector.address, [bump]]`.
 ///
 /// Accounts:
 /// 0. `[writable]` vector PDA
@@ -56,7 +56,7 @@ pub fn process(
     };
 
     let (advance_vector_signature, mut payload) = split_signature(instruction_data)?;
-    let (pubkey, bump, next_seed) =
+    let (address, bump, next_seed) =
         verify_and_extract_signer(vector, instructions_sysvar, advance_vector_signature)?;
 
     // Scope the borrow so it's dropped before the CPI loop; otherwise any
@@ -69,7 +69,7 @@ pub fn process(
     let bump = [bump];
     let seeds = [
         Seed::from(b"vector"),
-        Seed::from(&pubkey),
+        Seed::from(&address),
         Seed::from(&bump),
     ];
     let signers = [Signer::from(&seeds)];
@@ -93,7 +93,7 @@ fn split_signature(data: &[u8]) -> Result<(&[u8; SIGNATURE_LEN], &[u8]), Program
         .ok_or(ProgramError::InvalidInstructionData)
 }
 
-/// Verify the signature and return `(pubkey, bump, next_seed)`. Reads the
+/// Verify the signature and return `(address, bump, next_seed)`. Reads the
 /// vector account by value so no borrow lingers across the CPI loop.
 #[inline(always)]
 fn verify_and_extract_signer(

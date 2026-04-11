@@ -18,6 +18,4 @@ pinocchio-system = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-address = { workspace = true, features = ["curve25519"] }
 brine-ed25519 = { workspace = true }
-
-[target.'cfg(any(target_os = "solana", target_arch = "bpf"))'.dependencies]
 solana-define-syscall = { workspace = true }

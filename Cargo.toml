@@ -19,7 +19,6 @@ solana-instruction = "3.4.0"
 solana-pubkey = "4.2.0"
 solana-sha256-hasher = "3.1.0"
 pinocchio-log = "0.5.1"
-pinocchio-pubkey = "0.3.0"
 pinocchio-system = "0.6.0"
 brine-ed25519 = "0.4.1"
 

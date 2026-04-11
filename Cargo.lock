@@ -3152,7 +3152,6 @@ dependencies = [
  "solana-instruction",
  "solana-program-option",
  "solana-program-pack",
- "solana-pubkey 4.2.0",
  "solana-system-interface 3.2.0",
  "spl-token-interface",
  "vector-core",
