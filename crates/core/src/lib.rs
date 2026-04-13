@@ -8,7 +8,7 @@ use solana_instructions_sysvar::construct_instructions_data;
 
 /// On-chain program ID. Must match `declare_id!` in
 /// `programs/vector-program/src/lib.rs`.
-pub const VECTOR_PROGRAM_ID: Address = address!("Vector1111111111111111111111111111111111111");
+pub const VECTOR_PROGRAM_ID: Address = address!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
 pub const SYSTEM_PROGRAM_ID: Address = address!("11111111111111111111111111111111");
 pub const INSTRUCTIONS_SYSVAR_ID: Address = address!("Sysvar1nstructions1111111111111111111111111");
@@ -62,20 +62,16 @@ impl VectorAccount {
 }
 
 /// Build an `initialize` instruction creating a new vector account at the
-/// canonical PDA for `address`.
+/// canonical PDA for `address`. The seed is derived on-chain from the
+/// SlotHashes sysvar.
 ///
 /// Accounts: `[payer, vector_pda, system_program]`.
-/// Data: `[discriminator, seed (32), address (32)]`.
-pub fn create_initialize_instruction(
-    payer: &Address,
-    seed: &[u8; 32],
-    address: &Address,
-) -> Instruction {
+/// Data: `[discriminator, address (32)]`.
+pub fn create_initialize_instruction(payer: &Address, address: &Address) -> Instruction {
     let (vector, _bump) = find_vector_pda(address);
 
-    let mut data = Vec::with_capacity(1 + 32 + 32);
+    let mut data = Vec::with_capacity(1 + 32);
     data.push(INITIALIZE_DISCRIMINATOR);
-    data.extend_from_slice(seed);
     data.extend_from_slice(&address.to_bytes());
 
     Instruction {

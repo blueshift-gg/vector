@@ -1,0 +1,33 @@
+{
+  "name": "vector-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Vector Solana program",
+  "type": "module",
+  "main": "sdk/ts/dist/index.js",
+  "types": "sdk/ts/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./sdk/ts/dist/index.js",
+      "types": "./sdk/ts/dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "validator": "solana-test-validator --bpf-program vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV ./target/deploy/vector_program.so --account SysvarRent111111111111111111111111111111111 ./fixtures/rent.json --mint EvFUfisEScFuZSqDXagC17m3bpP32B74dseMHtzQ5TNb --reset",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.0",
+    "@noble/hashes": "^1.7.0",
+    "@solana/web3.js": "^1.95.0"
+  },
+  "devDependencies": {
+    "@solana/spl-token": "^0.4.0",
+    "typescript": "^5.4.0",
+    "vitest": "^3.1.0"
+  },
+  "files": [
+    "sdk/ts/dist",
+    "sdk/ts/src"
+  ]
+}

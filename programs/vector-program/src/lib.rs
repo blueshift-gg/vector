@@ -12,7 +12,7 @@ pub mod state;
 entrypoint!(process_instruction);
 nostd_panic_handler!();
 
-declare_id!("Vector1111111111111111111111111111111111111");
+declare_id!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
 pub fn process_instruction(
     program_id: &Address,

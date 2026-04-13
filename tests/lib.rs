@@ -36,10 +36,10 @@ mod tests {
             Address::new_unique(),
             Account::new(1_000_000_000, 0, &system_program),
         );
-        let (vector, bump) = find_vector_pda(&SIGNER_ADDRESS);
+        let (vector, _bump) = find_vector_pda(&SIGNER_ADDRESS);
         let vector_account = Account::default();
 
-        let init_ix = create_initialize_instruction(&payer, &SEED, &SIGNER_ADDRESS);
+        let init_ix = create_initialize_instruction(&payer, &SIGNER_ADDRESS);
 
         let accounts = vec![
             (payer, payer_account),
@@ -47,12 +47,8 @@ mod tests {
             (system_program, system_program_account),
         ];
 
-        let expected = VectorAccount {
-            seed: SEED,
-            address: SIGNER_ADDRESS,
-            bump,
-        }
-        .to_bytes();
+        // Seed is derived on-chain from address + SlotHashes; just check
+        // success, owner, and account size.
         mollusk.process_and_validate_instruction(
             &init_ix,
             &accounts,
@@ -60,7 +56,6 @@ mod tests {
                 Check::success(),
                 Check::account(&vector)
                     .owner(&VECTOR_PROGRAM_ID)
-                    .data(&expected)
                     .space(VectorAccount::LEN)
                     .build(),
             ],
@@ -126,7 +121,7 @@ mod tests {
         );
         println!("{} CUs", result.compute_units_consumed);
     }
-    
+
     #[test]
     fn advance_round_trips_spl_mint_authority() {
         let mut mollusk = Mollusk::new(&VECTOR_PROGRAM_ID, "../target/deploy/vector_program");

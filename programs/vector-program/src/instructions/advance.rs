@@ -55,6 +55,7 @@ pub fn process(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
+    let pda_address = vector.address().to_bytes();
     let (advance_vector_signature, mut payload) = split_signature(instruction_data)?;
     let (address, bump, next_seed) =
         verify_and_extract_signer(vector, instructions_sysvar, advance_vector_signature)?;
@@ -77,7 +78,7 @@ pub fn process(
     let num_instructions = read_u8(&mut payload)? as usize;
     let mut cursor = 0usize;
     for _ in 0..num_instructions {
-        invoke_next(&mut payload, remaining, &mut cursor, &signers)?;
+        invoke_next(&mut payload, remaining, &mut cursor, &signers, &pda_address)?;
     }
 
     if !payload.is_empty() || cursor != remaining.len() {
@@ -120,6 +121,7 @@ fn invoke_next(
     remaining: &[AccountView],
     cursor: &mut usize,
     signers: &[Signer],
+    vector_address: &[u8; 32],
 ) -> ProgramResult {
     let num_accounts = read_u8(payload)? as usize;
     let data_len = read_u16(payload)? as usize;
@@ -143,7 +145,11 @@ fn invoke_next(
     let mut metas: [MaybeUninit<InstructionAccount>; MAX_CPI_INSTRUCTION_ACCOUNTS] =
         [const { MaybeUninit::uninit() }; MAX_CPI_INSTRUCTION_ACCOUNTS];
     for (slot, view) in metas.iter_mut().zip(account_views) {
-        slot.write(InstructionAccount::from(view));
+        let mut meta = InstructionAccount::from(view);
+        if view.address().as_ref() == vector_address {
+            meta.is_signer = true;
+        }
+        slot.write(meta);
     }
     // SAFETY: the loop initialised exactly `num_accounts` entries, and
     // `MaybeUninit<InstructionAccount>` shares layout with `InstructionAccount`.

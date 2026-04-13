@@ -76,7 +76,9 @@ This means that, while Vector is compatible with all EOAs, including those of re
 One simple way to mitigate this is to require Vector users to place an ownership and balance check instruction at the end of their transaction. By knowing the balance of a relayer's EOA at the start of a transaction, it is sufficient to simply check that its balance has since increased or remains the same, and that it still belongs to the SystemProgram. This protects relayers by virtue of their right of refusal to sign.
 
 ## Initialization
-A Vector account is created via the `initialize` instruction, which allocates a 65-byte PDA at `["vector", address]` under the Vector program. The PDA stores `(seed, address, bump)`, where `address` is the Ed25519 public key authorized to sign advances and `seed` is the initial state from which the hashchain begins. Each address has at most one Vector account, since the PDA derivation is canonical.
+A Vector account is created via the `initialize` instruction, which allocates a 65-byte PDA at `["vector", address]` under the Vector program. The PDA stores `(seed, address, bump)`, where `address` is the Ed25519 public key authorized to sign advances. Each address has at most one Vector account, since the PDA derivation is canonical.
+
+The initial seed is derived entirely onchain using the `sol_get_sysvar` syscall to read the most recent slot hash and height from the `SlotHashes` sysvar, enabling us to calculate the 32-byte seed: `sha256(address || latest_slot_height || latest_slot_hash)`. This time-based pRNG mechanism ensures that if an account is closed and the same address is later re-initialized, the seed will differ, as the slot hash changes in every slot. The conditions required to replay a prior signature chain would require the account to be: opened → used → closed → reopened → replayed – all within the same slot; a set of circumstances that is technically infeasible without cooperation of both the private key holder and a colluding validator.
 
 ## Closing a Vector Account
 A Vector account is closed via a dedicated `close` instruction that reuses the same signature scheme as `advance`. The signer authorizes a `(seed, address, close_to)` tuple under the current Vector state, the program reconstructs the same SHA-256 digest from the instructions sysvar, verifies the Ed25519 signature, and then drains the PDA's lamports into `close_to` by direct lamport mutation. Once emptied, the runtime reclaims the PDA at the instruction boundary.
@@ -87,7 +89,7 @@ Because the signed digest commits to the entire transaction, the recipient and s
 The `vector-core` crate provides off-chain helpers for constructing Vector transactions:
 
 - `find_vector_pda(address)` — derive the canonical Vector PDA.
-- `create_initialize_instruction(payer, seed, address)` — build an `initialize` instruction.
+- `create_initialize_instruction(payer, address)` — build an `initialize` instruction. The seed is derived on-chain.
 - `advance_sighash_digest(seed, address, sub_ixs, pre, post)` — recompute the SHA-256 digest the on-chain program will verify for `advance`.
 - `sign_advance_instruction(signing_key, seed, sub_ixs, pre, post)` — sign the digest and return a ready-to-submit `advance` instruction.
 - `close_sighash_digest(seed, address, close_to, pre, post)` — recompute the SHA-256 digest the on-chain program will verify for `close`.
