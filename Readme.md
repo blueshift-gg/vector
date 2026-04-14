@@ -20,6 +20,19 @@ Pre-hashing with SHA-256 keeps the input handed to the on-chain Ed25519 verify c
 
 The fee payer or relayer is therefore not entrusted with authority over transaction contents at any time, as they are unable to alter the authorized transaction buffer without invalidating its corresponding signature.
 
+## Sighash Algorithm
+
+The following diagram illustrates how Vector computes the digest that binds a signature to a specific transaction and Vector state:
+
+<p align="center">
+    <img src="assets/diagram.png" width="1200"/>
+    <br>
+</p>
+
+**Key insight:** The digest covers the entire instructions sysvar — all pre-instructions, the advance instruction (minus its signature), and all post-instructions. This commits the signature to the complete transaction context, not just the Vector payload.
+
+**Why substitute instead of hash the signature?** If the signature were included in its own digest, you would need to know the signature before computing the hash, but you need the hash before computing the signature — an impossible recursion. By substituting with `seed || address`, the digest becomes computable before signing while still binding the signature to the specific Vector state.
+
 ## Passthrough CPI
 Vector acts as a narrow CPI gate in front of ordinary Solana execution. Its role is limited to verifying that the current transaction exactly matches the transaction that was signed offchain against the current Vector state. Once that check succeeds, execution proceeds to a Passthrough CPI, taking the accounts trailing the Advance instruction, along with the embedded instruction data, and performing CPI actions for the owner.
 
