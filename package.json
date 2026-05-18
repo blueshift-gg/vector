@@ -9,16 +9,49 @@
     ".": {
       "import": "./sdk/ts/dist/index.js",
       "types": "./sdk/ts/dist/index.d.ts"
+    },
+    "./scheme": {
+      "import": "./sdk/ts/dist/scheme.js",
+      "types": "./sdk/ts/dist/scheme.d.ts"
+    },
+    "./instructions": {
+      "import": "./sdk/ts/dist/instructions.js",
+      "types": "./sdk/ts/dist/instructions.d.ts"
+    },
+    "./digest": {
+      "import": "./sdk/ts/dist/digest.js",
+      "types": "./sdk/ts/dist/digest.d.ts"
+    },
+    "./ed25519": {
+      "import": "./sdk/ts/dist/schemes/ed25519.js",
+      "types": "./sdk/ts/dist/schemes/ed25519.d.ts"
+    },
+    "./eip191": {
+      "import": "./sdk/ts/dist/schemes/eip191.js",
+      "types": "./sdk/ts/dist/schemes/eip191.d.ts"
+    },
+    "./secp256k1": {
+      "import": "./sdk/ts/dist/schemes/secp256k1.js",
+      "types": "./sdk/ts/dist/schemes/secp256k1.d.ts"
+    },
+    "./falcon512": {
+      "import": "./sdk/ts/dist/schemes/falcon512.js",
+      "types": "./sdk/ts/dist/schemes/falcon512.d.ts"
+    },
+    "./hawk512": {
+      "import": "./sdk/ts/dist/schemes/hawk512.js",
+      "types": "./sdk/ts/dist/schemes/hawk512.d.ts"
     }
   },
   "scripts": {
     "build": "tsc",
-    "validator": "solana-test-validator --bpf-program vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV ./target/deploy/vector_program.so --account SysvarRent111111111111111111111111111111111 ./fixtures/rent.json --mint EvFUfisEScFuZSqDXagC17m3bpP32B74dseMHtzQ5TNb --reset",
-    "test": "vitest run"
+    "validator": "solana-test-validator --bpf-program vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV ./target/deploy/vector_ed25519.so --bpf-program G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu ./target/deploy/vector_eip191.so --bpf-program HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm ./target/deploy/vector_falcon512.so --bpf-program 9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd ./target/deploy/vector_secp256k1.so --bpf-program Ecm48RMiE4qvyw6m4M5DeutpRAN1AF4tis6ijc6Zq3H9 ./target/deploy/vector_hawk512.so --account SysvarRent111111111111111111111111111111111 ./fixtures/rent.json --mint EvFUfisEScFuZSqDXagC17m3bpP32B74dseMHtzQ5TNb --reset",
+    "test": "bun vitest run"
   },
   "dependencies": {
     "@noble/curves": "^1.8.0",
     "@noble/hashes": "^1.7.0",
+    "@noble/post-quantum": "^0.6.1",
     "@solana/web3.js": "^1.95.0"
   },
   "devDependencies": {

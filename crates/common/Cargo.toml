@@ -1,0 +1,20 @@
+[package]
+name = "vector-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared on-chain logic for the per-scheme Vector programs"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+# `account-resize` provides `AccountView::resize`, used by the two-step
+# `initialize`/`expand` flow for identities too large to allocate in one CPI.
+pinocchio = { workspace = true, features = ["account-resize"] }
+pinocchio-system = { workspace = true }
+# `curve25519` provides `Address::find_program_address` (PDA derivation,
+# syscall-backed on the SBF target). Required by every program, so it lives
+# here rather than in each program crate.
+solana-address = { workspace = true, features = ["curve25519"] }
+solana-nostd-sha256 = { workspace = true }

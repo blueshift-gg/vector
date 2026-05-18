@@ -1,0 +1,19 @@
+[package]
+name = "vector-falcon512"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector — Falcon-512 (post-quantum) signing program"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+vector-common = { path = "../../crates/common" }
+pinocchio = { workspace = true }
+solana-address = { workspace = true }
+solana-falcon512 = { workspace = true }
+solana-nostd-sha256 = { workspace = true }

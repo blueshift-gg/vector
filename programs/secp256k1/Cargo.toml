@@ -1,0 +1,19 @@
+[package]
+name = "vector-secp256k1"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector — plain secp256k1 ECDSA signing program"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+vector-common = { path = "../../crates/common" }
+pinocchio = { workspace = true }
+solana-address = { workspace = true }
+solana-secp256k1 = { workspace = true }
+solana-secp256k1-ecdsa = { workspace = true }

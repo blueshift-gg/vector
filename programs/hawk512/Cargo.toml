@@ -1,0 +1,19 @@
+[package]
+name = "vector-hawk512"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector — Hawk-512 (post-quantum) signing program, 2-step init+expand"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+vector-common = { path = "../../crates/common" }
+pinocchio = { workspace = true }
+solana-address = { workspace = true }
+solana-hawk512 = { workspace = true }
+solana-nostd-sha256 = { workspace = true }

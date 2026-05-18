@@ -9,5 +9,8 @@ description = "Client-side helpers for building Vector program instructions"
 solana-address = { workspace = true, features = ["curve25519", "decode"] }
 solana-instruction = { workspace = true }
 solana-instructions-sysvar = "3.0.0"
+solana-falcon512 = { workspace = true }
 ed25519-dalek = "=2.1.1"
 sha2 = "0.10"
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"

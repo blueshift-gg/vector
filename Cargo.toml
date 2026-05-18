@@ -1,9 +1,29 @@
 [workspace]
 resolver = "2"
 members = [
-    "programs/vector-program",
+    "crates/common",
+    "programs/ed25519",
+    "programs/eip191",
+    "programs/falcon512",
+    "programs/secp256k1",
+    "programs/hawk512",
     "crates/core",
     "tests",
+]
+# Default scope for `cargo build` / `cargo build-sbf` / `cargo check` when no
+# package or `--workspace` flag is given. Excludes `tests` so a plain
+# `cargo build-sbf` doesn't try to compile mollusk/pqcrypto for the SBF
+# target. Run the test suite explicitly with `cargo test -p vector-tests`.
+# Build a single program with `cargo build-sbf --manifest-path
+# programs/<scheme>/Cargo.toml`.
+default-members = [
+    "crates/common",
+    "programs/ed25519",
+    "programs/eip191",
+    "programs/falcon512",
+    "programs/secp256k1",
+    "programs/hawk512",
+    "crates/core",
 ]
 
 [workspace.package]
@@ -14,15 +34,38 @@ license = "MIT"
 [workspace.dependencies]
 pinocchio = "0.11.0"
 solana-address = "2.6.0"
-solana-define-syscall = "5.0"
 solana-instruction = "3.4.0"
 solana-pubkey = "4.2.0"
-solana-sha256-hasher = "3.1.0"
-pinocchio-log = "0.5.1"
-pinocchio-system = "0.6.0"
-brine-ed25519 = "0.4.1"
-
+solana-nostd-sha256 = "0.2.0"
+solana-nostd-keccak = "0.2.0"
+pinocchio-system = "0.6.1"
+brine-ed25519 = { version = "0.7.0", features = ["fast-sha512"] }
+solana-falcon512 = "0.1.2"
+solana-secp256k1 = "0.2.1"
+solana-secp256k1-ecdsa = { version = "0.2.0", default-features = false, features = ["sha256"] }
+solana-hawk512 = "0.1.0"
 [profile.release]
 overflow-checks = true
 lto = "fat"
 codegen-units = 1
+
+# Heavy modular-arithmetic crypto crates are correctness-checked upstream
+# and don't benefit from runtime overflow checks — disabling here recovers
+# ~120k CUs on Falcon advance and ~30-40k on the other schemes.
+[profile.release.package.solana-falcon512]
+overflow-checks = false
+
+[profile.release.package.solana-secp256k1]
+overflow-checks = false
+
+[profile.release.package.solana-secp256k1-ecdsa]
+overflow-checks = false
+
+[profile.release.package.solana-hawk512]
+overflow-checks = false
+
+[profile.release.package.crypto-bigint]
+overflow-checks = false
+
+[profile.release.package.brine-ed25519]
+overflow-checks = false

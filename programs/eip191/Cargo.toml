@@ -1,0 +1,18 @@
+[package]
+name = "vector-eip191"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector — secp256k1 EIP-191 (Ethereum personal-sign) program"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+vector-common = { path = "../../crates/common" }
+pinocchio = { workspace = true }
+solana-address = { workspace = true }
+solana-nostd-keccak = { workspace = true }
