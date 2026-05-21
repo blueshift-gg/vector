@@ -38,12 +38,14 @@ pub fn create_initialize_secp256k1_ecdsa(
     create_initialize_instruction(payer, &SECP256K1, compressed_pubkey, compressed_pubkey)
 }
 
-/// Sign the advance digest with a plain secp256k1 ECDSA key, returning a
-/// ready-to-submit `advance` instruction.
+/// Sign the advance digest with a plain secp256k1 ECDSA key, returning the
+/// advance ix alone. Any CPI passthrough must be built separately via
+/// [`crate::instructions::create_passthrough_instruction`] and included
+/// among `pre_instructions` or `post_instructions` so the digest commits
+/// to its bytes.
 pub fn sign_advance_instruction_secp256k1_ecdsa(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],
-    sub_instructions: &[Instruction],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
 ) -> Instruction {
@@ -52,7 +54,6 @@ pub fn sign_advance_instruction_secp256k1_ecdsa(
         &SECP256K1,
         nonce,
         &identity,
-        sub_instructions,
         pre_instructions,
         post_instructions,
     );
@@ -60,5 +61,5 @@ pub fn sign_advance_instruction_secp256k1_ecdsa(
         .sign_prehash(&digest)
         .expect("secp256k1 signing failed");
     let sig_bytes: [u8; 64] = sig.to_bytes().into();
-    create_advance_instruction(&SECP256K1, &identity, &sig_bytes, sub_instructions)
+    create_advance_instruction(&SECP256K1, &identity, &sig_bytes)
 }

@@ -1,31 +1,19 @@
-use alloc::vec::Vec;
+use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
-use pinocchio::{
-    cpi::{invoke_signed_with_slice, Signer},
-    error::ProgramError,
-    instruction::{InstructionAccount, InstructionView},
-    AccountView, Address, ProgramResult,
-};
-
-use crate::{
-    helpers::{read_u16, read_u8},
-    scheme::SigningScheme,
-    state::{signer_seeds, VectorAccount},
-};
+use crate::{scheme::SigningScheme, state::VectorAccount};
 
 /// Vector's auth model relies on instructions-sysvar introspection, which is
 /// only reliable in a top-level instruction. Reject any CPI invocation of
 /// `advance` so a parent program cannot rewrite the sysvar layout the
 /// signature was bound to.
 #[inline(always)]
-fn cpi_guard() -> Result<(), ProgramError> {
+pub(crate) fn cpi_guard() -> Result<(), ProgramError> {
     #[cfg(target_os = "solana")]
     {
         /// Stack height of a top-level (non-CPI) instruction.
         const TRANSACTION_LEVEL_STACK_HEIGHT: u64 = 1;
 
-        if unsafe { pinocchio::syscalls::sol_get_stack_height() }
-            == TRANSACTION_LEVEL_STACK_HEIGHT
+        if unsafe { pinocchio::syscalls::sol_get_stack_height() } == TRANSACTION_LEVEL_STACK_HEIGHT
         {
             Ok(())
         } else {
@@ -40,24 +28,20 @@ fn cpi_guard() -> Result<(), ProgramError> {
 }
 
 /// Verify the `advance_vector_signature` over the canonical
-/// `advance_vector_digest`, install the digest as the next nonce, and replay
-/// the supplied compiled CPI payload under the vector PDA's signer seeds.
+/// `advance_vector_digest` and install the digest as the next nonce.
+/// CPI passthrough lives in the sibling [`crate::passthrough`] handler
+/// (disc `4`); a tx that just wants to bump the nonce can call `advance`
+/// alone.
 ///
-/// Instruction data (after the discriminator stripped by [`crate::process`]):
+/// Instruction data (after the discriminator stripped by [`crate::dispatch`]):
 ///
 /// ```text
-/// [0..sig_len]  advance_vector_signature  (scheme-defined: 64 / 65 / 666)
-/// [sig_len]     num_instructions: u8
-/// for each instruction:
-///   u8  num_accounts
-///   u16 data_len (little endian)
-///   [u8; data_len] instruction_data
+/// [0..sig_len]  advance_vector_signature  (scheme-defined: 64 / 65 / 555 / 666)
 /// ```
 ///
 /// Accounts:
 /// 0. `[writable]` vector PDA
 /// 1. `[]`         instructions sysvar
-/// 2. `[..]`       CPI payload accounts, in order
 pub fn process<S: SigningScheme>(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -65,78 +49,19 @@ pub fn process<S: SigningScheme>(
 ) -> ProgramResult {
     cpi_guard()?;
 
-    let [vector, instructions_sysvar, remaining @ ..] = accounts else {
+    let [vector, instructions_sysvar] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    let (pda_address, state, identity_seed, payload) =
+    // `advance_nonce` verifies the sig over a digest that commits to the
+    // ENTIRE instructions sysvar buffer (minus the sig bytes), so any
+    // sibling `passthrough` ix's data + accounts in the same tx are
+    // committed to as part of pre/post. That's what authorises a
+    // standalone `passthrough` to run with `vector_pda`'s signer seeds.
+    let outcome =
         VectorAccount::advance_nonce::<S>(vector, &*instructions_sysvar, program_id, data)?;
-
-    let bump = [state.bump];
-    let seeds = signer_seeds(&identity_seed, &bump);
-    passthrough_cpi(payload, remaining, &[Signer::from(&seeds)], &pda_address)
-}
-
-/// Decode and invoke each compiled instruction from `payload`, consuming
-/// accounts from `remaining` in order. Errors if any bytes or accounts are
-/// left unconsumed.
-fn passthrough_cpi(
-    payload: &[u8],
-    remaining: &[AccountView],
-    signers: &[Signer],
-    vector_address: &[u8; 32],
-) -> ProgramResult {
-    let mut payload = payload;
-    let num_instructions = read_u8(&mut payload)? as usize;
-    let mut cursor = 0usize;
-
-    for _ in 0..num_instructions {
-        let num_accounts = read_u8(&mut payload)? as usize;
-        let data_len = read_u16(&mut payload)? as usize;
-
-        if payload.len() < data_len {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        let (data, rest) = payload.split_at(data_len);
-        payload = rest;
-
-        let end = cursor
-            .checked_add(1 + num_accounts)
-            .ok_or(ProgramError::InvalidInstructionData)?;
-        if end > remaining.len() {
-            return Err(ProgramError::NotEnoughAccountKeys);
-        }
-        let program_view = &remaining[cursor];
-        let account_views = &remaining[cursor + 1..end];
-        cursor = end;
-
-        // Build the instruction-account metas on the heap (pinocchio's bump
-        // allocator), promoting any account whose address matches the vector
-        // PDA to `is_signer` so re-entry into `close`/`withdraw` passes the
-        // `vector.is_signer()` gate.
-        let mut metas: Vec<InstructionAccount> = Vec::with_capacity(num_accounts);
-        for view in account_views {
-            let mut meta = InstructionAccount::from(view);
-            if view.address().as_ref() == vector_address {
-                meta.is_signer = true;
-            }
-            metas.push(meta);
-        }
-
-        invoke_signed_with_slice(
-            &InstructionView {
-                program_id: program_view.address(),
-                accounts: &metas,
-                data,
-            },
-            account_views,
-            signers,
-        )?;
-    }
-
-    if !payload.is_empty() || cursor != remaining.len() {
+    if !outcome.payload.is_empty() {
         return Err(ProgramError::InvalidInstructionData);
     }
-
     Ok(())
 }

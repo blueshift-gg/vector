@@ -6,6 +6,21 @@ use crate::scheme::{IdentitySeed, SigningScheme};
 
 pub const DIGEST_LEN: usize = 32;
 
+/// What [`VectorAccount::advance_nonce`] hands back after verifying the
+/// signature and bumping the nonce. All fields are derived from the
+/// vector PDA the call ran against; the borrows are released before the
+/// struct is returned so the PDA can appear in downstream CPI.
+pub struct AdvanceOutcome<'a> {
+    /// Vector PDA address as raw bytes (for sibling-ix lookups).
+    pub pda_address: [u8; 32],
+    /// Header snapshot with the *new* (post-advance) nonce installed.
+    pub state: VectorAccount,
+    /// PDA seed derived from the stored identity (for `invoke_signed`).
+    pub identity_seed: IdentitySeed,
+    /// Trailing instruction-data bytes after the signature.
+    pub payload: &'a [u8],
+}
+
 /// On-chain vector state — fixed-size header.
 ///
 /// Layout (33 bytes, `#[repr(C)]`):
@@ -75,14 +90,15 @@ impl VectorAccount {
 
     /// Parse the signature off `instruction_data`, verify it against the
     /// instructions-sysvar buffer, write the digest as the next nonce, and
-    /// return `(pda_address, state, identity_seed, payload)`. All borrows are
-    /// released before returning so the PDA can appear in downstream CPI.
+    /// return everything a downstream handler might need
+    /// ([`AdvanceOutcome`]). All borrows are released before returning so
+    /// the PDA can appear in downstream CPI.
     pub fn advance_nonce<'a, S: SigningScheme>(
         account: &mut AccountView,
         instructions_sysvar: &AccountView,
         program_id: &Address,
         instruction_data: &'a [u8],
-    ) -> Result<([u8; 32], Self, IdentitySeed, &'a [u8]), ProgramError> {
+    ) -> Result<AdvanceOutcome<'a>, ProgramError> {
         let pda_address = account.address().to_bytes();
         let mut state = Self::load(account, program_id)?;
 
@@ -104,16 +120,18 @@ impl VectorAccount {
 
         state.nonce = new_nonce;
         account.try_borrow_mut()?[..32].copy_from_slice(&state.nonce);
-        Ok((pda_address, state, identity_seed, payload))
+        Ok(AdvanceOutcome {
+            pda_address,
+            state,
+            identity_seed,
+            payload,
+        })
     }
 }
 
 /// Build the three PDA signer seeds for a vector account:
 /// `["vector", identity-or-hash, &[bump]]`.
-pub fn signer_seeds<'a>(
-    identity_seed: &'a IdentitySeed,
-    bump: &'a [u8; 1],
-) -> [Seed<'a>; 3] {
+pub fn signer_seeds<'a>(identity_seed: &'a IdentitySeed, bump: &'a [u8; 1]) -> [Seed<'a>; 3] {
     [
         Seed::from(b"vector"),
         Seed::from(identity_seed.as_slice()),

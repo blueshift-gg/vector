@@ -5,7 +5,7 @@
  * Mirrors `crates/core/src/instructions.rs`.
  */
 import {
-  PublicKey,
+  Address,
   SystemProgram,
   SYSVAR_INSTRUCTIONS_PUBKEY,
   TransactionInstruction,
@@ -19,6 +19,7 @@ import {
   INITIALIZE_DISCRIMINATOR,
   ADVANCE_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
+  PASSTHROUGH_DISCRIMINATOR,
   WITHDRAW_DISCRIMINATOR,
 } from "./scheme.js";
 
@@ -32,7 +33,7 @@ import {
  * Data: `[INITIALIZE_DISCRIMINATOR, ...initPayload]`.
  */
 export function createInitializeInstruction(
-  payer: PublicKey,
+  payer: Address,
   scheme: Scheme,
   identity: Uint8Array,
   initPayload: Uint8Array
@@ -56,10 +57,57 @@ export function createInitializeInstruction(
 
 // ── Advance ──────────────────────────────────────────────────────────
 
+/**
+ * Build an `advance` instruction — verifies the signature and installs the
+ * digest as the next nonce. No CPI passthrough: pair this with
+ * {@link createPassthroughInstruction} in the same tx if you need to
+ * authorise CPIs under the vector PDA's signer seeds.
+ *
+ * Accounts: `[vector_pda(writable), instructions_sysvar]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, ...signature]`.
+ */
 export function createAdvanceInstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  advanceVectorSignature: Uint8Array,
+  advanceVectorSignature: Uint8Array
+): TransactionInstruction {
+  const [vectorPda] = findVectorPda(scheme, identity);
+
+  const sigLen = advanceVectorSignature.length;
+  const data = new Uint8Array(1 + sigLen);
+  data[0] = ADVANCE_DISCRIMINATOR;
+  data.set(advanceVectorSignature, 1);
+
+  return new TransactionInstruction({
+    programId: scheme.programId,
+    keys: [
+      { pubkey: vectorPda, isSigner: false, isWritable: true },
+      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.from(data),
+  });
+}
+
+// ── Passthrough ──────────────────────────────────────────────────────
+
+/**
+ * Build a `passthrough` instruction — replays a batch of CPIs under the
+ * vector PDA's signer seeds. Must be paired with a sibling `advance` ix
+ * earlier in the same tx: the on-chain handler scans the instructions
+ * sysvar and refuses if it can't find a prior `advance` for the same
+ * vector PDA. The sibling advance's signature digest commits to the
+ * entire sysvar buffer (minus its sig bytes), so the passthrough's data
+ * and account layout are authenticated end-to-end without a second
+ * signature here.
+ *
+ * Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
+ * ...sub_ix accounts...]` repeated per sub-instruction.
+ * Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
+ * {num_accounts(u8), data_len(u16 LE), data}...]`.
+ */
+export function createPassthroughInstruction(
+  scheme: Scheme,
+  identity: Uint8Array,
   subInstructions: TransactionInstruction[]
 ): TransactionInstruction {
   if (subInstructions.length > 255) {
@@ -87,9 +135,8 @@ export function createAdvanceInstruction(
     }
   }
 
-  // [disc(1)][sig(sigLen)][num_ixs(u8)][per ix: num_accounts(u8) data_len(u16 LE) data]
-  const sigLen = advanceVectorSignature.length;
-  let dataLen = 1 + sigLen + 1;
+  // [disc(1)][num_ixs(u8)][per ix: num_accounts(u8) data_len(u16 LE) data]
+  let dataLen = 1 + 1;
   for (const ix of subInstructions) {
     dataLen += 1 + 2 + ix.data.length;
   }
@@ -97,9 +144,7 @@ export function createAdvanceInstruction(
   const data = new Uint8Array(dataLen);
   let off = 0;
 
-  data[off++] = ADVANCE_DISCRIMINATOR;
-  data.set(advanceVectorSignature, off);
-  off += sigLen;
+  data[off++] = PASSTHROUGH_DISCRIMINATOR;
   data[off++] = subInstructions.length;
 
   for (const ix of subInstructions) {
@@ -130,16 +175,17 @@ export function createAdvanceInstruction(
 // ── Close / Withdraw subinstructions ──────────────────────────────────
 
 /**
- * Build a `close` instruction for use as a sub-instruction inside an
- * `advance` payload. Direct top-level invocation fails the
- * `vector.is_signer()` gate; close is only reachable as a CPI from advance.
+ * Build a `close` sub-instruction for use inside a `passthrough` ix. Direct
+ * top-level invocation fails the `vector.is_signer()` gate; close is only
+ * reachable as a CPI from passthrough (which promotes the vector PDA to a
+ * signer via `invoke_signed`).
  *
  * Accounts: `[vector_pda, close_to]`. Data: `[CLOSE_DISCRIMINATOR]`.
  */
 export function createCloseSubinstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  closeTo: PublicKey
+  closeTo: Address
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
   return new TransactionInstruction({
@@ -153,8 +199,7 @@ export function createCloseSubinstruction(
 }
 
 /**
- * Build a `withdraw` instruction for use as a sub-instruction inside an
- * `advance` payload. Same authorisation model as
+ * Build a `withdraw` sub-instruction. Same authorisation model as
  * {@link createCloseSubinstruction}.
  *
  * Accounts: `[vector_pda, receiver]`.
@@ -163,7 +208,7 @@ export function createCloseSubinstruction(
 export function createWithdrawSubinstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  receiver: PublicKey,
+  receiver: Address,
   lamports: bigint
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);

@@ -7,13 +7,13 @@ use sha2::{Digest as Sha2Digest, Sha256};
 use solana_address::{address, Address};
 
 pub const SYSTEM_PROGRAM_ID: Address = address!("11111111111111111111111111111111");
-pub const INSTRUCTIONS_SYSVAR_ID: Address =
-    address!("Sysvar1nstructions1111111111111111111111111");
+pub const INSTRUCTIONS_SYSVAR_ID: Address = address!("Sysvar1nstructions1111111111111111111111111");
 
 pub const INITIALIZE_DISCRIMINATOR: u8 = 0;
 pub const ADVANCE_DISCRIMINATOR: u8 = 1;
 pub const CLOSE_DISCRIMINATOR: u8 = 2;
 pub const WITHDRAW_DISCRIMINATOR: u8 = 3;
+pub const PASSTHROUGH_DISCRIMINATOR: u8 = 4;
 
 pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 

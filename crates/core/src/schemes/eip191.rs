@@ -63,12 +63,14 @@ fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Sign the advance digest with an EIP-191 secp256k1 key, returning a
-/// ready-to-submit `advance` instruction.
+/// Sign the advance digest with an EIP-191 secp256k1 key, returning the
+/// advance ix alone. Any CPI passthrough must be built separately via
+/// [`crate::instructions::create_passthrough_instruction`] and included
+/// among `pre_instructions` or `post_instructions` so the digest commits
+/// to its bytes.
 pub fn sign_advance_instruction_secp256k1_eip191(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],
-    sub_instructions: &[Instruction],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
 ) -> Instruction {
@@ -77,7 +79,6 @@ pub fn sign_advance_instruction_secp256k1_eip191(
         &EIP191,
         nonce,
         &identity,
-        sub_instructions,
         pre_instructions,
         post_instructions,
     );
@@ -88,5 +89,5 @@ pub fn sign_advance_instruction_secp256k1_eip191(
     let mut sig_bytes = [0u8; 65];
     sig_bytes[..64].copy_from_slice(&sig.to_bytes());
     sig_bytes[64] = recid.to_byte();
-    create_advance_instruction(&EIP191, &identity, &sig_bytes, sub_instructions)
+    create_advance_instruction(&EIP191, &identity, &sig_bytes)
 }

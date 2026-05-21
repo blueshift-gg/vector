@@ -6,8 +6,8 @@ use solana_account::Account;
 use solana_address::Address;
 use vector_core::{
     advance_vector_digest, create_close_subinstruction, create_initialize_ed25519,
-    create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda,
-    sign_advance_instruction_ed25519, ED25519,
+    create_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
+    find_vector_pda, sign_advance_instruction_ed25519, ED25519,
 };
 
 use crate::common::{
@@ -15,9 +15,8 @@ use crate::common::{
 };
 
 const SIGNER_PRIVKEY: [u8; 32] = [
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ];
 
 fn signing_key() -> SigningKey {
@@ -74,9 +73,9 @@ fn advance_empty() {
         &pubkey,
     );
 
-    let advance_ix = sign_advance_instruction_ed25519(&key, &NONCE, &[], &[], &[]);
+    let advance_ix = sign_advance_instruction_ed25519(&key, &NONCE, &[], &[]);
 
-    let next_nonce = advance_vector_digest(&ED25519, &NONCE, &pubkey, &[], &[], &[]);
+    let next_nonce = advance_vector_digest(&ED25519, &NONCE, &pubkey, &[], &[]);
     let expected_vector_data = expected_advanced_data(next_nonce, &ED25519, bump, &pubkey);
 
     let accounts = vec![(vector, vector_account)];
@@ -98,8 +97,8 @@ fn advance_empty() {
 fn advance_round_trips_spl_mint_authority() {
     let key = signing_key();
     let pubkey = ed25519_pubkey(&key);
-    run_round_trip_spl(&ED25519, &pubkey, &pubkey, |nonce, sub, pre, post| {
-        sign_advance_instruction_ed25519(&key, nonce, sub, pre, post)
+    run_round_trip_spl(&ED25519, &pubkey, &pubkey, |nonce, pre, post| {
+        sign_advance_instruction_ed25519(&key, nonce, pre, post)
     });
 }
 
@@ -113,28 +112,35 @@ fn close_via_advance() {
     let (vector, bump) = find_vector_pda(&ED25519, &pubkey);
     let vector_account = build_vector_account(NONCE, &ED25519, bump, vector_lamports, &pubkey);
 
-    let eoa_starting_lamports = 1_0000_000_000u64;
+    let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (
         Address::new_unique(),
         Account::new(eoa_starting_lamports, 0, &Address::default()),
     );
 
+    // The close runs inside a passthrough that follows advance. advance's
+    // digest commits to the passthrough's bytes via post_instructions.
     let close_sub = create_close_subinstruction(&ED25519, &pubkey, &eoa);
-    let advance_ix = sign_advance_instruction_ed25519(&key, &NONCE, &[close_sub], &[], &[]);
+    let passthrough_ix = create_passthrough_instruction(&ED25519, &pubkey, &[close_sub]);
+    let advance_ix =
+        sign_advance_instruction_ed25519(&key, &NONCE, &[], std::slice::from_ref(&passthrough_ix));
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
     mollusk.process_and_validate_instruction_chain(
-        &[(
-            &advance_ix,
-            &[
-                Check::success(),
-                Check::account(&vector).lamports(0).build(),
-                Check::account(&eoa)
-                    .lamports(eoa_starting_lamports + vector_lamports)
-                    .build(),
-            ],
-        )],
+        &[
+            (&advance_ix, &[Check::success()]),
+            (
+                &passthrough_ix,
+                &[
+                    Check::success(),
+                    Check::account(&vector).lamports(0).build(),
+                    Check::account(&eoa)
+                        .lamports(eoa_starting_lamports + vector_lamports)
+                        .build(),
+                ],
+            ),
+        ],
         &accounts,
     );
 }
@@ -153,30 +159,35 @@ fn withdraw_via_advance() {
     let vector_account =
         build_vector_account(NONCE, &ED25519, bump, starting_vector_lamports, &pubkey);
 
-    let eoa_starting_lamports = 1_0000_000_000u64;
+    let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (
         Address::new_unique(),
         Account::new(eoa_starting_lamports, 0, &Address::default()),
     );
 
     let withdraw_sub = create_withdraw_subinstruction(&ED25519, &pubkey, &eoa, withdraw_amount);
-    let advance_ix = sign_advance_instruction_ed25519(&key, &NONCE, &[withdraw_sub], &[], &[]);
+    let passthrough_ix = create_passthrough_instruction(&ED25519, &pubkey, &[withdraw_sub]);
+    let advance_ix =
+        sign_advance_instruction_ed25519(&key, &NONCE, &[], std::slice::from_ref(&passthrough_ix));
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
     mollusk.process_and_validate_instruction_chain(
-        &[(
-            &advance_ix,
-            &[
-                Check::success(),
-                Check::account(&vector)
-                    .lamports(starting_vector_lamports - withdraw_amount)
-                    .build(),
-                Check::account(&eoa)
-                    .lamports(eoa_starting_lamports + withdraw_amount)
-                    .build(),
-            ],
-        )],
+        &[
+            (&advance_ix, &[Check::success()]),
+            (
+                &passthrough_ix,
+                &[
+                    Check::success(),
+                    Check::account(&vector)
+                        .lamports(starting_vector_lamports - withdraw_amount)
+                        .build(),
+                    Check::account(&eoa)
+                        .lamports(eoa_starting_lamports + withdraw_amount)
+                        .build(),
+                ],
+            ),
+        ],
         &accounts,
     );
 }

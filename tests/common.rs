@@ -11,8 +11,10 @@ use spl_token_interface::{
     instruction::{mint_to, set_authority, AuthorityType},
     state::{Account as TokenAccount, AccountState, Mint},
 };
-use vector_core::{advance_vector_digest, find_vector_pda, Scheme, VectorAccount, ED25519,
-    EIP191, FALCON512, HAWK512, SECP256K1};
+use vector_core::{
+    advance_vector_digest, create_passthrough_instruction, find_vector_pda, Scheme, VectorAccount,
+    ED25519, EIP191, FALCON512, HAWK512, SECP256K1,
+};
 
 /// Initial nonce used for advance/close digests across the suite.
 pub const NONCE: [u8; 32] = [0xff; 32];
@@ -20,9 +22,8 @@ pub const NONCE: [u8; 32] = [0xff; 32];
 /// Test secp256k1 private key (`32 zero bytes || 0x01`). Shared by every
 /// secp256k1-based program test module.
 pub const SECP256K1_PRIVKEY: [u8; 32] = [
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ];
 
 /// Path (sans `.so`) to a program's built ELF, keyed off its program ID.
@@ -91,15 +92,19 @@ pub fn expected_advanced_data(
 /// `identity` is the client identity (PDA seed + digest input;
 /// `scheme.identity_len`); `stored_identity` is what the account holds
 /// (`scheme.stored_identity_len`) — these differ only for Falcon.
-/// `sign_advance` returns a ready-to-submit `advance` `Instruction` given the
-/// canonical `(nonce, sub_ixs, pre_ixs, post_ixs)`.
+///
+/// `sign_advance(nonce, pre, post)` returns just the `advance`
+/// `Instruction` signed over the canonical digest. Sub-instruction CPIs
+/// (the mint-authority handoff here) live in a separate `passthrough`
+/// ix that this helper builds and threads through `post`, so the closure
+/// stays signer-only.
 pub fn run_round_trip_spl<F>(
     scheme: &Scheme,
     identity: &[u8],
     stored_identity: &[u8],
     sign_advance: F,
 ) where
-    F: Fn(&[u8; 32], &[Instruction], &[Instruction], &[Instruction]) -> Instruction,
+    F: Fn(&[u8; 32], &[Instruction], &[Instruction]) -> Instruction,
 {
     let mut mollusk = mollusk(scheme);
     token::add_program(&mut mollusk);
@@ -108,7 +113,7 @@ pub fn run_round_trip_spl<F>(
     let (token_program, token_program_account) = keyed_account();
     let (eoa, eoa_account) = (
         Address::new_unique(),
-        Account::new(1_0000_000_000, 0, &Address::default()),
+        Account::new(10_000_000_000, 0, &Address::default()),
     );
 
     let (vector, bump) = find_vector_pda(scheme, identity);
@@ -116,10 +121,7 @@ pub fn run_round_trip_spl<F>(
         NONCE,
         scheme,
         bump,
-        mollusk
-            .sysvars
-            .rent
-            .minimum_balance(scheme.account_len()),
+        mollusk.sysvars.rent.minimum_balance(scheme.account_len()),
         stored_identity,
     );
 
@@ -168,21 +170,19 @@ pub fn run_round_trip_spl<F>(
     )
     .unwrap();
 
-    let advance_ix = sign_advance(
-        &NONCE,
-        &[pda_to_eoa_ix.clone()],
-        &[],
-        &[mint_to_ix.clone(), eoa_to_pda_ix.clone()],
-    );
+    // Build the passthrough that runs the mint-authority handoff CPI
+    // under vector_pda's signer seeds. Order in the tx is
+    // `[advance, passthrough, mint_to, eoa_to_pda]`; advance's digest
+    // commits to all three post-instructions.
+    let passthrough_ix = create_passthrough_instruction(scheme, identity, &[pda_to_eoa_ix]);
+    let post_ixs = [
+        passthrough_ix.clone(),
+        mint_to_ix.clone(),
+        eoa_to_pda_ix.clone(),
+    ];
+    let advance_ix = sign_advance(&NONCE, &[], &post_ixs);
 
-    let next_nonce = advance_vector_digest(
-        scheme,
-        &NONCE,
-        identity,
-        &[pda_to_eoa_ix],
-        &[],
-        &[mint_to_ix.clone(), eoa_to_pda_ix.clone()],
-    );
+    let next_nonce = advance_vector_digest(scheme, &NONCE, identity, &[], &post_ixs);
 
     let expected_vector_data = expected_advanced_data(next_nonce, scheme, bump, stored_identity);
 
@@ -216,6 +216,7 @@ pub fn run_round_trip_spl<F>(
                     Check::account(&vector).data(&expected_vector_data).build(),
                 ],
             ),
+            (&passthrough_ix, &[Check::success()]),
             (&mint_to_ix, &[Check::success()]),
             (
                 &eoa_to_pda_ix,

@@ -5,15 +5,18 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 
 use crate::scheme::{
-    find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR,
-    INITIALIZE_DISCRIMINATOR, INSTRUCTIONS_SYSVAR_ID, SYSTEM_PROGRAM_ID,
-    WITHDRAW_DISCRIMINATOR,
+    find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
+    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
 };
 
 /// Build an `initialize` instruction. `init_payload`'s shape is
 /// scheme-defined; there is no scheme byte (the program ID identifies it).
 ///
-/// Accounts: `[payer, vector_pda, system_program]`.
+/// Accounts: `[payer, vector_pda, system_program]`. `system_program` is
+/// required — Solana resolves the pinocchio `CreateAccount` CPI by looking
+/// up System in the parent program's account_infos (built-in programs are
+/// NOT auto-loaded for CPI dispatch).
+///
 /// Data: `[INITIALIZE_DISCRIMINATOR, ...init_payload]`.
 pub fn create_initialize_instruction(
     payer: &Address,
@@ -43,12 +46,47 @@ pub fn create_initialize_instruction(
     }
 }
 
-/// Build an `advance` instruction wrapping `instructions` as a CPI
-/// passthrough payload signed by the vector PDA.
+/// Build an `advance` instruction — verify the signature and install the
+/// digest as the next nonce. No CPI passthrough; pair with
+/// [`create_passthrough_instruction`] in the same tx for that.
+///
+/// Accounts: `[vector_pda(writable), instructions_sysvar]`.
+/// Data: `[ADVANCE_DISCRIMINATOR, ...signature]`.
 pub fn create_advance_instruction(
     scheme: &Scheme,
     identity: &[u8],
     advance_vector_signature: &[u8],
+) -> Instruction {
+    let (vector_pda, _bump) = find_vector_pda(scheme, identity);
+    let mut data = Vec::with_capacity(1 + advance_vector_signature.len());
+    data.push(ADVANCE_DISCRIMINATOR);
+    data.extend_from_slice(advance_vector_signature);
+    Instruction {
+        program_id: scheme.program_id,
+        accounts: vec![
+            AccountMeta::new(vector_pda, false),
+            AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
+        ],
+        data,
+    }
+}
+
+/// Build a `passthrough` instruction — replay a batch of CPIs under the
+/// vector PDA's signer seeds. Must be paired with a sibling
+/// [`create_advance_instruction`] earlier in the same transaction: the
+/// on-chain handler scans the instructions sysvar and refuses if it
+/// can't find a prior `advance` for the same vector PDA. The sibling
+/// advance's signature digest commits to the entire sysvar buffer (minus
+/// the sig bytes), so this passthrough's data + account layout are
+/// authenticated end-to-end without a second signature here.
+///
+/// Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
+/// ...sub_ix accounts...]` repeated per sub-instruction.
+/// Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
+/// {num_accounts(u8), data_len(u16 LE), data}...]`.
+pub fn create_passthrough_instruction(
+    scheme: &Scheme,
+    identity: &[u8],
     instructions: &[Instruction],
 ) -> Instruction {
     assert!(
@@ -68,17 +106,14 @@ pub fn create_advance_instruction(
         accounts.extend(ix.accounts.iter().cloned());
     }
 
-    let sig_len = advance_vector_signature.len();
     let payload_len: usize = 1
-        + sig_len
         + 1
         + instructions
             .iter()
             .map(|ix| 1 + 2 + ix.data.len())
             .sum::<usize>();
     let mut data = Vec::with_capacity(payload_len);
-    data.push(ADVANCE_DISCRIMINATOR);
-    data.extend_from_slice(advance_vector_signature);
+    data.push(PASSTHROUGH_DISCRIMINATOR);
     data.push(instructions.len() as u8);
     for ix in instructions {
         assert!(
@@ -104,8 +139,9 @@ pub fn create_advance_instruction(
     }
 }
 
-/// Build a `close` instruction suitable for use as a sub-instruction inside
-/// an `advance` payload.
+/// Build a `close` sub-instruction for inclusion in a
+/// [`create_passthrough_instruction`] payload. Direct top-level invocation
+/// fails the `vector.is_signer()` gate.
 pub fn create_close_subinstruction(
     scheme: &Scheme,
     identity: &[u8],
@@ -122,7 +158,9 @@ pub fn create_close_subinstruction(
     }
 }
 
-/// Build a `withdraw` instruction suitable for use as a sub-instruction.
+/// Build a `withdraw` sub-instruction for inclusion in a
+/// [`create_passthrough_instruction`] payload. Same authorisation model as
+/// [`create_close_subinstruction`].
 pub fn create_withdraw_subinstruction(
     scheme: &Scheme,
     identity: &[u8],

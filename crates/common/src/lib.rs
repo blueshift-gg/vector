@@ -3,16 +3,16 @@
 //! Every Vector program (Ed25519, EIP-191, Falcon-512, secp256k1-ECDSA,
 //! Hawk-512) is a thin shell: it picks one [`SigningScheme`] and routes a
 //! discriminator to the shared instruction handlers exposed here
-//! ([`initialize`], [`advance`], [`close`], [`withdraw`], and the two-step
-//! [`prepare`]). The handlers are the single source of truth; only signature
-//! verification (the program's `SigningScheme` impl) and the dispatch table
-//! vary per program.
+//! ([`initialize`], [`advance`], [`close`], [`withdraw`], [`passthrough`]).
+//! The handlers are the single source of truth; only signature verification
+//! (the program's `SigningScheme` impl) and the dispatch table vary per
+//! program.
 //!
 //! Single-step schemes use the canonical [`dispatch`] router verbatim.
 //! Hawk-512 writes its own dispatch so its discriminator `0` can route to
-//! [`initialize`] (round one) or [`prepare`] (round two) by account owner —
-//! that owner check then lives only in Hawk, not in every program's
-//! `initialize`.
+//! one of three registration steps (`initialize` / `store_wire` / `finalize`)
+//! by ix shape + vector account state — that routing then lives only in
+//! Hawk, not in every program's `initialize`.
 //!
 //! Because each scheme ships as its own program with its own program ID, the
 //! account layout carries no scheme discriminator:
@@ -32,15 +32,14 @@ mod scheme;
 mod state;
 
 pub use scheme::{IdentitySeed, SigningScheme};
-pub use state::{signer_seeds, VectorAccount};
+pub use state::{signer_seeds, AdvanceOutcome, VectorAccount};
 
 /// Shared instruction handlers. Each is a plain function a program routes to
 /// from its own discriminator match; `close` is scheme-independent, the rest
 /// are generic over the program's [`SigningScheme`].
 pub use instructions::{
-    advance::process as advance, close::process as close,
-    initialize::process as initialize, prepare::process as prepare,
-    withdraw::process as withdraw,
+    advance::process as advance, close::process as close, initialize::process as initialize,
+    passthrough::process as passthrough, withdraw::process as withdraw,
 };
 
 use instructions::VectorInstruction;
@@ -48,10 +47,12 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
 /// Canonical discriminator router for single-step schemes
 /// (Ed25519/EIP-191/Falcon-512/secp256k1): `0` Initialize, `1` Advance,
-/// `2` Close, `3` Withdraw — where `Initialize` is a strict create.
+/// `2` Close, `3` Withdraw, `4` Passthrough — where `Initialize` is a strict
+/// create.
 ///
 /// Hawk-512 does NOT use this; it writes its own match so discriminator `0`
-/// can dispatch to [`initialize`] vs [`prepare`] on the account's owner.
+/// can dispatch to one of three registration steps by ix shape + vector
+/// account state (see `programs/hawk512/src/scheme.rs`).
 #[inline(always)]
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,
@@ -63,9 +64,10 @@ pub fn dispatch<S: SigningScheme>(
         .ok_or(ProgramError::InvalidInstructionData)?;
 
     match VectorInstruction::try_from(discriminator)? {
-        VectorInstruction::InitializeVector => initialize::<S>(program_id, accounts, rest),
-        VectorInstruction::AdvanceVector => advance::<S>(program_id, accounts, rest),
-        VectorInstruction::CloseVector => close(program_id, accounts, rest),
-        VectorInstruction::WithdrawVector => withdraw::<S>(program_id, accounts, rest),
+        VectorInstruction::Initialize => initialize::<S>(program_id, accounts, rest),
+        VectorInstruction::Advance => advance::<S>(program_id, accounts, rest),
+        VectorInstruction::Close => close(program_id, accounts, rest),
+        VectorInstruction::Withdraw => withdraw::<S>(program_id, accounts, rest),
+        VectorInstruction::Passthrough => passthrough::<S>(program_id, accounts, rest),
     }
 }

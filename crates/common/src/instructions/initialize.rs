@@ -21,11 +21,12 @@ use crate::state::VectorAccount;
 /// resizes. Re-invoking it on an existing account fails naturally — the
 /// system-program `CreateAccount` CPI errors on an account it no longer
 /// owns. Single-step schemes (Ed25519/EIP-191/Falcon-512/Secp256k1) register
-/// in this one call. Hawk-512's program routes its *first* call here and a
-/// later call to [`prepare`](super::prepare::process) (it allocates only the
-/// `min(full, MAX_PERMITTED_DATA_INCREASE)` base chunk here, since its full
-/// account exceeds the single-CPI allocation cap — rent is funded for the
-/// final size so the later resize stays rent-exempt).
+/// in this one call. Hawk-512's program routes its *first* call here and
+/// follows up with `store_wire` + `finalize` (in
+/// `programs/hawk512/src/scheme.rs`): the base chunk allocated here is
+/// `min(full, MAX_PERMITTED_DATA_INCREASE)` since the full account exceeds
+/// the single-CPI allocation cap — rent is funded for the final size so the
+/// later resize stays rent-exempt.
 ///
 /// Instruction data (after the discriminator): `init_payload` — the wire
 /// pubkey/address, length `S::INIT_PAYLOAD_LEN`. No scheme byte (the program
@@ -34,7 +35,10 @@ use crate::state::VectorAccount;
 /// Accounts:
 /// 0. `[signer, writable]` payer
 /// 1. `[writable]`         vector PDA
-/// 2. `[]`                 system program
+/// 2. `[]`                 system_program (required for the `CreateAccount`
+///    CPI — pinocchio's `invoke_signed` resolves the System program out of
+///    the parent's `account_infos`, so the runtime needs it loaded via this
+///    ix's metas; built-in programs are NOT auto-loaded for CPI dispatch).
 pub fn process<S: SigningScheme>(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -81,9 +85,12 @@ pub fn process<S: SigningScheme>(
 
     // A CPI `CreateAccount` can only allocate up to
     // `MAX_PERMITTED_DATA_INCREASE` bytes; schemes whose identity exceeds
-    // that (Hawk-512) get a base chunk now and grow in `prepare`. Rent is
-    // funded for the *final* size so the account stays rent-exempt across a
-    // later resize.
+    // that (Hawk-512) get a base chunk now and grow in `prepare`. The
+    // post-CPI realloc rule anchors the per-ix grow cap to the account's
+    // size at the start of the *current* ix — which here is 0 (brand-new
+    // PDA), so we can't fold the second grow into call 1 either. Rent is
+    // funded for the *final* size so the account stays rent-exempt across
+    // the later resize in `prepare`.
     let full_len = VectorAccount::account_len::<S>();
     let alloc_len = full_len.min(MAX_PERMITTED_DATA_INCREASE);
     let lamports = Rent::get()?.try_minimum_balance(full_len)?;

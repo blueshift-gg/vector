@@ -5,7 +5,7 @@
  * Mirrors `crates/core/src/schemes/secp256k1.rs`. Pulls in only
  * `@noble/curves/secp256k1`.
  */
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
 import { Scheme, SECP256K1_COMPRESSED_PUBKEY_LEN } from "../scheme.js";
@@ -17,7 +17,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey. */
 export const SECP256K1: Scheme = {
-  programId: new PublicKey("9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd"),
+  programId: new Address("9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd"),
   signatureLen: 64,
   identityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
   storedIdentityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
@@ -38,7 +38,7 @@ export function secp256k1Identity(privateKey: Uint8Array): Uint8Array {
  * 33-byte sec1-compressed pubkey.
  */
 export function createInitializeSecp256k1(
-  payer: PublicKey,
+  payer: Address,
   compressedPubkey: Uint8Array
 ): TransactionInstruction {
   if (compressedPubkey.length !== SECP256K1_COMPRESSED_PUBKEY_LEN) {
@@ -63,29 +63,22 @@ export function createInitializeSecp256k1(
 export function signAdvanceInstructionSecp256k1(
   privateKey: Uint8Array,
   nonce: Uint8Array,
-  subInstructions: TransactionInstruction[],
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: PublicKey
+  feePayer?: Address
 ): TransactionInstruction {
   const identity = secp256k1Identity(privateKey);
   const digest = advanceVectorDigest(
     SECP256K1,
     nonce,
     identity,
-    subInstructions,
     preInstructions,
     postInstructions,
     feePayer
   );
 
   const sig = secp256k1.sign(digest, privateKey);
-  const sigBytes = sig.toCompactRawBytes(); // r || s (64 bytes)
+  const sigBytes = sig.toBytes("compact"); // r || s (64 bytes)
 
-  return createAdvanceInstruction(
-    SECP256K1,
-    identity,
-    sigBytes,
-    subInstructions
-  );
+  return createAdvanceInstruction(SECP256K1, identity, sigBytes);
 }

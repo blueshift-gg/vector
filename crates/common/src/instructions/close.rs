@@ -4,16 +4,17 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 /// data and reassigns ownership to System once lamports hit zero at the
 /// instruction boundary.
 ///
-/// Top-level invocation is rejected: the `is_signer()` gate only passes when
-/// this instruction is reached as a CPI from `advance` (which signs as the
-/// PDA via `invoke_signed`). Authorisation is therefore inherited from the
-/// offchain signature on the wrapping advance. This handler is
+/// Top-level invocation is rejected: the `is_signer()` gate only passes
+/// when this instruction is reached as a CPI from `passthrough` (which
+/// signs as the PDA via `invoke_signed`). Authorisation is therefore
+/// inherited from the offchain signature on the sibling `advance`, whose
+/// digest commits to the passthrough's bytes. This handler is
 /// scheme-independent.
 ///
 /// Instruction data: empty.
 ///
 /// Accounts:
-/// 0. `[signer, writable]` vector PDA  (signer flag promoted by Advance)
+/// 0. `[signer, writable]` vector PDA  (signer flag promoted by Passthrough)
 /// 1. `[writable]`         receiver
 pub fn process(
     _program_id: &Address,

@@ -1,7 +1,7 @@
 use pinocchio::error::ProgramError;
 use solana_falcon512::{
-    Falcon512PreparedPubkey, Falcon512Pubkey, Falcon512Signature,
-    FALCON_512_PREPARED_PUBKEY_LEN, FALCON_512_PUBKEY_LEN, FALCON_512_SIGNATURE_LEN,
+    Falcon512PreparedPubkey, Falcon512Pubkey, Falcon512Signature, FALCON_512_PREPARED_PUBKEY_LEN,
+    FALCON_512_PUBKEY_LEN, FALCON_512_SIGNATURE_LEN,
 };
 use solana_nostd_sha256::hash;
 use vector_common::{IdentitySeed, SigningScheme, VectorAccount};
@@ -26,7 +26,7 @@ const FALCON_IDENTITY_LEN: usize = PREPARED_OFFSET + FALCON_512_PREPARED_PUBKEY_
 /// `Falcon512PreparedPubkey::try_from_slice`. Account data is 8-byte aligned
 /// per the Solana ABI, so the requirement reduces to an even offset.
 const PREPARED_ALIGNED: () =
-    assert!((VectorAccount::HEADER_LEN + PREPARED_OFFSET) % 2 == 0);
+    assert!((VectorAccount::HEADER_LEN + PREPARED_OFFSET).is_multiple_of(2));
 
 /// Falcon-512. Identity is the 897-byte wire pubkey (hashed + prepared on
 /// init); signatures are 666-byte zero-padded compressed Falcon.
@@ -44,7 +44,7 @@ impl SigningScheme for Falcon512 {
         let prepared = pubkey
             .try_prepare_pubkey()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        // Layout: hash[..32] || pad[32] (zero) || prepared[33..].
+        // Layout: hash[..32] || pad[1] (zero) || prepared[33..].
         let wire_hash = hash(payload);
         identity_out[..HASH_LEN].copy_from_slice(&wire_hash);
         identity_out[HASH_LEN..PREPARED_OFFSET].fill(0);

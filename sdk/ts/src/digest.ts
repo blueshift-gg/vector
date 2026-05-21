@@ -5,9 +5,9 @@
  * Mirrors `crates/core/src/digest.rs`.
  */
 import { createHash } from "crypto";
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Address, TransactionInstruction } from "@solana/web3.js";
 
-import { Scheme, readU16LE } from "./scheme.js";
+import { Scheme, readU16LE, writeU16LE } from "./scheme.js";
 import {
   createAdvanceInstruction,
   constructInstructionsData,
@@ -19,7 +19,7 @@ import {
  */
 function promoteToMessageFlags(
   instructions: TransactionInstruction[],
-  feePayer?: PublicKey
+  feePayer?: Address
 ): TransactionInstruction[] {
   const flagMap = new Map<string, { isSigner: boolean; isWritable: boolean }>();
 
@@ -63,7 +63,7 @@ function promoteToMessageFlags(
 /**
  * Shared digest: `SHA256(buffer[..sigStart] || nonce || identity ||
  * buffer[sigEnd..])`. `identity` is the scheme's client identity bytes (for
- * Falcon, `sha256(wire_pubkey)`).
+ * Falcon/Hawk, `sha256(wire_pubkey)`).
  */
 function vectorDigest(
   targetIx: TransactionInstruction,
@@ -73,11 +73,17 @@ function vectorDigest(
   identity: Uint8Array,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: PublicKey
+  feePayer?: Address
 ): Uint8Array {
   const allIxs = [...preInstructions, targetIx, ...postInstructions];
   const promoted = promoteToMessageFlags(allIxs, feePayer);
   const buffer = constructInstructionsData(promoted);
+  // Patch the sysvar's `current_instruction_index` footer (last 2 bytes) to
+  // match what the runtime will write at execution time. The footer is part
+  // of `post`, which is folded into the hash, so the off-chain digest only
+  // matches when this index is correct (a no-op for single-ix advance, but
+  // non-zero when there are pre-instructions like Hawk's CU bump).
+  writeU16LE(buffer, targetIndex, buffer.length - 2);
 
   const ixOffsetPos = 2 + 2 * targetIndex;
   const ixOffset = readU16LE(buffer, ixOffsetPos);
@@ -94,23 +100,25 @@ function vectorDigest(
   return new Uint8Array(h.digest());
 }
 
+/**
+ * Compute the canonical `advance_vector_digest` the client must sign over.
+ * Callers thread the full ix layout via `pre`/`post`; the advance ix is
+ * inserted at `pre.length`. Any sibling `passthrough` ix authorising CPIs
+ * under the vector PDA's signer seeds is just another pre/post ix — its
+ * bytes get committed to by the digest like any other tx ix, which is
+ * what authenticates the passthrough end-to-end.
+ */
 export function advanceVectorDigest(
   scheme: Scheme,
   nonce: Uint8Array,
   identity: Uint8Array,
-  subInstructions: TransactionInstruction[],
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: PublicKey
+  feePayer?: Address
 ): Uint8Array {
   const sigLen = scheme.signatureLen;
   const placeholder = new Uint8Array(sigLen);
-  const advanceIx = createAdvanceInstruction(
-    scheme,
-    identity,
-    placeholder,
-    subInstructions
-  );
+  const advanceIx = createAdvanceInstruction(scheme, identity, placeholder);
   return vectorDigest(
     advanceIx,
     preInstructions.length,

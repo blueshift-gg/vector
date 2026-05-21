@@ -6,7 +6,7 @@
  * Mirrors `crates/core/src/schemes/eip191.rs`. Pulls in only
  * `@noble/curves/secp256k1` + `@noble/hashes/sha3` (keccak).
  */
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 
@@ -19,7 +19,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
 export const EIP191: Scheme = {
-  programId: new PublicKey("G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu"),
+  programId: new Address("G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu"),
   signatureLen: 65,
   identityLen: 20,
   storedIdentityLen: 20,
@@ -39,7 +39,7 @@ export function eip191Identity(privateKey: Uint8Array): Uint8Array {
 
 /** Initialize an EIP-191 vector account. `ethAddress` is the 20-byte address. */
 export function createInitializeEip191(
-  payer: PublicKey,
+  payer: Address,
   ethAddress: Uint8Array
 ): TransactionInstruction {
   return createInitializeInstruction(payer, EIP191, ethAddress, ethAddress);
@@ -65,17 +65,15 @@ function eip191Hash(digest: Uint8Array): Uint8Array {
 export function signAdvanceInstructionEip191(
   privateKey: Uint8Array,
   nonce: Uint8Array,
-  subInstructions: TransactionInstruction[],
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: PublicKey
+  feePayer?: Address
 ): TransactionInstruction {
   const identity = eip191Identity(privateKey);
   const digest = advanceVectorDigest(
     EIP191,
     nonce,
     identity,
-    subInstructions,
     preInstructions,
     postInstructions,
     feePayer
@@ -87,5 +85,5 @@ export function signAdvanceInstructionEip191(
   sigBytes.set(sig.toCompactRawBytes(), 0); // r || s (64 bytes)
   sigBytes[64] = sig.recovery; // v (1 byte)
 
-  return createAdvanceInstruction(EIP191, identity, sigBytes, subInstructions);
+  return createAdvanceInstruction(EIP191, identity, sigBytes);
 }

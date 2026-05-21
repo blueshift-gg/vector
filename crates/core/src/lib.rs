@@ -13,7 +13,8 @@
 //! - [`scheme`] — the [`Scheme`] descriptor, [`VectorAccount`] header mirror,
 //!   and canonical PDA derivation ([`find_vector_pda`]).
 //! - [`instructions`] — generic builders ([`create_initialize_instruction`],
-//!   [`create_advance_instruction`], close/withdraw sub-instructions).
+//!   [`create_advance_instruction`], [`create_passthrough_instruction`],
+//!   close/withdraw sub-instructions).
 //! - [`digest`] — [`advance_vector_digest`], the value clients sign.
 //! - [`schemes`] — one module per program (`ed25519`, `eip191`, `falcon512`,
 //!   `hawk512`, `secp256k1`): its `Scheme`/program-ID const, identity
@@ -36,6 +37,4 @@ pub mod schemes;
 pub use digest::*;
 pub use instructions::*;
 pub use scheme::*;
-pub use schemes::{
-    ed25519::*, eip191::*, falcon512::*, hawk512::*, secp256k1::*,
-};
+pub use schemes::{ed25519::*, eip191::*, falcon512::*, hawk512::*, secp256k1::*};

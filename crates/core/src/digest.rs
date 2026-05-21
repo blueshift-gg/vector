@@ -12,48 +12,45 @@ use crate::scheme::Scheme;
 ///
 /// `digest = SHA256(pre || nonce || identity || post)`, where `pre` and
 /// `post` span the entire instructions sysvar buffer minus the scheme's
-/// signature region.
+/// signature region inside the `advance` ix.
+///
+/// Callers pass the full ix layout via `pre_instructions` /
+/// `post_instructions` — the advance ix is inserted at `pre.len()`. Any
+/// sibling `passthrough` ix authorising CPIs under the vector PDA's signer
+/// seeds is just another pre/post ix; the on-chain `passthrough` handler
+/// scans the sysvar to pair with this `advance`, and the digest commits
+/// to all of it.
 pub fn advance_vector_digest(
     scheme: &Scheme,
     nonce: &[u8; 32],
     identity: &[u8],
-    sub_instructions: &[Instruction],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
 ) -> [u8; 32] {
     let sig_len = scheme.signature_len;
     let placeholder = vec![0u8; sig_len];
-    let advance_ix =
-        create_advance_instruction(scheme, identity, &placeholder, sub_instructions);
-    vector_digest(
-        &advance_ix,
-        pre_instructions.len(),
-        sig_len,
-        nonce,
-        identity,
-        pre_instructions,
-        post_instructions,
-    )
+    let advance_ix = create_advance_instruction(scheme, identity, &placeholder);
+
+    let mut all_owned: Vec<Instruction> =
+        Vec::with_capacity(pre_instructions.len() + 1 + post_instructions.len());
+    all_owned.extend(pre_instructions.iter().cloned());
+    let advance_index = all_owned.len();
+    all_owned.push(advance_ix);
+    all_owned.extend(post_instructions.iter().cloned());
+
+    vector_digest(advance_index, sig_len, nonce, identity, &all_owned)
 }
 
 /// Shared digest computation for any vector instruction whose data starts
 /// with `[discriminator (1), signature (sig_len), ...]`. Hashes
 /// `buffer[..sig_start] || nonce || identity || buffer[sig_end..]`.
 fn vector_digest(
-    target_ix: &Instruction,
     target_index: usize,
     sig_len: usize,
     nonce: &[u8; 32],
     identity: &[u8],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
+    all_ixs: &[Instruction],
 ) -> [u8; 32] {
-    let mut all_ixs: Vec<&Instruction> =
-        Vec::with_capacity(pre_instructions.len() + 1 + post_instructions.len());
-    all_ixs.extend(pre_instructions.iter());
-    all_ixs.push(target_ix);
-    all_ixs.extend(post_instructions.iter());
-
     let borrowed_ixs: Vec<BorrowedInstruction> = all_ixs
         .iter()
         .map(|ix| {
@@ -86,7 +83,7 @@ fn vector_digest(
     // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
     // u16 data_len + data. Signature sits right after the 1-byte
     // discriminator.
-    let num_accounts = target_ix.accounts.len();
+    let num_accounts = all_ixs[target_index].accounts.len();
     let sig_start = ix_offset + 2 + 33 * num_accounts + 32 + 2 + 1;
     let sig_end = sig_start + sig_len;
 

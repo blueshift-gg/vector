@@ -8,7 +8,8 @@
  * Mirrors `crates/core/src/scheme.rs`.
  */
 import { createHash } from "crypto";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, Address } from "@solana/web3.js";
+import { ed25519 } from "@noble/curves/ed25519.js";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -16,6 +17,7 @@ export const INITIALIZE_DISCRIMINATOR = 0;
 export const ADVANCE_DISCRIMINATOR = 1;
 export const CLOSE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
+export const PASSTHROUGH_DISCRIMINATOR = 4;
 
 /**
  * Fixed-size account header: `nonce[32] || bump[1]`. Each scheme is its own
@@ -47,7 +49,7 @@ export const HAWK_PREPARED_PUBKEY_LEN = 18464;
  */
 export interface Scheme {
   /** On-chain program ID (matches the program's `declare_id!`). */
-  programId: PublicKey;
+  programId: Address;
   /** Wire signature length carried in `advance` instruction data. */
   signatureLen: number;
   /**
@@ -115,11 +117,59 @@ export function pdaSeedFromIdentity(identity: Uint8Array): Uint8Array {
 export function findVectorPda(
   scheme: Scheme,
   identity: Uint8Array
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
+): [Address, number] {
+  return findProgramAddressSync(
     [VECTOR_PDA_SEED, pdaSeedFromIdentity(identity)],
     scheme.programId
   );
+}
+
+const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
+
+/**
+ * Synchronous PDA derivation — `@solana/web3.js@3` only ships the async
+ * `Address.findProgramAddress`, but our SDK builders need to derive PDAs
+ * inline without forcing every caller to be async. The algorithm mirrors
+ * the on-chain `find_program_address`: walk bumps 255→0, accept the first
+ * `sha256(seeds || bump || program_id || "ProgramDerivedAddress")` that
+ * is *off* the ed25519 curve.
+ */
+function findProgramAddressSync(
+  seeds: Uint8Array[],
+  programId: Address
+): [Address, number] {
+  const programBytes = programId.toBytes();
+  const totalLen =
+    seeds.reduce((n, s) => n + s.length, 0) + 1 + programBytes.length + PDA_MARKER.length;
+  const buf = new Uint8Array(totalLen);
+  let off = 0;
+  for (const s of seeds) {
+    buf.set(s, off);
+    off += s.length;
+  }
+  const bumpOffset = off;
+  off += 1;
+  buf.set(programBytes, off);
+  off += programBytes.length;
+  buf.set(PDA_MARKER, off);
+
+  for (let bump = 255; bump >= 0; bump--) {
+    buf[bumpOffset] = bump;
+    const hash = sha256(buf);
+    if (!isOnCurve(hash)) {
+      return [new Address(hash), bump];
+    }
+  }
+  throw new Error("Unable to find a viable PDA bump seed");
+}
+
+function isOnCurve(point: Uint8Array): boolean {
+  try {
+    ed25519.Point.fromBytes(point);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── Query ────────────────────────────────────────────────────────────

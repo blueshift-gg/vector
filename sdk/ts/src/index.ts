@@ -13,8 +13,8 @@
  *
  * - `./scheme.js` — the {@link Scheme} descriptor, {@link VectorAccount}
  *   header mirror, canonical PDA derivation, and shared byte helpers.
- * - `./instructions.js` — generic builders (initialize/advance/close/
- *   withdraw, instructions-sysvar serialization).
+ * - `./instructions.js` — generic builders (initialize/advance/passthrough/
+ *   close/withdraw, instructions-sysvar serialization).
  * - `./digest.js` — {@link advanceVectorDigest}, the value clients sign.
  * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
  *   `falcon512`, `hawk512`, `secp256k1`): its `Scheme`/program-ID const,
@@ -24,8 +24,8 @@
  * Everything is re-exported flat here, so either style works:
  *
  * ```ts
- * import { ED25519, signAdvanceInstruction } from "vector-sdk";          // flat
- * import { ED25519, signAdvanceInstruction } from "vector-sdk/ed25519";  // per-scheme
+ * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk";          // flat
+ * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";  // per-scheme
  * ```
  *
  * The Falcon/Hawk wire-size constants are owned by `./scheme.js` and
@@ -57,8 +57,15 @@ export {
   createInitializeFalcon512,
   signAdvanceInstructionFalcon512,
 } from "./schemes/falcon512.js";
+export type { Falcon512Keypair } from "./schemes/falcon512.js";
 export {
   HAWK512,
+  HAWK_SECRET_KEY_LEN,
   hawk512Identity,
+  hawk512Keygen,
   createInitializeHawk512,
+  createHawk512StoreWire,
+  createHawk512Finalize,
+  signAdvanceInstructionHawk512,
 } from "./schemes/hawk512.js";
+export type { Hawk512Keypair } from "./schemes/hawk512.js";

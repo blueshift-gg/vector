@@ -1,6 +1,5 @@
 use pinocchio::{
-    error::ProgramError, sysvars::rent::Rent, sysvars::Sysvar, AccountView, Address,
-    ProgramResult,
+    error::ProgramError, sysvars::rent::Rent, sysvars::Sysvar, AccountView, Address, ProgramResult,
 };
 
 use crate::scheme::SigningScheme;
@@ -10,13 +9,15 @@ use crate::state::VectorAccount;
 /// least its rent-minimum balance so the account survives.
 ///
 /// Same authorisation model as [`close`](super::close): the `is_signer()`
-/// gate only passes when reached as a CPI from `advance`, so the wrapping
-/// advance's signature is what authorises the transfer.
+/// gate only passes when reached as a CPI from `passthrough` (which
+/// promotes the vector PDA via `invoke_signed`); the sibling `advance`'s
+/// digest commits to the passthrough's bytes, so the offchain signature is
+/// what authorises the transfer end-to-end.
 ///
 /// Instruction data: `lamports: u64` (little-endian).
 ///
 /// Accounts:
-/// 0. `[signer, writable]` vector PDA  (signer flag promoted by Advance)
+/// 0. `[signer, writable]` vector PDA  (signer flag promoted by Passthrough)
 /// 1. `[writable]`         receiver
 pub fn process<S: SigningScheme>(
     program_id: &Address,

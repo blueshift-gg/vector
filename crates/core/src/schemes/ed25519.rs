@@ -32,12 +32,14 @@ pub fn create_initialize_ed25519(
     create_initialize_instruction(payer, &ED25519, pubkey, pubkey)
 }
 
-/// Sign the advance digest with an Ed25519 key, returning a ready-to-submit
-/// `advance` instruction.
+/// Sign the advance digest with an Ed25519 key, returning the advance ix
+/// alone. Any CPI passthrough must be built separately via
+/// [`crate::instructions::create_passthrough_instruction`] and included
+/// among `pre_instructions` or `post_instructions` so the digest commits
+/// to its bytes.
 pub fn sign_advance_instruction_ed25519(
     signing_key: &SigningKey,
     nonce: &[u8; 32],
-    sub_instructions: &[Instruction],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
 ) -> Instruction {
@@ -46,10 +48,9 @@ pub fn sign_advance_instruction_ed25519(
         &ED25519,
         nonce,
         &identity,
-        sub_instructions,
         pre_instructions,
         post_instructions,
     );
     let signature: [u8; 64] = signing_key.sign(&digest).to_bytes();
-    create_advance_instruction(&ED25519, &identity, &signature, sub_instructions)
+    create_advance_instruction(&ED25519, &identity, &signature)
 }

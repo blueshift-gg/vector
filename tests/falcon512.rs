@@ -13,8 +13,9 @@ use solana_address::Address;
 use solana_falcon512::Falcon512Pubkey;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
-    create_initialize_falcon512, falcon512_identity, find_vector_pda, FALCON512,
-    FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN,
+    create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
+    falcon512_identity, find_vector_pda, FALCON512, FALCON512_SIGNATURE_LEN,
+    FALCON512_WIRE_PUBKEY_LEN,
 };
 
 use crate::common::{
@@ -86,7 +87,10 @@ fn initialize() {
                 .build(),
         ],
     );
-    println!("falcon512 initialize: {} CUs", result.compute_units_consumed);
+    println!(
+        "falcon512 initialize: {} CUs",
+        result.compute_units_consumed
+    );
 }
 
 #[test]
@@ -104,13 +108,16 @@ fn advance_empty() {
         NONCE,
         &FALCON512,
         bump,
-        mollusk.sysvars.rent.minimum_balance(FALCON512.account_len()),
+        mollusk
+            .sysvars
+            .rent
+            .minimum_balance(FALCON512.account_len()),
         &stored,
     );
 
-    let digest = advance_vector_digest(&FALCON512, &NONCE, &identity, &[], &[], &[]);
+    let digest = advance_vector_digest(&FALCON512, &NONCE, &identity, &[], &[]);
     let signature = sign(&digest, &sk);
-    let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature, &[]);
+    let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature);
 
     let expected_vector_data = expected_advanced_data(digest, &FALCON512, bump, &stored);
 
@@ -135,10 +142,10 @@ fn advance_round_trips_spl_mint_authority() {
     let wire = wire_pubkey(&pk);
     let identity = falcon512_identity(&wire);
     let stored = stored_identity(&wire);
-    run_round_trip_spl(&FALCON512, &identity, &stored, |nonce, sub, pre, post| {
-        let digest = advance_vector_digest(&FALCON512, nonce, &identity, sub, pre, post);
+    run_round_trip_spl(&FALCON512, &identity, &stored, |nonce, pre, post| {
+        let digest = advance_vector_digest(&FALCON512, nonce, &identity, pre, post);
         let signature = sign(&digest, &sk);
-        create_advance_instruction(&FALCON512, &identity, &signature, sub)
+        create_advance_instruction(&FALCON512, &identity, &signature)
     });
 }
 
@@ -152,35 +159,108 @@ fn close_via_advance() {
     let identity = falcon512_identity(&wire);
     let stored = stored_identity(&wire);
 
-    let vector_lamports = mollusk.sysvars.rent.minimum_balance(FALCON512.account_len());
+    let vector_lamports = mollusk
+        .sysvars
+        .rent
+        .minimum_balance(FALCON512.account_len());
     let (vector, bump) = find_vector_pda(&FALCON512, &identity);
     let vector_account = build_vector_account(NONCE, &FALCON512, bump, vector_lamports, &stored);
 
-    let eoa_starting_lamports = 1_0000_000_000u64;
+    let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (
         Address::new_unique(),
         Account::new(eoa_starting_lamports, 0, &Address::default()),
     );
 
     let close_sub = create_close_subinstruction(&FALCON512, &identity, &eoa);
-    let digest =
-        advance_vector_digest(&FALCON512, &NONCE, &identity, &[close_sub.clone()], &[], &[]);
+    let passthrough_ix = create_passthrough_instruction(&FALCON512, &identity, &[close_sub]);
+    let digest = advance_vector_digest(
+        &FALCON512,
+        &NONCE,
+        &identity,
+        &[],
+        std::slice::from_ref(&passthrough_ix),
+    );
     let signature = sign(&digest, &sk);
-    let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature, &[close_sub]);
+    let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature);
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
     mollusk.process_and_validate_instruction_chain(
-        &[(
-            &advance_ix,
-            &[
-                Check::success(),
-                Check::account(&vector).lamports(0).build(),
-                Check::account(&eoa)
-                    .lamports(eoa_starting_lamports + vector_lamports)
-                    .build(),
-            ],
-        )],
+        &[
+            (&advance_ix, &[Check::success()]),
+            (
+                &passthrough_ix,
+                &[
+                    Check::success(),
+                    Check::account(&vector).lamports(0).build(),
+                    Check::account(&eoa)
+                        .lamports(eoa_starting_lamports + vector_lamports)
+                        .build(),
+                ],
+            ),
+        ],
+        &accounts,
+    );
+}
+
+#[test]
+fn withdraw_via_advance() {
+    let mut mollusk = mollusk(&FALCON512);
+    mollusk.compute_budget.compute_unit_limit = 500_000;
+
+    let (pk, sk) = falcon512::keypair();
+    let wire = wire_pubkey(&pk);
+    let identity = falcon512_identity(&wire);
+    let stored = stored_identity(&wire);
+
+    let rent_min = mollusk
+        .sysvars
+        .rent
+        .minimum_balance(FALCON512.account_len());
+    let starting_vector_lamports = rent_min + 5_000_000;
+    let withdraw_amount = 3_000_000u64;
+
+    let (vector, bump) = find_vector_pda(&FALCON512, &identity);
+    let vector_account =
+        build_vector_account(NONCE, &FALCON512, bump, starting_vector_lamports, &stored);
+
+    let eoa_starting_lamports = 10_000_000_000_u64;
+    let (eoa, eoa_account) = (
+        Address::new_unique(),
+        Account::new(eoa_starting_lamports, 0, &Address::default()),
+    );
+
+    let withdraw_sub = create_withdraw_subinstruction(&FALCON512, &identity, &eoa, withdraw_amount);
+    let passthrough_ix = create_passthrough_instruction(&FALCON512, &identity, &[withdraw_sub]);
+    let digest = advance_vector_digest(
+        &FALCON512,
+        &NONCE,
+        &identity,
+        &[],
+        std::slice::from_ref(&passthrough_ix),
+    );
+    let signature = sign(&digest, &sk);
+    let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature);
+
+    let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
+
+    mollusk.process_and_validate_instruction_chain(
+        &[
+            (&advance_ix, &[Check::success()]),
+            (
+                &passthrough_ix,
+                &[
+                    Check::success(),
+                    Check::account(&vector)
+                        .lamports(starting_vector_lamports - withdraw_amount)
+                        .build(),
+                    Check::account(&eoa)
+                        .lamports(eoa_starting_lamports + withdraw_amount)
+                        .build(),
+                ],
+            ),
+        ],
         &accounts,
     );
 }

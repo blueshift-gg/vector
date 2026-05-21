@@ -21,9 +21,12 @@ pub trait SigningScheme {
     const IDENTITY_LEN: usize;
 
     /// `initialize` payload length (after the instruction discriminator).
-    /// Usually equals `IDENTITY_LEN` (the pubkey is stored verbatim), but may
-    /// differ — Falcon-512 takes a 897-byte wire pubkey and expands it into a
-    /// 1024-byte prepared form on-chain.
+    /// Usually equals `IDENTITY_LEN` (the pubkey is stored verbatim), but
+    /// may differ for schemes that expand or compress on-chain: Falcon-512
+    /// takes a 897-byte wire pubkey and expands it into the 1057-byte
+    /// stored identity; Hawk-512 takes a 32-byte hash commit (the full
+    /// 18.5 KB identity is filled by follow-up `store_wire` + `finalize`
+    /// ixs).
     const INIT_PAYLOAD_LEN: usize;
 
     /// Validate the init payload and write the on-chain identity bytes into
@@ -55,25 +58,6 @@ pub trait SigningScheme {
     /// init runs.
     fn pda_seed_from_payload(payload: &[u8]) -> IdentitySeed {
         IdentitySeed::default_from(payload)
-    }
-
-    /// Second-stage identity population for schemes whose stored form is too
-    /// large to build in one instruction (Hawk-512's prepared pubkey is
-    /// ~18 KB). The *first* `initialize` call writes only the cheap prefix
-    /// (`sha256(wire)`); a *second* `initialize` call — same accounts and
-    /// args, permissionless — calls this to fill the heavy region in place.
-    /// Named to match `solana-hawk512`'s `prepare_into`.
-    ///
-    /// `payload` is the re-supplied input (the wire pubkey); `identity_out`
-    /// is the full identity region (`IDENTITY_LEN`). An impl MUST verify
-    /// `payload` matches what the first call committed (e.g.
-    /// `sha256(payload) == identity_out[..32]`) before writing, so a
-    /// permissionless caller can't bind a different key. Default:
-    /// unsupported — single-step schemes finish in the first call and never
-    /// reach this.
-    fn prepare(payload: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
-        let _ = (payload, identity_out);
-        Err(ProgramError::InvalidInstructionData)
     }
 
     /// Verify `signature` over `digest` against the stored `identity`.
