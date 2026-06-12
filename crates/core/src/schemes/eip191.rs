@@ -92,3 +92,18 @@ pub fn sign_advance_instruction_secp256k1_eip191(
     sig_bytes[64] = recid.to_byte();
     create_advance_instruction(&EIP191, &identity, &sig_bytes)
 }
+
+/// Sign an inert advance — a revocation — with an EIP-191 secp256k1 key:
+/// [`sign_advance_instruction_secp256k1_eip191`] with empty pre/post
+/// instructions. Landing it only bumps the nonce, orphaning everything
+/// pre-signed against it. The digest
+/// ([`crate::digest::revocation_digest`]) commits to the broadcasting
+/// transaction containing ONLY this instruction; verify with
+/// [`crate::verify::verify_advance_signature_secp256k1_eip191`] over empty
+/// pre/post slices.
+pub fn sign_revocation_instruction_secp256k1_eip191(
+    signing_key: &Secp256k1SigningKey,
+    nonce: &[u8; 32],
+) -> Instruction {
+    sign_advance_instruction_secp256k1_eip191(signing_key, nonce, &[], &[])
+}

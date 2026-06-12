@@ -54,3 +54,17 @@ pub fn sign_advance_instruction_ed25519(
     let signature: [u8; 64] = signing_key.sign(&digest).to_bytes();
     create_advance_instruction(&ED25519, &identity, &signature)
 }
+
+/// Sign an inert advance — a revocation — with an Ed25519 key:
+/// [`sign_advance_instruction_ed25519`] with empty pre/post instructions.
+/// Landing it only bumps the nonce, orphaning everything pre-signed against
+/// it. The digest ([`crate::digest::revocation_digest`]) commits to the
+/// broadcasting transaction containing ONLY this instruction; verify with
+/// [`crate::verify::verify_advance_signature_ed25519`] over empty pre/post
+/// slices.
+pub fn sign_revocation_instruction_ed25519(
+    signing_key: &SigningKey,
+    nonce: &[u8; 32],
+) -> Instruction {
+    sign_advance_instruction_ed25519(signing_key, nonce, &[], &[])
+}

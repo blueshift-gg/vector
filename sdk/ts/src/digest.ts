@@ -130,3 +130,27 @@ export function advanceVectorDigest(
     feePayer
   );
 }
+
+/**
+ * The digest a pre-signed revocation commits to: {@link advanceVectorDigest}
+ * with empty pre/post instructions. The resulting advance is an inert
+ * transition — landing it only installs the next nonce, orphaning every
+ * signature pre-signed against `nonce` (a kill-switch).
+ *
+ * This digest commits to the instructions sysvar of the broadcasting
+ * transaction, so a pre-signed revocation must be broadcast as a transaction
+ * containing ONLY the advance instruction. ed25519 / eip191 / secp256k1
+ * inert advances fit the default compute budget (~13k / ~26k / ~72k CUs);
+ * for Falcon-512 / Hawk-512, sign via the advance signer with a
+ * compute-budget pre-instruction committed at sign time (Hawk's verify
+ * exceeds the 200k default).
+ *
+ * Mirrors `revocation_digest` in `crates/core/src/digest.rs`.
+ */
+export function revocationDigest(
+  scheme: Scheme,
+  nonce: Uint8Array,
+  identity: Uint8Array
+): Uint8Array {
+  return advanceVectorDigest(scheme, nonce, identity, [], []);
+}

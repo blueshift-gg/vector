@@ -82,3 +82,18 @@ export function signAdvanceInstructionSecp256k1(
 
   return createAdvanceInstruction(SECP256K1, identity, sigBytes);
 }
+
+/**
+ * Sign an inert advance — a revocation — with a plain secp256k1 ECDSA key:
+ * {@link signAdvanceInstructionSecp256k1} with empty pre/post instructions.
+ * Landing it only bumps the nonce, orphaning everything pre-signed against
+ * it. The digest (`revocationDigest`) commits to the broadcasting
+ * transaction containing ONLY this instruction; verify with
+ * `verifyAdvanceSignatureSecp256k1` over empty pre/post arrays.
+ */
+export function signRevocationInstructionSecp256k1(
+  privateKey: Uint8Array,
+  nonce: Uint8Array
+): TransactionInstruction {
+  return signAdvanceInstructionSecp256k1(privateKey, nonce, [], []);
+}

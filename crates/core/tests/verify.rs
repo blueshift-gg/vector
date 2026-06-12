@@ -12,8 +12,9 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use vector_core::{
     advance_vector_digest_with_fee_payer, ed25519_pubkey, falcon512_identity, hawk512_identity,
-    secp256k1_compressed_pubkey, secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
-    sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
+    revocation_digest, secp256k1_compressed_pubkey, secp256k1_eip191_eth_address,
+    sign_advance_instruction_ed25519, sign_advance_instruction_secp256k1_ecdsa,
+    sign_advance_instruction_secp256k1_eip191, sign_revocation_instruction_ed25519,
     verify_advance_signature_ed25519, verify_advance_signature_falcon512,
     verify_advance_signature_hawk512, verify_advance_signature_secp256k1_ecdsa,
     verify_advance_signature_secp256k1_eip191, VerifyError, ED25519, FALCON512,
@@ -281,4 +282,38 @@ fn digest_matches_the_cross_language_pin() {
     )
     .unwrap();
     assert_eq!(verified, digest);
+}
+
+// ---------------------------------------------------------------------------
+// Revocation (inert advance)
+// ---------------------------------------------------------------------------
+
+/// Revocation digest for (ed25519 identity from seed 0x42·32, nonce
+/// 0x01·32): an inert advance, empty pre/post, no fee payer.
+/// `sdk/ts/test/verify.test.ts` pins the SAME constant — if either
+/// implementation drifts, its half of the pin breaks.
+const PINNED_REVOCATION_DIGEST_HEX: &str =
+    "53e3d3f9a7c687ed3dbfbbee0da290586acb5f4d64d690221134d29ce9a25aba";
+
+#[test]
+fn revocation_round_trip_and_cross_language_pin() {
+    let key = Ed25519SigningKey::from_bytes(&[0x42; 32]);
+    let pubkey = ed25519_pubkey(&key);
+
+    // A revocation is just an advance with empty pre/post, so it verifies
+    // through the ordinary advance verifier with empty slices.
+    let revocation = sign_revocation_instruction_ed25519(&key, &NONCE);
+    let digest = verify_advance_signature_ed25519(
+        &pubkey,
+        &NONCE,
+        &[],
+        &[],
+        None,
+        signature_of(&revocation),
+    )
+    .expect("revocation round trip must verify");
+
+    assert_eq!(digest, revocation_digest(&ED25519, &NONCE, &pubkey));
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(hex, PINNED_REVOCATION_DIGEST_HEX);
 }

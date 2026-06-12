@@ -17,12 +17,14 @@ import {
   eip191Identity,
   falcon512Keygen,
   hawk512Keygen,
+  revocationDigest,
   secp256k1Identity,
   signAdvanceInstructionEd25519,
   signAdvanceInstructionEip191,
   signAdvanceInstructionFalcon512,
   signAdvanceInstructionHawk512,
   signAdvanceInstructionSecp256k1,
+  signRevocationInstructionEd25519,
 } from "../src/index.js";
 import {
   IdentityMismatchError,
@@ -270,5 +272,31 @@ describe("cross-language digest pin", () => {
     const advance = signAdvanceInstructionEd25519(key, NONCE, pre, post);
     const verified = verifyAdvanceSignatureEd25519(pubkey, NONCE, pre, post, sigOf(advance));
     expect(bytesToHex(verified)).toBe(PINNED_DIGEST_HEX);
+  });
+});
+
+// ── Revocation (inert advance) ───────────────────────────────────────
+
+/**
+ * Revocation digest for (ed25519 identity from seed 0x42·32, nonce
+ * 0x01·32): an inert advance, empty pre/post, no fee payer.
+ * `crates/core/tests/verify.rs` pins the SAME constant — if either
+ * implementation drifts, its half of the pin breaks.
+ */
+const PINNED_REVOCATION_DIGEST_HEX =
+  "53e3d3f9a7c687ed3dbfbbee0da290586acb5f4d64d690221134d29ce9a25aba";
+
+describe("revocation (inert advance)", () => {
+  test("round trip + cross-language pin", () => {
+    const key = new Uint8Array(32).fill(0x42);
+    const pubkey = ed25519Identity(key);
+
+    // A revocation is just an advance with empty pre/post, so it verifies
+    // through the ordinary advance verifier with empty arrays.
+    const revocation = signRevocationInstructionEd25519(key, NONCE);
+    const digest = verifyAdvanceSignatureEd25519(pubkey, NONCE, [], [], sigOf(revocation));
+
+    expect(bytesToHex(digest)).toBe(bytesToHex(revocationDigest(ED25519, NONCE, pubkey)));
+    expect(bytesToHex(digest)).toBe(PINNED_REVOCATION_DIGEST_HEX);
   });
 });

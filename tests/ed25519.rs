@@ -4,10 +4,12 @@ use ed25519_dalek::SigningKey;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use solana_account::Account;
 use solana_address::Address;
+use solana_program_error::ProgramError;
 use vector_core::{
     advance_vector_digest, create_close_subinstruction, create_initialize_ed25519,
     create_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
-    find_vector_pda, sign_advance_instruction_ed25519, ED25519,
+    find_vector_pda, revocation_digest, sign_advance_instruction_ed25519,
+    sign_revocation_instruction_ed25519, ED25519,
 };
 
 use crate::common::{
@@ -100,6 +102,69 @@ fn advance_round_trips_spl_mint_authority() {
     run_round_trip_spl(&ED25519, &pubkey, &pubkey, |nonce, pre, post| {
         sign_advance_instruction_ed25519(&key, nonce, pre, post)
     });
+}
+
+#[test]
+fn revocation_orphans_presigned_advance() {
+    let mollusk = mollusk(&ED25519);
+    let key = signing_key();
+    let pubkey = ed25519_pubkey(&key);
+
+    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let (vector, bump) = find_vector_pda(&ED25519, &pubkey);
+    let vector_account = build_vector_account(NONCE, &ED25519, bump, rent_min + 5_000_000, &pubkey);
+    let (eoa, eoa_account) = (
+        Address::new_unique(),
+        Account::new(10_000_000_000, 0, &Address::default()),
+    );
+
+    // Pre-sign a normal advance at the outstanding nonce: a withdraw via
+    // passthrough — the shape a custodian would hold in reserve.
+    let withdraw_sub = create_withdraw_subinstruction(&ED25519, &pubkey, &eoa, 3_000_000);
+    let passthrough_ix = create_passthrough_instruction(&ED25519, &pubkey, &[withdraw_sub]);
+    let presigned_ix =
+        sign_advance_instruction_ed25519(&key, &NONCE, &[], std::slice::from_ref(&passthrough_ix));
+
+    // Kill-switch: an inert advance signed at the same nonce, broadcast as
+    // a transaction containing only the advance instruction.
+    let revocation_ix = sign_revocation_instruction_ed25519(&key, &NONCE);
+    let next_nonce = revocation_digest(&ED25519, &NONCE, &pubkey);
+    let expected_vector_data = expected_advanced_data(next_nonce, &ED25519, bump, &pubkey);
+
+    let result = mollusk.process_and_validate_instruction_chain(
+        &[(
+            &revocation_ix,
+            &[
+                Check::success(),
+                Check::account(&vector).data(&expected_vector_data).build(),
+            ],
+        )],
+        &[(vector, vector_account), (eoa, eoa_account.clone())],
+    );
+    let revoked_vector = result.get_account(&vector).expect("vector exists").clone();
+
+    // The original pre-signed advance — broadcast in its committed shape —
+    // is orphaned: its digest recomputes against the bumped nonce.
+    mollusk.process_and_validate_instruction_chain(
+        &[
+            (
+                &presigned_ix,
+                &[Check::err(ProgramError::MissingRequiredSignature)],
+            ),
+            (&passthrough_ix, &[]),
+        ],
+        &[(vector, revoked_vector.clone()), (eoa, eoa_account)],
+    );
+
+    // Replaying the revocation fails the same way: it too was signed at
+    // the consumed nonce.
+    mollusk.process_and_validate_instruction_chain(
+        &[(
+            &revocation_ix,
+            &[Check::err(ProgramError::MissingRequiredSignature)],
+        )],
+        &[(vector, revoked_vector)],
+    );
 }
 
 #[test]

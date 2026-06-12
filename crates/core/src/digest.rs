@@ -123,6 +123,22 @@ pub fn advance_vector_digest(
     vector_digest(advance_index, sig_len, nonce, identity, &all_owned)
 }
 
+/// The digest a pre-signed revocation commits to: [`advance_vector_digest`]
+/// with empty pre/post instructions. The resulting advance is an inert
+/// transition — landing it only installs the next nonce, orphaning every
+/// signature pre-signed against `nonce` (a kill-switch).
+///
+/// This digest commits to the instructions sysvar of the broadcasting
+/// transaction, so a pre-signed revocation must be broadcast as a
+/// transaction containing ONLY the advance instruction. ed25519 / eip191 /
+/// secp256k1 inert advances fit the default compute budget (~13k / ~26k /
+/// ~72k CUs); for Falcon-512 / Hawk-512, sign via the advance signer with a
+/// compute-budget pre-instruction committed at sign time (Hawk's verify
+/// exceeds the 200k default).
+pub fn revocation_digest(scheme: &Scheme, nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {
+    advance_vector_digest(scheme, nonce, identity, &[], &[])
+}
+
 /// Shared digest computation for any vector instruction whose data starts
 /// with `[discriminator (1), signature (sig_len), ...]`. Hashes
 /// `buffer[..sig_start] || nonce || identity || buffer[sig_end..]` over the

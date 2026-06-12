@@ -63,3 +63,18 @@ pub fn sign_advance_instruction_secp256k1_ecdsa(
     let sig_bytes: [u8; 64] = sig.to_bytes().into();
     create_advance_instruction(&SECP256K1, &identity, &sig_bytes)
 }
+
+/// Sign an inert advance — a revocation — with a plain secp256k1 ECDSA key:
+/// [`sign_advance_instruction_secp256k1_ecdsa`] with empty pre/post
+/// instructions. Landing it only bumps the nonce, orphaning everything
+/// pre-signed against it. The digest
+/// ([`crate::digest::revocation_digest`]) commits to the broadcasting
+/// transaction containing ONLY this instruction; verify with
+/// [`crate::verify::verify_advance_signature_secp256k1_ecdsa`] over empty
+/// pre/post slices.
+pub fn sign_revocation_instruction_secp256k1_ecdsa(
+    signing_key: &Secp256k1SigningKey,
+    nonce: &[u8; 32],
+) -> Instruction {
+    sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, &[], &[])
+}

@@ -92,3 +92,18 @@ export function signAdvanceInstructionEip191(
 
   return createAdvanceInstruction(EIP191, identity, sigBytes);
 }
+
+/**
+ * Sign an inert advance — a revocation — with an EIP-191 secp256k1 key:
+ * {@link signAdvanceInstructionEip191} with empty pre/post instructions.
+ * Landing it only bumps the nonce, orphaning everything pre-signed against
+ * it. The digest (`revocationDigest`) commits to the broadcasting
+ * transaction containing ONLY this instruction; verify with
+ * `verifyAdvanceSignatureEip191` over empty pre/post arrays.
+ */
+export function signRevocationInstructionEip191(
+  privateKey: Uint8Array,
+  nonce: Uint8Array
+): TransactionInstruction {
+  return signAdvanceInstructionEip191(privateKey, nonce, [], []);
+}

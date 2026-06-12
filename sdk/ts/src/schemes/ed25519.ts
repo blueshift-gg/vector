@@ -60,3 +60,18 @@ export function signAdvanceInstructionEd25519(
   const signature = ed25519.sign(digest, signingKey);
   return createAdvanceInstruction(ED25519, identity, signature);
 }
+
+/**
+ * Sign an inert advance — a revocation — with an Ed25519 key:
+ * {@link signAdvanceInstructionEd25519} with empty pre/post instructions.
+ * Landing it only bumps the nonce, orphaning everything pre-signed against
+ * it. The digest (`revocationDigest`) commits to the broadcasting
+ * transaction containing ONLY this instruction; verify with
+ * `verifyAdvanceSignatureEd25519` over empty pre/post arrays.
+ */
+export function signRevocationInstructionEd25519(
+  signingKey: Uint8Array,
+  nonce: Uint8Array
+): TransactionInstruction {
+  return signAdvanceInstructionEd25519(signingKey, nonce, [], []);
+}
