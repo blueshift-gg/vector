@@ -55,8 +55,9 @@ pub fn create_initialize_secp256k1_eip191(
 
 /// `keccak256("\x19Ethereum Signed Message:\n32" || digest)` — the EIP-191
 /// personal-sign envelope the on-chain program reproduces before
-/// `secp256k1_recover`.
-fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
+/// `secp256k1_recover`. Public so external signers (HSMs, wallets exposing
+/// raw-prehash APIs) can be handed the exact prehash they expect.
+pub fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Keccak256::new();
     hasher.update(b"\x19Ethereum Signed Message:\n32");
     hasher.update(digest);

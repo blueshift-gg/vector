@@ -22,6 +22,10 @@
       "import": "./sdk/ts/dist/digest.js",
       "types": "./sdk/ts/dist/digest.d.ts"
     },
+    "./verify": {
+      "import": "./sdk/ts/dist/verify.js",
+      "types": "./sdk/ts/dist/verify.d.ts"
+    },
     "./ed25519": {
       "import": "./sdk/ts/dist/schemes/ed25519.js",
       "types": "./sdk/ts/dist/schemes/ed25519.d.ts"

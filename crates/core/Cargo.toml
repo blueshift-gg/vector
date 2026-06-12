@@ -10,7 +10,16 @@ solana-address = { workspace = true, features = ["curve25519", "decode"] }
 solana-instruction = { workspace = true }
 solana-instructions-sysvar = "3.0.0"
 solana-falcon512 = { workspace = true }
+solana-hawk512 = { workspace = true }
 ed25519-dalek = "=2.1.1"
 sha2 = "0.10"
 k256 = { version = "0.13", features = ["ecdsa"] }
 sha3 = "0.10"
+
+[dev-dependencies]
+# Falcon/Hawk signers for the verify round-trip tests (already in the
+# workspace tree via `vector-tests`; `solana-falcon512`/`solana-hawk512`
+# above are verify-only).
+pqcrypto-falcon = "0.4"
+pqcrypto-traits = "0.3"
+hawk512 = "0.1.0"
