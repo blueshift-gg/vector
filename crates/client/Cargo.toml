@@ -1,0 +1,33 @@
+[package]
+name = "vector-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Async RPC client, migration, and scanner for Vector"
+
+[features]
+default = ["ed25519", "secp256k1", "eip191"]
+ed25519 = ["vector-core/ed25519"]
+secp256k1 = ["vector-core/secp256k1"]
+eip191 = ["vector-core/eip191"]
+falcon512 = ["vector-core/falcon512"]
+hawk512 = ["vector-core/hawk512"]
+
+[dependencies]
+vector-core = { path = "../core", default-features = false }
+solana-address = { workspace = true }
+solana-instruction = { workspace = true }
+# Async RPC client. The 3.1.x line requires `solana-instruction = ^3.0.0`
+# (resolves to the workspace 3.4.0) and `solana-address = ^2.1.0` (resolves to
+# 2.6.0), so the offline `vector-core` Instruction/Address types are the SAME
+# types the RPC client's transaction builder expects in later tasks.
+# NOTE: do NOT bump to 4.x — solana-rpc-client 4.0.0 pins
+# `solana-instruction = >=3.2.0, <3.4.0`, which would force a SECOND
+# solana-instruction major-minor (3.3.x) alongside the workspace 3.4.0 and
+# break handing vector_core instructions to the tx builder.
+solana-rpc-client = "3.1"
+solana-commitment-config = "3"
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }

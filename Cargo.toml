@@ -8,6 +8,7 @@ members = [
     "programs/secp256k1",
     "programs/hawk512",
     "crates/core",
+    "crates/client",
     "tests",
 ]
 # Default scope for `cargo build` / `cargo build-sbf` / `cargo check` when no
@@ -24,6 +25,7 @@ default-members = [
     "programs/secp256k1",
     "programs/hawk512",
     "crates/core",
+    "crates/client",
 ]
 
 [workspace.package]
