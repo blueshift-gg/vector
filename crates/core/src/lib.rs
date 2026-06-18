@@ -27,13 +27,16 @@
 //! use vector_core::schemes::ed25519;                                 // structured
 //! ```
 
+pub mod artifact_serde;
 pub mod instructions;
 pub mod protocol;
 pub mod scheme;
 pub mod schemes;
+pub mod vector;
 
 // Flat re-exports — the ergonomic surface. Names are unique across modules,
 // so a glob per module can't collide.
+pub use artifact_serde::*;
 pub use instructions::*;
 pub use protocol::*;
 pub use scheme::*;
@@ -47,3 +50,4 @@ pub use schemes::falcon512::*;
 pub use schemes::hawk512::*;
 #[cfg(feature = "secp256k1")]
 pub use schemes::secp256k1::*;
+pub use vector::*;
