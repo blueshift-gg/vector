@@ -30,6 +30,9 @@ import {
   createAdvanceInstruction,
 } from "../instructions.js";
 import { advanceVectorDigest } from "../digest.js";
+import { Vector, Artifact } from "../vector.js";
+import { ChainSigner } from "../branching.js";
+import { registerArtifactVerifier, artifactParts } from "../inspect.js";
 
 export {
   HAWK_PUBKEY_LEN,
@@ -199,3 +202,76 @@ export function signAdvanceInstructionHawk512(
 
   return createAdvanceInstruction(HAWK512, identity, signature);
 }
+
+const COMPUTE_BUDGET_PROGRAM_ID = new Address(
+  "ComputeBudget111111111111111111111111111111"
+);
+
+/** `ComputeBudgetProgram.setComputeUnitLimit` ix, built by hand (disc 2 + u32 LE). */
+function setComputeUnitLimitIx(units: number): TransactionInstruction {
+  const data = new Uint8Array(5);
+  data[0] = 2;
+  data[1] = units & 0xff;
+  data[2] = (units >>> 8) & 0xff;
+  data[3] = (units >>> 16) & 0xff;
+  data[4] = (units >>> 24) & 0xff;
+  return new TransactionInstruction({
+    programId: COMPUTE_BUDGET_PROGRAM_ID,
+    keys: [],
+    data: Buffer.from(data),
+  });
+}
+
+/** Hawk-512 (post-quantum) chain signer (184-byte secret + 1024-byte wire pubkey). */
+export function hawk512ChainSigner(keypair: Hawk512Keypair): ChainSigner {
+  return {
+    scheme: HAWK512,
+    identity: hawk512Identity(keypair.publicKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionHawk512(keypair, nonce, pre, post, feePayer),
+  };
+}
+
+/**
+ * Construct a Hawk-512 {@link Vector} from a keypair. Registration is a
+ * three-transaction flow — call `register(payer)` (not `initialize`). The
+ * advance carries a compute-budget bump (Hawk verification is heavy),
+ * committed to by the digest. `derive` is unavailable — build each
+ * sub-account from its own keypair.
+ */
+export function vectorHawk512(
+  keypair: Hawk512Keypair,
+  opts?: { feePayer?: Address }
+): Vector {
+  const signer = hawk512ChainSigner(keypair);
+  const [pda] = findVectorPda(HAWK512, signer.identity);
+  return Vector.fromParts({
+    scheme: HAWK512,
+    signer,
+    pda,
+    registerGroups: (payer) => [
+      [createInitializeHawk512(payer, keypair.publicKey)],
+      [createHawk512StoreWire(keypair.publicKey)],
+      [setComputeUnitLimitIx(600_000), createHawk512Finalize(keypair.publicKey)],
+    ],
+    feePayer: opts?.feePayer,
+    publicKey: keypair.publicKey,
+    preIxs: [setComputeUnitLimitIx(450_000)],
+  });
+}
+
+registerArtifactVerifier(HAWK512.programId, (a: Artifact) => {
+  if (!a.publicKey) {
+    throw new Error(
+      "verifyArtifact: Hawk artifact is missing publicKey (the wire pubkey)"
+    );
+  }
+  const parts = artifactParts(a, HAWK512);
+  if (!parts) return false;
+  try {
+    // Hawk signature is fixed-size — no length recovery needed.
+    return nobleHawk.verify(parts.signature, parts.digest, a.publicKey);
+  } catch {
+    return false;
+  }
+});

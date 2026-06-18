@@ -22,6 +22,30 @@
       "import": "./sdk/ts/dist/digest.js",
       "types": "./sdk/ts/dist/digest.d.ts"
     },
+    "./vector": {
+      "import": "./sdk/ts/dist/vector.js",
+      "types": "./sdk/ts/dist/vector.d.ts"
+    },
+    "./inspect": {
+      "import": "./sdk/ts/dist/inspect.js",
+      "types": "./sdk/ts/dist/inspect.d.ts"
+    },
+    "./wallet": {
+      "import": "./sdk/ts/dist/wallet.js",
+      "types": "./sdk/ts/dist/wallet.d.ts"
+    },
+    "./migrate": {
+      "import": "./sdk/ts/dist/migrate.js",
+      "types": "./sdk/ts/dist/migrate.d.ts"
+    },
+    "./scan": {
+      "import": "./sdk/ts/dist/scan.js",
+      "types": "./sdk/ts/dist/scan.d.ts"
+    },
+    "./branching": {
+      "import": "./sdk/ts/dist/branching.js",
+      "types": "./sdk/ts/dist/branching.d.ts"
+    },
     "./ed25519": {
       "import": "./sdk/ts/dist/schemes/ed25519.js",
       "types": "./sdk/ts/dist/schemes/ed25519.d.ts"
@@ -49,13 +73,21 @@
     "test": "bun vitest run"
   },
   "dependencies": {
-    "@blueshift-gg/hawk512": "0.0.0",
     "@noble/curves": "^1.8.0",
     "@noble/hashes": "^1.7.0",
-    "@noble/post-quantum": "^0.6.1",
     "@solana/web3.js": "3.0.0-rc.0"
   },
+  "peerDependencies": {
+    "@blueshift-gg/hawk512": "0.0.0",
+    "@noble/post-quantum": "^0.6.1"
+  },
+  "peerDependenciesMeta": {
+    "@blueshift-gg/hawk512": { "optional": true },
+    "@noble/post-quantum": { "optional": true }
+  },
   "devDependencies": {
+    "@blueshift-gg/hawk512": "0.0.0",
+    "@noble/post-quantum": "^0.6.1",
     "@solana/spl-token": "^0.4.0",
     "typescript": "^5.4.0",
     "vitest": "^3.1.0"

@@ -8,12 +8,15 @@
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
-import { Scheme, SECP256K1_COMPRESSED_PUBKEY_LEN } from "../scheme.js";
+import { Scheme, findVectorPda, SECP256K1_COMPRESSED_PUBKEY_LEN } from "../scheme.js";
 import {
   createInitializeInstruction,
   createAdvanceInstruction,
 } from "../instructions.js";
 import { advanceVectorDigest } from "../digest.js";
+import { Vector, Artifact } from "../vector.js";
+import { ChainSigner, deriveLaneSeed } from "../branching.js";
+import { registerArtifactVerifier, artifactParts } from "../inspect.js";
 
 /** Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey. */
 export const SECP256K1: Scheme = {
@@ -82,3 +85,41 @@ export function signAdvanceInstructionSecp256k1(
 
   return createAdvanceInstruction(SECP256K1, identity, sigBytes);
 }
+
+/** Plain secp256k1 ECDSA chain signer (32-byte private key). */
+export function secp256k1ChainSigner(privateKey: Uint8Array): ChainSigner {
+  return {
+    scheme: SECP256K1,
+    identity: secp256k1Identity(privateKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer),
+  };
+}
+
+/** Construct a plain-secp256k1 {@link Vector} from a 32-byte private key. */
+export function vectorSecp256k1(
+  privateKey: Uint8Array,
+  opts?: { feePayer?: Address }
+): Vector {
+  const signer = secp256k1ChainSigner(privateKey);
+  const [pda] = findVectorPda(SECP256K1, signer.identity);
+  return Vector.fromParts({
+    scheme: SECP256K1,
+    signer,
+    pda,
+    initIx: (payer) => createInitializeSecp256k1(payer, signer.identity),
+    feePayer: opts?.feePayer,
+    deriveChild: (i) =>
+      vectorSecp256k1(deriveLaneSeed(privateKey, "secp256k1", i), opts),
+  });
+}
+
+registerArtifactVerifier(SECP256K1.programId, (a: Artifact) => {
+  const parts = artifactParts(a, SECP256K1);
+  if (!parts) return false;
+  try {
+    return secp256k1.verify(parts.signature, parts.digest, a.identity);
+  } catch {
+    return false;
+  }
+});

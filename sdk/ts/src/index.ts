@@ -1,71 +1,27 @@
 /**
- * Off-chain helpers for constructing Vector program instructions and
- * computing the digests the on-chain programs verify.
+ * Vector SDK — core (scheme-agnostic) entrypoint.
  *
- * Each signing scheme is its own on-chain program with its own program ID.
- * There is no on-chain scheme discriminator: the program ID identifies the
- * scheme, the account header is `nonce[32] || bump[1]` (33 bytes), and PDA
- * seeds are `["vector", identity_seed]`. A {@link Scheme} bundles what a
- * client needs to talk to a given program: its program ID, wire signature
- * length, and identity/stored-identity lengths.
+ * The default import is light: it pulls no per-scheme crypto. Construct a
+ * `Vector` from its scheme's subpath so you only install/bundle the crypto you
+ * use, e.g. `import { vectorEd25519 } from "vector-sdk/ed25519"`. Importing a
+ * scheme subpath also registers its offline verifier with {@link verifyArtifact}.
  *
- * # Layout
+ * Per-scheme subpaths — each exports its `Scheme` const, identity/init/sign
+ * builders, a `vector<Scheme>(...)` constructor, and a `<scheme>ChainSigner`:
  *
- * - `./scheme.js` — the {@link Scheme} descriptor, {@link VectorAccount}
- *   header mirror, canonical PDA derivation, and shared byte helpers.
- * - `./instructions.js` — generic builders (initialize/advance/passthrough/
- *   close/withdraw, instructions-sysvar serialization).
- * - `./digest.js` — {@link advanceVectorDigest}, the value clients sign.
- * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
- *   `falcon512`, `hawk512`, `secp256k1`): its `Scheme`/program-ID const,
- *   identity derivation, an `initialize` builder, and a signer where one
- *   exists.
+ * - `vector-sdk/ed25519`
+ * - `vector-sdk/secp256k1`
+ * - `vector-sdk/eip191`
+ * - `vector-sdk/falcon512`
+ * - `vector-sdk/hawk512`
  *
- * Everything is re-exported flat here, so either style works:
- *
- * ```ts
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk";          // flat
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";  // per-scheme
- * ```
- *
- * The Falcon/Hawk wire-size constants are owned by `./scheme.js` and
- * re-exported flat from there. `./schemes/falcon512.js` and
- * `./schemes/hawk512.js` also re-export them for their standalone subpath
- * entrypoints; to keep the flat API unambiguous they are NOT glob-exported
- * here from those modules (only the symbols unique to each scheme module
- * are).
+ * The low-level chain engine is at `vector-sdk/branching`.
  */
-
 export * from "./scheme.js";
 export * from "./instructions.js";
 export * from "./digest.js";
-
-export * from "./schemes/ed25519.js";
-export * from "./schemes/eip191.js";
-export * from "./schemes/secp256k1.js";
-
-// Falcon/Hawk: re-export only the scheme-unique symbols. The wire-size
-// constants come from `./scheme.js` above (re-exporting them again via
-// these modules would make them ambiguous and silently drop them from the
-// flat barrel).
-export {
-  FALCON512,
-  FALCON_SECRET_KEY_LEN,
-  falcon512Identity,
-  falcon512Keygen,
-  falcon512PublicKey,
-  createInitializeFalcon512,
-  signAdvanceInstructionFalcon512,
-} from "./schemes/falcon512.js";
-export type { Falcon512Keypair } from "./schemes/falcon512.js";
-export {
-  HAWK512,
-  HAWK_SECRET_KEY_LEN,
-  hawk512Identity,
-  hawk512Keygen,
-  createInitializeHawk512,
-  createHawk512StoreWire,
-  createHawk512Finalize,
-  signAdvanceInstructionHawk512,
-} from "./schemes/hawk512.js";
-export type { Hawk512Keypair } from "./schemes/hawk512.js";
+export * from "./vector.js";
+export * from "./inspect.js";
+export * from "./wallet.js";
+export * from "./migrate.js";
+export * from "./scan.js";
