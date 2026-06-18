@@ -114,6 +114,31 @@ impl<S: Signer> Vector<S> {
             instructions,
         }
     }
+    /// Ordered, forward-secure: each op is signed against the previous op's
+    /// `next_nonce`, so step N can't land before step N-1.
+    pub fn chain(&self, nonce: &[u8; 32], ops: &[Op]) -> Vec<Artifact> {
+        let mut cur = *nonce;
+        let mut out = Vec::with_capacity(ops.len());
+        for op in ops {
+            let art = self.authorize(&cur, op.clone());
+            cur = art.next_nonce;
+            out.push(art);
+        }
+        out
+    }
+
+    /// Mutually exclusive arms: every arm is signed against the same `nonce`;
+    /// landing one advances the nonce and orphans the rest atomically.
+    pub fn branch(
+        &self,
+        nonce: &[u8; 32],
+        arms: std::collections::BTreeMap<String, Op>,
+    ) -> std::collections::BTreeMap<String, Artifact> {
+        arms.into_iter()
+            .map(|(k, op)| (k, self.authorize(nonce, op)))
+            .collect()
+    }
+
     pub fn withdraw(&self, nonce: &[u8; 32], to: &Address, lamports: u64) -> Artifact {
         let ix = create_withdraw_subinstruction(&S::descriptor(), &self.identity(), to, lamports);
         self.authorize(nonce, Op::One(ix))
@@ -152,6 +177,31 @@ mod facade_tests {
         let groups = v.register(&Ed25519::PROGRAM_ID);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].len(), 1);
+    }
+}
+
+#[cfg(all(test, feature = "ed25519"))]
+mod branch_tests {
+    use super::*;
+    use crate::schemes::ed25519::Ed25519;
+    #[test]
+    fn chain_links_nonces() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let arts = v.chain(&[0u8; 32], &[Op::Inert, Op::Inert]);
+        assert_eq!(arts.len(), 2);
+        assert_eq!(arts[1].nonce, arts[0].next_nonce); // step 2 signed against step 1's result
+        assert_ne!(arts[0].nonce, arts[1].nonce);
+    }
+    #[test]
+    fn branches_share_nonce() {
+        use std::collections::BTreeMap;
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let mut arms = BTreeMap::new();
+        arms.insert("a".to_string(), Op::Inert);
+        arms.insert("b".to_string(), Op::Inert);
+        let out = v.branch(&[7u8; 32], arms);
+        assert_eq!(out["a"].nonce, out["b"].nonce); // same source nonce
+        assert_eq!(out.len(), 2);
     }
 }
 
