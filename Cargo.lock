@@ -3368,6 +3368,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "hawk512",
+ "hmac",
  "k256",
  "pqcrypto-falcon",
  "pqcrypto-traits",

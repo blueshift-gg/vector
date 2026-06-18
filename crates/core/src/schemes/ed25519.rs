@@ -96,6 +96,13 @@ impl Signer for Ed25519 {
     }
 }
 
+use crate::branching::derive_lane_seed;
+impl crate::scheme::Derivable for Ed25519 {
+    fn derive(&self, index: u32) -> Self {
+        Self::from_seed(&derive_lane_seed(&self.key.to_bytes(), "ed25519", index))
+    }
+}
+
 impl Verifier for Ed25519 {
     fn verify(identity: &[u8], _pk: Option<&[u8]>, digest: &[u8; 32], signature: &[u8]) -> bool {
         let (Ok(vk_bytes), Ok(sig_bytes)) = (

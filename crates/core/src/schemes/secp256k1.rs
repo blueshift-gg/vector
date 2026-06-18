@@ -110,6 +110,14 @@ impl Signer for Secp256k1 {
     }
 }
 
+use crate::branching::derive_lane_seed;
+impl crate::scheme::Derivable for Secp256k1 {
+    fn derive(&self, index: u32) -> Self {
+        let master: [u8; 32] = self.key.to_bytes().into();
+        Self::from_seed(&derive_lane_seed(&master, "secp256k1", index))
+    }
+}
+
 impl Verifier for Secp256k1 {
     fn verify(identity: &[u8], _pk: Option<&[u8]>, digest: &[u8; 32], signature: &[u8]) -> bool {
         let Ok(vk) = VerifyingKey::from_sec1_bytes(identity) else {

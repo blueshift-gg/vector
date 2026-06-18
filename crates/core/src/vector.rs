@@ -149,6 +149,29 @@ impl<S: Signer> Vector<S> {
     }
 }
 
+impl<S: crate::scheme::Derivable> Vector<S> {
+    /// Independent sub-account: same API, its own deterministic key + PDA.
+    pub fn derive(&self, index: u32) -> Vector<S> {
+        Vector {
+            signer: self.signer.derive(index),
+            fee_payer: self.fee_payer,
+        }
+    }
+}
+
+#[cfg(all(test, feature = "ed25519"))]
+mod derive_tests {
+    use super::*;
+    use crate::schemes::ed25519::Ed25519;
+    #[test]
+    fn derived_subaccounts_are_deterministic_and_distinct() {
+        let root = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        assert_eq!(root.derive(0).pda(), root.derive(0).pda()); // deterministic
+        assert_ne!(root.derive(0).pda(), root.derive(1).pda()); // distinct
+        assert_ne!(root.derive(0).pda(), root.pda()); // child != root
+    }
+}
+
 #[cfg(all(test, feature = "ed25519"))]
 mod facade_tests {
     use super::*;

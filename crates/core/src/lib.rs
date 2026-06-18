@@ -28,6 +28,7 @@
 //! ```
 
 pub mod artifact_serde;
+pub mod branching;
 pub mod instructions;
 pub mod protocol;
 pub mod scheme;
@@ -37,6 +38,7 @@ pub mod vector;
 // Flat re-exports — the ergonomic surface. Names are unique across modules,
 // so a glob per module can't collide.
 pub use artifact_serde::*;
+pub use branching::*;
 pub use instructions::*;
 pub use protocol::*;
 pub use scheme::*;

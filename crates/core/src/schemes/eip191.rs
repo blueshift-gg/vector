@@ -137,6 +137,14 @@ impl Signer for Eip191 {
     }
 }
 
+use crate::branching::derive_lane_seed;
+impl crate::scheme::Derivable for Eip191 {
+    fn derive(&self, index: u32) -> Self {
+        let master: [u8; 32] = self.key.to_bytes().into();
+        Self::from_seed(&derive_lane_seed(&master, "eip191", index))
+    }
+}
+
 impl Verifier for Eip191 {
     fn verify(identity: &[u8], _pk: Option<&[u8]>, digest: &[u8; 32], signature: &[u8]) -> bool {
         if signature.len() != 65 {

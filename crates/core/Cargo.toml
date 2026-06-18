@@ -21,6 +21,7 @@ solana-instruction = { workspace = true }
 solana-instructions-sysvar = "3.0.0"
 solana-falcon512 = { workspace = true, optional = true }
 sha2 = "0.10"
+hmac = "0.12"
 ed25519-dalek = { version = "=2.1.1", optional = true }
 k256 = { version = "0.13", features = ["ecdsa"], optional = true }
 sha3 = { version = "0.10", optional = true }
