@@ -63,3 +63,79 @@ pub fn sign_advance_instruction_secp256k1_ecdsa(
     let sig_bytes: [u8; 64] = sig.to_bytes().into();
     create_advance_instruction(&SECP256K1, &identity, &sig_bytes)
 }
+
+// ---------------------------------------------------------------------------
+// Secp256k1 struct — implements SchemeMeta + Signer + Verifier
+// ---------------------------------------------------------------------------
+
+use crate::scheme::{SchemeMeta, Signer, Verifier};
+use k256::ecdsa::{signature::hazmat::PrehashVerifier, Signature, VerifyingKey};
+
+/// Secp256k1 signer/verifier. Identity is the 33-byte sec1-compressed pubkey.
+#[derive(Clone)]
+pub struct Secp256k1 {
+    key: Secp256k1SigningKey,
+}
+
+impl Secp256k1 {
+    pub fn from_seed(seed: &[u8; 32]) -> Self {
+        Self {
+            key: Secp256k1SigningKey::from_slice(seed).expect("valid secp256k1 scalar"),
+        }
+    }
+}
+
+impl SchemeMeta for Secp256k1 {
+    const PROGRAM_ID: solana_address::Address = SECP256K1.program_id;
+    const SIGNATURE_LEN: usize = 64;
+    const IDENTITY_LEN: usize = 33;
+    const STORED_IDENTITY_LEN: usize = 33;
+}
+
+impl Signer for Secp256k1 {
+    fn identity(&self) -> Vec<u8> {
+        self.key
+            .verifying_key()
+            .to_encoded_point(true)
+            .as_bytes()
+            .to_vec()
+    }
+
+    fn sign(&self, digest: &[u8; 32]) -> Vec<u8> {
+        let (sig, _recid): (Signature, _) = self
+            .key
+            .sign_prehash(digest)
+            .expect("secp256k1 signing failed");
+        sig.to_bytes().to_vec()
+    }
+}
+
+impl Verifier for Secp256k1 {
+    fn verify(identity: &[u8], _pk: Option<&[u8]>, digest: &[u8; 32], signature: &[u8]) -> bool {
+        let Ok(vk) = VerifyingKey::from_sec1_bytes(identity) else {
+            return false;
+        };
+        let Ok(sig) = Signature::from_slice(signature) else {
+            return false;
+        };
+        vk.verify_prehash(digest, &sig).is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scheme::{Signer, Verifier};
+
+    #[test]
+    fn sign_then_verify_roundtrip() {
+        let k = Secp256k1::from_seed(&[3u8; 32]);
+        let digest = [5u8; 32];
+        let sig = k.sign(&digest);
+        assert_eq!(sig.len(), 64);
+        assert!(Secp256k1::verify(&k.identity(), None, &digest, &sig));
+        let mut bad = digest;
+        bad[1] ^= 1;
+        assert!(!Secp256k1::verify(&k.identity(), None, &bad, &sig));
+    }
+}
