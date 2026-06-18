@@ -31,6 +31,11 @@ any Ethereum `personal_sign` wallet. Core (`import … from "vector-sdk"`) gives
 you the `Vector` type, inspection, migration, and the scanner; the low-level
 chain engine is at `vector-sdk/branching`.
 
+The post-quantum libraries are **optional peer dependencies** — a base install
+doesn't pull them. Add `@noble/post-quantum` only if you use `vector-sdk/falcon512`,
+and `@blueshift-gg/hawk512` only for `vector-sdk/hawk512`. The other schemes need
+nothing beyond `@noble/curves`.
+
 ## Quickstart
 
 ```ts

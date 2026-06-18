@@ -73,13 +73,21 @@
     "test": "bun vitest run"
   },
   "dependencies": {
-    "@blueshift-gg/hawk512": "0.0.0",
     "@noble/curves": "^1.8.0",
     "@noble/hashes": "^1.7.0",
-    "@noble/post-quantum": "^0.6.1",
     "@solana/web3.js": "3.0.0-rc.0"
   },
+  "peerDependencies": {
+    "@blueshift-gg/hawk512": "0.0.0",
+    "@noble/post-quantum": "^0.6.1"
+  },
+  "peerDependenciesMeta": {
+    "@blueshift-gg/hawk512": { "optional": true },
+    "@noble/post-quantum": { "optional": true }
+  },
   "devDependencies": {
+    "@blueshift-gg/hawk512": "0.0.0",
+    "@noble/post-quantum": "^0.6.1",
     "@solana/spl-token": "^0.4.0",
     "typescript": "^5.4.0",
     "vitest": "^3.1.0"
