@@ -4,8 +4,10 @@
 //! constants, [`VectorAccount`], and PDA derivation live in
 //! [`crate::protocol`].
 
+use crate::instructions::create_initialize_instruction;
 use crate::protocol::VectorAccount;
 use solana_address::Address;
+use solana_instruction::Instruction;
 
 /// Everything a client needs to address one Vector program. Each on-chain
 /// scheme is a separate program; this is the off-chain mirror of "which
@@ -65,6 +67,27 @@ pub trait Signer: SchemeMeta {
     }
     /// Wire signature over `digest`, `SIGNATURE_LEN` bytes.
     fn sign(&self, digest: &[u8; 32]) -> Vec<u8>;
+
+    /// Top-level instructions that must precede the advance and be committed by
+    /// the digest (e.g. a compute-budget bump for an expensive on-chain verify).
+    /// Default: none.
+    fn advance_pre_instructions(&self) -> Vec<Instruction> {
+        Vec::new()
+    }
+
+    /// Account-registration transactions, one group per transaction. Default:
+    /// a single `initialize` (init payload = the wire pubkey for PQ schemes,
+    /// else the identity itself). Multi-tx schemes (Hawk) override this.
+    fn registration_groups(&self, payer: &Address) -> Vec<Vec<Instruction>> {
+        let id = self.identity();
+        let init_payload = self.public_key().unwrap_or_else(|| id.clone());
+        vec![vec![create_initialize_instruction(
+            payer,
+            &Self::descriptor(),
+            &id,
+            &init_payload,
+        )]]
+    }
 }
 
 /// Pure, offline signature check. No secret, no RPC.
