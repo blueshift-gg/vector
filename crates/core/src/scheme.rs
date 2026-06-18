@@ -35,3 +35,51 @@ impl Scheme {
         VectorAccount::HEADER_LEN + self.stored_identity_len
     }
 }
+
+/// Const dimensions + program id for one Vector program.
+pub trait SchemeMeta {
+    const PROGRAM_ID: Address;
+    const SIGNATURE_LEN: usize;
+    const IDENTITY_LEN: usize;
+    const STORED_IDENTITY_LEN: usize;
+    /// Runtime descriptor for value-taking APIs (the digest builder).
+    fn descriptor() -> Scheme {
+        Scheme {
+            program_id: Self::PROGRAM_ID,
+            signature_len: Self::SIGNATURE_LEN,
+            identity_len: Self::IDENTITY_LEN,
+            stored_identity_len: Self::STORED_IDENTITY_LEN,
+        }
+    }
+}
+
+/// Holds a secret; produces the wire signature over the advance digest.
+pub trait Signer: SchemeMeta {
+    /// Client identity (`IDENTITY_LEN` bytes): pubkey/address, or
+    /// `sha256(wire)` for PQ schemes.
+    fn identity(&self) -> Vec<u8>;
+    /// Wire pubkey carried in the artifact for PQ schemes; `None` for the
+    /// curve schemes.
+    fn public_key(&self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Wire signature over `digest`, `SIGNATURE_LEN` bytes.
+    fn sign(&self, digest: &[u8; 32]) -> Vec<u8>;
+}
+
+/// Pure, offline signature check. No secret, no RPC.
+pub trait Verifier: SchemeMeta {
+    /// `identity` is the client identity; `public_key` is the PQ wire pubkey
+    /// when present.
+    fn verify(
+        identity: &[u8],
+        public_key: Option<&[u8]>,
+        digest: &[u8; 32],
+        signature: &[u8],
+    ) -> bool;
+}
+
+/// SDK-only sub-key lanes; only 32-byte-key schemes implement it.
+pub trait Derivable: Signer + Sized {
+    fn derive(&self, index: u32) -> Self;
+}
