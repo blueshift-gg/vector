@@ -35,6 +35,12 @@ import {
   signAdvanceInstructionFalcon512,
   Falcon512Keypair,
 } from "./schemes/falcon512.js";
+import {
+  HAWK512,
+  hawk512Identity,
+  signAdvanceInstructionHawk512,
+  Hawk512Keypair,
+} from "./schemes/hawk512.js";
 import { advanceVectorDigest } from "./digest.js";
 
 /** Per-scheme signer for a single chain (one key / identity). */
@@ -87,6 +93,16 @@ export function falcon512ChainSigner(keypair: Falcon512Keypair): ChainSigner {
     identity: falcon512Identity(keypair.publicKey),
     sign: (nonce, pre, post, feePayer) =>
       signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer),
+  };
+}
+
+/** Hawk-512 (post-quantum) chain signer (184-byte secret + 1024-byte wire pubkey). */
+export function hawk512ChainSigner(keypair: Hawk512Keypair): ChainSigner {
+  return {
+    scheme: HAWK512,
+    identity: hawk512Identity(keypair.publicKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionHawk512(keypair, nonce, pre, post, feePayer),
   };
 }
 

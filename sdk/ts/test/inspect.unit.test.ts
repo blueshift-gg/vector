@@ -2,8 +2,8 @@ import { describe, test, expect } from "vitest";
 import { Address, SystemProgram, Transaction } from "@solana/web3.js";
 import {
   Vector,
-  HAWK512,
   falcon512Keygen,
+  hawk512Keygen,
   serializeArtifact,
   deserializeArtifact,
   decodeOps,
@@ -91,6 +91,12 @@ describe("verifyArtifact across schemes", () => {
     expect(art.publicKey).toBeDefined();
     expect(verifyArtifact(art)).toBe(true);
   });
+  test("hawk512 carries the wire pubkey and verifies (advance after compute budget)", () => {
+    const art = Vector.hawk512(hawk512Keygen()).authorize(NONCE, op);
+    expect(art.publicKey).toBeDefined();
+    expect(art.advanceIndex).toBe(1); // compute-budget pre-instruction
+    expect(verifyArtifact(art)).toBe(true);
+  });
   test("tamper is rejected (secp256k1)", () => {
     const art = Vector.secp256k1(secpKey).authorize(NONCE, op);
     const data = art.instructions[1].data;
@@ -99,13 +105,14 @@ describe("verifyArtifact across schemes", () => {
   });
 });
 
-describe("verifyArtifact unsupported scheme", () => {
-  test("throws for a scheme it can't verify offline (Hawk-512)", () => {
+describe("verifyArtifact unknown scheme", () => {
+  test("throws for an unknown program id", () => {
     const fake = {
-      programId: HAWK512.programId,
+      programId: new Address("11111111111111111111111111111111"), // not a Vector scheme
       identity: new Uint8Array(32),
       nonce: new Uint8Array(32),
       nextNonce: new Uint8Array(32),
+      advanceIndex: 0,
       instructions: [],
       transaction: () => new Transaction(),
     } as any;

@@ -6,11 +6,14 @@ import {
   SECP256K1,
   EIP191,
   FALCON512,
+  HAWK512,
   ed25519Identity,
   secp256k1Identity,
   eip191Identity,
   falcon512Identity,
   falcon512Keygen,
+  hawk512Identity,
+  hawk512Keygen,
   findVectorPda,
   ADVANCE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
@@ -150,6 +153,22 @@ describe("multi-scheme facade", () => {
     const v = Vector.secp256k1(secpKey);
     expect(v.derive(0).pda.toBase58()).toBe(v.derive(0).pda.toBase58());
     expect(v.derive(0).pda.toBase58()).not.toBe(v.derive(1).pda.toBase58());
+  });
+
+  test("hawk512: 3-tx register(), compute-budget pre, no single initialize/derive", () => {
+    const kp = hawk512Keygen();
+    const v = Vector.hawk512(kp, { feePayer: PAY });
+    expect(v.scheme.programId.toBase58()).toBe(HAWK512.programId.toBase58());
+    expect(Buffer.from(v.identity)).toEqual(Buffer.from(hawk512Identity(kp.publicKey)));
+
+    const groups = v.register(PAY);
+    expect(groups.length).toBe(3); // initialize / storeWire / finalize
+    expect(() => v.initialize(PAY)).toThrow(); // multi-tx → use register()
+
+    const art = v.authorize(NONCE, ix(1));
+    expect(art.advanceIndex).toBe(1); // [computeBudget, advance, passthrough]
+    expect(art.instructions[art.advanceIndex].data[0]).toBe(ADVANCE_DISCRIMINATOR);
+    expect(() => v.derive(0)).toThrow();
   });
 });
 

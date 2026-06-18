@@ -48,6 +48,13 @@ import {
   Falcon512Keypair,
 } from "./schemes/falcon512.js";
 import {
+  HAWK512,
+  createInitializeHawk512,
+  createHawk512StoreWire,
+  createHawk512Finalize,
+  Hawk512Keypair,
+} from "./schemes/hawk512.js";
+import {
   createPassthroughInstruction,
   createWithdrawSubinstruction,
   createCloseSubinstruction,
@@ -58,6 +65,7 @@ import {
   secp256k1ChainSigner,
   eip191ChainSigner,
   falcon512ChainSigner,
+  hawk512ChainSigner,
   signChain,
   signBranches,
   resolveChainStatus,
@@ -66,6 +74,25 @@ import {
   SignedStep,
   ChainStatus,
 } from "./branching.js";
+
+const COMPUTE_BUDGET_PROGRAM_ID = new Address(
+  "ComputeBudget111111111111111111111111111111"
+);
+
+/** `ComputeBudgetProgram.setComputeUnitLimit` ix, built by hand (disc 2 + u32 LE). */
+function setComputeUnitLimitIx(units: number): TransactionInstruction {
+  const data = new Uint8Array(5);
+  data[0] = 2;
+  data[1] = units & 0xff;
+  data[2] = (units >>> 8) & 0xff;
+  data[3] = (units >>> 16) & 0xff;
+  data[4] = (units >>> 24) & 0xff;
+  return new TransactionInstruction({
+    programId: COMPUTE_BUDGET_PROGRAM_ID,
+    keys: [],
+    data: Buffer.from(data),
+  });
+}
 
 export type { ChainStatus } from "./branching.js";
 
@@ -94,7 +121,13 @@ export interface Artifact {
    * artifact offline; omitted for schemes where `identity` is the key itself.
    */
   publicKey?: Uint8Array;
-  /** Instructions to broadcast in order: `[advance]` or `[advance, passthrough]`. */
+  /**
+   * Index of the `advance` within {@link instructions}. 0 for most schemes;
+   * non-zero when the scheme prepends instructions (e.g. Hawk-512's
+   * compute-budget bump), which are committed to by the digest.
+   */
+  advanceIndex: number;
+  /** Instructions to broadcast in order: `[...pre, advance, ...passthrough]`. */
   instructions: TransactionInstruction[];
   /** A fresh `Transaction` of {@link instructions} (relayer adds blockhash + fee-payer sig). */
   transaction(): Transaction;
@@ -110,27 +143,33 @@ export class Vector {
 
   private readonly signer: ChainSigner;
   private readonly feePayer?: Address;
-  private readonly initIx: (payer: Address) => TransactionInstruction;
+  private readonly initIx?: (payer: Address) => TransactionInstruction;
+  private readonly registerGroups?: (payer: Address) => TransactionInstruction[][];
   private readonly deriveChild?: (index: number) => Vector;
   private readonly publicKey?: Uint8Array;
+  private readonly preIxs: TransactionInstruction[];
 
   private constructor(args: {
     scheme: Scheme;
     signer: ChainSigner;
     pda: Address;
-    initIx: (payer: Address) => TransactionInstruction;
+    initIx?: (payer: Address) => TransactionInstruction;
+    registerGroups?: (payer: Address) => TransactionInstruction[][];
     feePayer?: Address;
     deriveChild?: (index: number) => Vector;
     publicKey?: Uint8Array;
+    preIxs?: TransactionInstruction[];
   }) {
     this.scheme = args.scheme;
     this.signer = args.signer;
     this.identity = args.signer.identity;
     this.pda = args.pda;
     this.initIx = args.initIx;
+    this.registerGroups = args.registerGroups;
     this.feePayer = args.feePayer;
     this.deriveChild = args.deriveChild;
     this.publicKey = args.publicKey;
+    this.preIxs = args.preIxs ?? [];
   }
 
   /** Bind a `Vector` to a 32-byte Ed25519 private-key seed. */
@@ -198,9 +237,55 @@ export class Vector {
     });
   }
 
-  /** The one-time `initialize` instruction that creates this account on-chain. */
+  /**
+   * Bind a `Vector` to a post-quantum Hawk-512 keypair. Registration is a
+   * three-transaction flow (see {@link register}), so `initialize` throws —
+   * use `register`. `derive` is unavailable (build each sub-account from its
+   * own keypair). The advance carries a compute-budget bump (Hawk verification
+   * is heavy), committed to by the digest.
+   */
+  static hawk512(keypair: Hawk512Keypair, opts?: { feePayer?: Address }): Vector {
+    const signer = hawk512ChainSigner(keypair);
+    const [pda] = findVectorPda(HAWK512, signer.identity);
+    return new Vector({
+      scheme: HAWK512,
+      signer,
+      pda,
+      registerGroups: (payer) => [
+        [createInitializeHawk512(payer, keypair.publicKey)],
+        [createHawk512StoreWire(keypair.publicKey)],
+        [setComputeUnitLimitIx(600_000), createHawk512Finalize(keypair.publicKey)],
+      ],
+      feePayer: opts?.feePayer,
+      publicKey: keypair.publicKey,
+      preIxs: [setComputeUnitLimitIx(450_000)],
+    });
+  }
+
+  /**
+   * The one-time `initialize` instruction for single-transaction schemes.
+   * Throws for schemes whose registration spans multiple transactions
+   * (Hawk-512) — use {@link register} instead.
+   */
   initialize(payer: Address): TransactionInstruction {
+    if (!this.initIx) {
+      throw new Error(
+        `${this.scheme.programId.toBase58()} needs multi-transaction registration — use register()`
+      );
+    }
     return this.initIx(payer);
+  }
+
+  /**
+   * All account-registration transactions, in order — one inner array per
+   * transaction. Single-transaction schemes return one group of one
+   * instruction; Hawk-512 returns three (initialize → store wire → finalize).
+   * Send each group as its own transaction, in order.
+   */
+  register(payer: Address): TransactionInstruction[][] {
+    if (this.registerGroups) return this.registerGroups(payer);
+    if (this.initIx) return [[this.initIx(payer)]];
+    throw new Error(`${this.scheme.programId.toBase58()} has no registration path`);
   }
 
   /** Read the current on-chain nonce. The only networked call. */
@@ -309,12 +394,16 @@ export class Vector {
   /** Wrap an op's CPIs in a passthrough (or nothing, for an inert advance). */
   private toStep(op: Op): BranchStep {
     const ixs = Array.isArray(op) ? op : [op];
-    if (ixs.length === 0) return {};
-    return { post: [createPassthroughInstruction(this.scheme, this.identity, ixs)] };
+    const pre = this.preIxs.length ? this.preIxs : undefined;
+    if (ixs.length === 0) return { pre };
+    return {
+      pre,
+      post: [createPassthroughInstruction(this.scheme, this.identity, ixs)],
+    };
   }
 
   private toArtifact(step: SignedStep): Artifact {
-    const instructions = [step.advanceIx, ...step.post];
+    const instructions = [...step.pre, step.advanceIx, ...step.post];
     return {
       programId: this.scheme.programId,
       identity: this.identity,
@@ -322,6 +411,7 @@ export class Vector {
       nextNonce: step.nextNonce,
       feePayer: this.feePayer,
       publicKey: this.publicKey,
+      advanceIndex: step.pre.length,
       instructions,
       transaction: () => new Transaction().add(...instructions),
     };

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { Address, Connection, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
-import { Vector } from "../src/index.js";
+import { Vector, hawk512Keygen } from "../src/index.js";
 import { RPC_URL, WS_URL, FEE_PAYER_SEED, sendTx } from "./helpers.js";
 
 // Distinct keys so this suite never collides with the per-scheme tests.
@@ -107,4 +107,16 @@ describe("Vector (front door, on-chain)", () => {
       expect(Buffer.from(await v.nonce(connection))).toEqual(Buffer.from(art.nextNonce));
     });
   }
+
+  test("hawk512: 3-tx registration + advance on-chain", async () => {
+    const v = Vector.hawk512(hawk512Keygen(), { feePayer: feePayer.address });
+    // register() returns one group per transaction (initialize / storeWire / finalize)
+    for (const group of v.register(feePayer.address)) {
+      await sendTx(connection, new Transaction().add(...group), [feePayer]);
+    }
+    const nonce = await v.nonce(connection);
+    const art = v.authorize(nonce, []); // inert advance; carries the compute-budget pre
+    await sendTx(connection, art.transaction(), [feePayer]);
+    expect(Buffer.from(await v.nonce(connection))).toEqual(Buffer.from(art.nextNonce));
+  }, 60_000);
 });

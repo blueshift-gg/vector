@@ -9,6 +9,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
+import { hawk512 as nobleHawk } from "@blueshift-gg/hawk512";
 
 import {
   Scheme,
@@ -87,6 +88,7 @@ export function serializeArtifact(a: Artifact): string {
     nextNonce: toHex(a.nextNonce),
     feePayer: a.feePayer ? a.feePayer.toBase58() : undefined,
     publicKey: a.publicKey ? toHex(a.publicKey) : undefined,
+    advanceIndex: a.advanceIndex,
     instructions: a.instructions.map(ixToSerialized),
   });
 }
@@ -102,6 +104,7 @@ export function deserializeArtifact(json: string): Artifact {
     nextNonce: fromHex(o.nextNonce),
     feePayer: o.feePayer ? new Address(o.feePayer) : undefined,
     publicKey: o.publicKey ? fromHex(o.publicKey) : undefined,
+    advanceIndex: o.advanceIndex ?? 0,
     instructions,
     transaction: () => new Transaction().add(...instructions),
   };
@@ -215,32 +218,24 @@ export function verifyArtifact(a: Artifact): boolean {
   const scheme = schemeForProgramId(a.programId);
   const pid = scheme.programId.toBase58();
 
-  const supported = [
-    ED25519.programId.toBase58(),
-    SECP256K1.programId.toBase58(),
-    EIP191.programId.toBase58(),
-    FALCON512.programId.toBase58(),
-  ];
-  if (!supported.includes(pid)) {
+  const needsPubkey =
+    pid === FALCON512.programId.toBase58() || pid === HAWK512.programId.toBase58();
+  if (needsPubkey && !a.publicKey) {
     throw new Error(
-      `verifyArtifact: offline verification for ${pid} is not implemented (e.g. Hawk-512 — use on-chain verification)`
-    );
-  }
-  if (pid === FALCON512.programId.toBase58() && !a.publicKey) {
-    throw new Error(
-      "verifyArtifact: Falcon artifact is missing publicKey (the wire pubkey)"
+      "verifyArtifact: post-quantum artifact is missing publicKey (the wire pubkey)"
     );
   }
 
-  const advanceData = new Uint8Array(a.instructions[0].data);
+  const idx = a.advanceIndex ?? 0;
+  const advanceData = new Uint8Array(a.instructions[idx].data);
   if (advanceData[0] !== ADVANCE_DISCRIMINATOR) return false;
   const signature = advanceData.slice(1, 1 + scheme.signatureLen);
   const digest = advanceVectorDigest(
     scheme,
     a.nonce,
     a.identity,
-    [],
-    a.instructions.slice(1),
+    a.instructions.slice(0, idx),
+    a.instructions.slice(idx + 1),
     a.feePayer
   );
 
@@ -250,6 +245,10 @@ export function verifyArtifact(a: Artifact): boolean {
     }
     if (pid === SECP256K1.programId.toBase58()) {
       return secp256k1.verify(signature, digest, a.identity);
+    }
+    if (pid === HAWK512.programId.toBase58()) {
+      // Hawk signature is fixed-size — no length recovery needed (unlike Falcon).
+      return nobleHawk.verify(signature, digest, a.publicKey!);
     }
     if (pid === EIP191.programId.toBase58()) {
       const recovered = secp256k1.Signature.fromCompact(signature.slice(0, 64))
