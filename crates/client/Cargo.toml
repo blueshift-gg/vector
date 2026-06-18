@@ -15,7 +15,7 @@ hawk512 = ["vector-core/hawk512"]
 
 [dependencies]
 vector-core = { path = "../core", default-features = false }
-solana-address = { workspace = true }
+solana-address = { workspace = true, features = ["curve25519"] }
 solana-instruction = { workspace = true }
 # Async RPC client. The 3.1.x line requires `solana-instruction = ^3.0.0`
 # (resolves to the workspace 3.4.0) and `solana-address = ^2.1.0` (resolves to
