@@ -26,6 +26,10 @@
       "import": "./sdk/ts/dist/vector.js",
       "types": "./sdk/ts/dist/vector.d.ts"
     },
+    "./inspect": {
+      "import": "./sdk/ts/dist/inspect.js",
+      "types": "./sdk/ts/dist/inspect.d.ts"
+    },
     "./branching": {
       "import": "./sdk/ts/dist/branching.js",
       "types": "./sdk/ts/dist/branching.d.ts"

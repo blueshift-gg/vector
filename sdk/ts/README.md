@@ -121,6 +121,29 @@ const status = v.status(steps, await v.nonce(connection));
 An artifact is broadcastable iff its chain is still at the nonce it was signed
 against.
 
+## Inspecting & verifying artifacts
+
+Artifacts are transportable and self-describing — a counterparty or policy
+engine can decode the intent and verify the signature **without a chain
+connection**.
+
+```ts
+import {
+  serializeArtifact, deserializeArtifact,
+  summarize, verifyArtifact, review,
+} from "vector-sdk";
+
+const wire = serializeArtifact(art);     // deterministic JSON for transport
+const a = deserializeArtifact(wire);
+
+summarize(a);        // ["System transfer 5 lamports 1111… → 1111…", ...]
+verifyArtifact(a);   // true | false — recompute digest + check signature, offline
+console.log(review(a));   // deterministic, human-readable block for sign-off
+```
+
+Unknown programs are rendered raw (program id + byte/account counts), never
+silently hidden — so a reviewer always sees the full intent.
+
 ## Air-gapped signing
 
 Signing is **synchronous and offline** — `authorize`/`chain`/`branch` take a

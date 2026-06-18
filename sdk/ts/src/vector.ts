@@ -68,10 +68,16 @@ export type Op = TransactionInstruction | TransactionInstruction[];
 
 /** A signed, broadcast-ready authorization with the advance/passthrough wired. */
 export interface Artifact {
+  /** The scheme program this artifact authorizes against. */
+  programId: Address;
+  /** The signing identity (Ed25519: the 32-byte public key). */
+  identity: Uint8Array;
   /** Nonce this artifact is signed against; valid only while the PDA sits here. */
   nonce: Uint8Array;
   /** Nonce the chain holds after this artifact executes. */
   nextNonce: Uint8Array;
+  /** Fee payer the digest was bound to, if any (needed to re-verify offline). */
+  feePayer?: Address;
   /** Instructions to broadcast in order: `[advance]` or `[advance, passthrough]`. */
   instructions: TransactionInstruction[];
   /** A fresh `Transaction` of {@link instructions} (relayer adds blockhash + fee-payer sig). */
@@ -202,8 +208,11 @@ export class Vector {
   private toArtifact(step: SignedStep): Artifact {
     const instructions = [step.advanceIx, ...step.post];
     return {
+      programId: this.scheme.programId,
+      identity: this.identity,
       nonce: step.nonce,
       nextNonce: step.nextNonce,
+      feePayer: this.feePayer,
       instructions,
       transaction: () => new Transaction().add(...instructions),
     };
