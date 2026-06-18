@@ -163,19 +163,20 @@ export function summarize(a: Artifact): string[] {
   const vector = a.programId.toBase58();
   return decodeOps(a).map((ix) => {
     const pid = ix.programId.toBase58();
-    if (pid === vector && ix.data[0] === WITHDRAW_DISCRIMINATOR) {
+    const raw = `unknown program ${short(ix.programId)}: ${ix.data.length} bytes, ${ix.accounts.length} accounts`;
+    if (pid === vector && ix.data[0] === WITHDRAW_DISCRIMINATOR && ix.data.length >= 9 && ix.accounts.length >= 2) {
       return `Vector withdraw ${readU64LE(ix.data, 1)} lamports → ${short(ix.accounts[1].pubkey)}`;
     }
-    if (pid === vector && ix.data[0] === CLOSE_DISCRIMINATOR) {
+    if (pid === vector && ix.data[0] === CLOSE_DISCRIMINATOR && ix.accounts.length >= 2) {
       return `Vector close → ${short(ix.accounts[1].pubkey)}`;
     }
-    if (pid === SYSTEM_PROGRAM && ix.data.length >= 12 && ix.data[0] === 2) {
+    if (pid === SYSTEM_PROGRAM && ix.data[0] === 2 && ix.data.length >= 12 && ix.accounts.length >= 2) {
       return `System transfer ${readU64LE(ix.data, 4)} lamports ${short(ix.accounts[0].pubkey)} → ${short(ix.accounts[1].pubkey)}`;
     }
-    if (pid === TOKEN_PROGRAM && ix.data[0] === 3) {
+    if (pid === TOKEN_PROGRAM && ix.data[0] === 3 && ix.data.length >= 9 && ix.accounts.length >= 2) {
       return `SPL transfer ${readU64LE(ix.data, 1)} ${short(ix.accounts[0].pubkey)} → ${short(ix.accounts[1].pubkey)}`;
     }
-    return `unknown program ${short(ix.programId)}: ${ix.data.length} bytes, ${ix.accounts.length} accounts`;
+    return raw;
   });
 }
 
@@ -183,19 +184,28 @@ export function summarize(a: Artifact): string[] {
 
 /**
  * Recompute the canonical digest from the artifact's instruction layout and
- * verify the signature against its identity — no chain access. Ed25519 is
- * implemented; other schemes throw with a clear extension point.
+ * verify the signature against its identity — no chain access. Returns
+ * `false` for a bad signature. **Throws** for schemes whose offline verify is
+ * not implemented yet (only Ed25519 is today) — catch it if you inspect mixed
+ * schemes. Assumes facade-shaped artifacts (`[advance, ...passthrough]`).
  */
 export function verifyArtifact(a: Artifact): boolean {
   const scheme = schemeForProgramId(a.programId);
-  const post = a.instructions.slice(1); // everything after the advance
-  const digest = advanceVectorDigest(scheme, a.nonce, a.identity, [], post, a.feePayer);
-
   if (scheme.programId.toBase58() !== ED25519.programId.toBase58()) {
-    throw new Error(`verifyArtifact: ${a.programId.toBase58()} not implemented yet`);
+    throw new Error(
+      `verifyArtifact: offline verification for ${a.programId.toBase58()} is not implemented yet`
+    );
   }
   const advanceData = new Uint8Array(a.instructions[0].data);
   if (advanceData[0] !== ADVANCE_DISCRIMINATOR) return false;
+  const digest = advanceVectorDigest(
+    scheme,
+    a.nonce,
+    a.identity,
+    [],
+    a.instructions.slice(1),
+    a.feePayer
+  );
   const signature = advanceData.slice(1, 1 + scheme.signatureLen);
   try {
     return ed25519.verify(signature, digest, a.identity);

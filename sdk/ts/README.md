@@ -154,12 +154,12 @@ cutoff.
 ```ts
 import {
   createMigrateSolInstruction, createPdaAtaInstruction,
-  associatedTokenAddress, createSplTransferIx, createWithdrawSubinstruction,
+  associatedTokenAddress, createSplTransferIx,
   scanMigration,
 } from "vector-sdk";
 
-// spend SOL out of the PDA (through the facade)
-v.authorize(nonce, createWithdrawSubinstruction(v.programId, v.identity, to, 1_000n));
+// spend SOL out of the PDA — facade convenience for the program's own withdraw
+v.withdraw(nonce, to, 1_000n);
 
 // spend tokens out of the PDA's ATA
 const source = associatedTokenAddress(mint, v.pda);

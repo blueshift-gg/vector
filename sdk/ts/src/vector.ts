@@ -44,7 +44,11 @@ import {
   ed25519Identity,
   createInitializeEd25519,
 } from "./schemes/ed25519.js";
-import { createPassthroughInstruction } from "./instructions.js";
+import {
+  createPassthroughInstruction,
+  createWithdrawSubinstruction,
+  createCloseSubinstruction,
+} from "./instructions.js";
 import {
   ChainSigner,
   ed25519ChainSigner,
@@ -138,6 +142,26 @@ export class Vector {
   }
 
   /**
+   * Authorize a SOL withdrawal from this account's PDA to `to`. Convenience
+   * for the program's own `withdraw` instruction — no need to reach for the
+   * low-level builder or supply the scheme/identity.
+   */
+  withdraw(nonce: Uint8Array, to: Address, lamports: bigint): Artifact {
+    return this.authorize(
+      nonce,
+      createWithdrawSubinstruction(this.scheme, this.identity, to, lamports)
+    );
+  }
+
+  /** Authorize closing this account, sending its remaining lamports to `to`. */
+  close(nonce: Uint8Array, to: Address): Artifact {
+    return this.authorize(
+      nonce,
+      createCloseSubinstruction(this.scheme, this.identity, to)
+    );
+  }
+
+  /**
    * Authorize an ordered, forward-secure chain of ops starting at `nonce`.
    * Op `i` is signed against the nonce op `i-1` produces, so the ops can only
    * execute in order. Broadcast each returned artifact's `transaction()`.
@@ -155,7 +179,8 @@ export class Vector {
   /**
    * Authorize mutually-exclusive alternatives from one `nonce`. All share the
    * same parent state, so executing any one orphans the rest atomically.
-   * Returns an artifact per label.
+   * Returns an artifact per label. Each label is a single op; for multi-step
+   * alternative chains drop to the low-level {@link signBranches}.
    */
   branch(nonce: Uint8Array, named: Record<string, Op>): Record<string, Artifact> {
     const labels = Object.keys(named);
@@ -175,7 +200,8 @@ export class Vector {
   /**
    * Derive an independent sub-account (its own chain) from this account's key.
    * Use for non-exclusive parallel work (e.g. one position per RFQ deal). The
-   * returned `Vector` has the same API and a distinct identity/PDA.
+   * returned `Vector` has the same API and a distinct identity/PDA, and
+   * inherits this account's `feePayer`.
    */
   derive(index: number): Vector {
     const childSeed = deriveLaneSeed(this.key, "ed25519", index);
@@ -184,7 +210,9 @@ export class Vector {
 
   /**
    * Where a pre-signed chain stands given the current on-chain nonce:
-   * `pending` (and which op is next), `completed`, or `orphaned`.
+   * `pending` (and which op is next), `completed`, or `orphaned`. Assumes
+   * facade-shaped artifacts (`[advance, ...passthrough]`), which is everything
+   * the facade emits.
    */
   status(artifacts: Artifact[], currentNonce: Uint8Array): ChainStatus {
     const steps: SignedStep[] = artifacts.map((a, index) => ({

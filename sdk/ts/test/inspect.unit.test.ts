@@ -1,7 +1,8 @@
 import { describe, test, expect } from "vitest";
-import { Address, SystemProgram } from "@solana/web3.js";
+import { Address, SystemProgram, Transaction } from "@solana/web3.js";
 import {
   Vector,
+  SECP256K1,
   serializeArtifact,
   deserializeArtifact,
   decodeOps,
@@ -55,6 +56,32 @@ describe("verifyArtifact", () => {
     const data = art.instructions[1].data;
     data[data.length - 1] ^= 0xff;
     expect(verifyArtifact(art)).toBe(false);
+  });
+});
+
+describe("verifyArtifact with a fee payer", () => {
+  test("verifies an artifact whose digest binds the fee payer", () => {
+    const feePayer = new Address("11111111111111111111111111111119");
+    const vf = Vector.ed25519(KEY, { feePayer });
+    // op references the fee payer → exercises message-flag promotion in the digest
+    const op = SystemProgram.transfer({ fromPubkey: feePayer, toPubkey: B, lamports: 9 });
+    const art = vf.authorize(NONCE, op);
+    expect(art.feePayer?.toBase58()).toBe(feePayer.toBase58());
+    expect(verifyArtifact(art)).toBe(true);
+  });
+});
+
+describe("verifyArtifact unsupported scheme", () => {
+  test("throws for a non-ed25519 artifact", () => {
+    const fake = {
+      programId: SECP256K1.programId,
+      identity: new Uint8Array(33),
+      nonce: new Uint8Array(32),
+      nextNonce: new Uint8Array(32),
+      instructions: [],
+      transaction: () => new Transaction(),
+    } as any;
+    expect(() => verifyArtifact(fake)).toThrow();
   });
 });
 

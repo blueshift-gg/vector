@@ -88,6 +88,24 @@ describe("derive", () => {
   });
 });
 
+describe("withdraw / close", () => {
+  const v = Vector.ed25519(KEY, { feePayer: PAY });
+  const to = new Address("11111111111111111111111111111119");
+
+  test("withdraw builds a passthrough'd withdraw artifact", () => {
+    const art = v.withdraw(NONCE, to, 1000n);
+    expect(art.instructions.length).toBe(2);
+    expect(art.instructions[0].data[0]).toBe(ADVANCE_DISCRIMINATOR);
+    expect(art.instructions[1].data[0]).toBe(PASSTHROUGH_DISCRIMINATOR);
+  });
+
+  test("close builds a passthrough'd close artifact", () => {
+    const art = v.close(NONCE, to);
+    expect(art.instructions.length).toBe(2);
+    expect(art.instructions[1].data[0]).toBe(PASSTHROUGH_DISCRIMINATOR);
+  });
+});
+
 describe("status", () => {
   const v = Vector.ed25519(KEY, { feePayer: PAY });
   const arts = v.chain(NONCE, [ix(1), ix(2)]);
