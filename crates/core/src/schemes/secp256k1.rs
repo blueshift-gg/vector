@@ -5,8 +5,8 @@ use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as Secp256k1Signi
 use solana_address::{address, Address};
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
+use crate::protocol::advance_vector_digest;
 use crate::scheme::Scheme;
 
 pub const SECP256K1_COMPRESSED_PUBKEY_LEN: usize = 33;

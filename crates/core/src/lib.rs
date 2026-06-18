@@ -10,12 +10,12 @@
 //!
 //! # Layout
 //!
-//! - [`scheme`] — the [`Scheme`] descriptor, [`VectorAccount`] header mirror,
-//!   and canonical PDA derivation ([`find_vector_pda`]).
+//! - [`protocol`] — protocol primitives: digest, encoding constants,
+//!   [`VectorAccount`] header mirror, and PDA derivation ([`find_vector_pda`]).
+//! - [`scheme`] — the [`Scheme`] descriptor.
 //! - [`instructions`] — generic builders ([`create_initialize_instruction`],
 //!   [`create_advance_instruction`], [`create_passthrough_instruction`],
 //!   close/withdraw sub-instructions).
-//! - [`digest`] — [`advance_vector_digest`], the value clients sign.
 //! - [`schemes`] — one module per program (`ed25519`, `eip191`, `falcon512`,
 //!   `hawk512`, `secp256k1`): its `Scheme`/program-ID const, identity
 //!   derivation, an `initialize` builder, and a signer where one exists.
@@ -27,14 +27,23 @@
 //! use vector_core::schemes::ed25519;                                 // structured
 //! ```
 
-pub mod digest;
 pub mod instructions;
+pub mod protocol;
 pub mod scheme;
 pub mod schemes;
 
 // Flat re-exports — the ergonomic surface. Names are unique across modules,
 // so a glob per module can't collide.
-pub use digest::*;
 pub use instructions::*;
+pub use protocol::*;
 pub use scheme::*;
-pub use schemes::{ed25519::*, eip191::*, falcon512::*, hawk512::*, secp256k1::*};
+#[cfg(feature = "ed25519")]
+pub use schemes::ed25519::*;
+#[cfg(feature = "eip191")]
+pub use schemes::eip191::*;
+#[cfg(feature = "falcon512")]
+pub use schemes::falcon512::*;
+#[cfg(feature = "hawk512")]
+pub use schemes::hawk512::*;
+#[cfg(feature = "secp256k1")]
+pub use schemes::secp256k1::*;

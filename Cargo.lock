@@ -3348,11 +3348,15 @@ name = "vector-core"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "hawk512",
  "k256",
+ "pqcrypto-falcon",
+ "pqcrypto-traits",
  "sha2 0.10.9",
  "sha3",
  "solana-address 2.6.0",
  "solana-falcon512",
+ "solana-hawk512",
  "solana-instruction",
  "solana-instructions-sysvar",
 ]

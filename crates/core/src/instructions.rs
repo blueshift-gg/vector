@@ -4,10 +4,11 @@
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 
-use crate::scheme::{
-    find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
+use crate::protocol::{
+    find_vector_pda, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
     INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
 };
+use crate::scheme::Scheme;
 
 /// Build an `initialize` instruction. `init_payload`'s shape is
 /// scheme-defined; there is no scheme byte (the program ID identifies it).

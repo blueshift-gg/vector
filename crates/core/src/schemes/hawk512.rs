@@ -8,7 +8,8 @@ use solana_address::{address, Address};
 use solana_instruction::{AccountMeta, Instruction};
 
 use crate::instructions::create_initialize_instruction;
-use crate::scheme::{find_vector_pda, Scheme, INITIALIZE_DISCRIMINATOR};
+use crate::protocol::{find_vector_pda, INITIALIZE_DISCRIMINATOR};
+use crate::scheme::Scheme;
 
 /// Hawk-512 wire pubkey length.
 pub const HAWK512_WIRE_PUBKEY_LEN: usize = 1024;
