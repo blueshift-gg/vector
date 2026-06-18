@@ -30,6 +30,18 @@
       "import": "./sdk/ts/dist/inspect.js",
       "types": "./sdk/ts/dist/inspect.d.ts"
     },
+    "./wallet": {
+      "import": "./sdk/ts/dist/wallet.js",
+      "types": "./sdk/ts/dist/wallet.d.ts"
+    },
+    "./migrate": {
+      "import": "./sdk/ts/dist/migrate.js",
+      "types": "./sdk/ts/dist/migrate.d.ts"
+    },
+    "./scan": {
+      "import": "./sdk/ts/dist/scan.js",
+      "types": "./sdk/ts/dist/scan.d.ts"
+    },
     "./branching": {
       "import": "./sdk/ts/dist/branching.js",
       "types": "./sdk/ts/dist/branching.d.ts"

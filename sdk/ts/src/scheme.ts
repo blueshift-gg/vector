@@ -134,7 +134,7 @@ const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
  * `sha256(seeds || bump || program_id || "ProgramDerivedAddress")` that
  * is *off* the ed25519 curve.
  */
-function findProgramAddressSync(
+export function findProgramAddressSync(
   seeds: Uint8Array[],
   programId: Address
 ): [Address, number] {

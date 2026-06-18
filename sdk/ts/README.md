@@ -144,6 +144,42 @@ console.log(review(a));   // deterministic, human-readable block for sign-off
 Unknown programs are rendered raw (program id + byte/account counts), never
 silently hidden — so a reviewer always sees the full intent.
 
+## Migration & the scanner (fund-in-PDA)
+
+The PDA *is* the wallet: hold SOL and tokens in it and spend with offline
+artifacts. Move existing holdings in with the migration builders, then **audit
+with the scanner** so nothing is left on the old key before the deprecation
+cutoff.
+
+```ts
+import {
+  createMigrateSolInstruction, createPdaAtaInstruction,
+  associatedTokenAddress, createSplTransferIx, createWithdrawSubinstruction,
+  scanMigration,
+} from "vector-sdk";
+
+// spend SOL out of the PDA (through the facade)
+v.authorize(nonce, createWithdrawSubinstruction(v.programId, v.identity, to, 1_000n));
+
+// spend tokens out of the PDA's ATA
+const source = associatedTokenAddress(mint, v.pda);
+v.authorize(nonce, createSplTransferIx(source, destAta, v.pda, 50n));
+
+// audit: did everything leave the old key?
+const report = await scanMigration(connection, {
+  owner: oldKey,        // the keypair you're migrating away from
+  pda: v.pda,           // the Vector account it should now point at
+  mints: [usdcMint],    // declared — mint/freeze authorities aren't queryable by authority
+});
+if (!report.complete) console.table(report.unmigrated);   // your migration to-do list
+```
+
+The scanner **auto-discovers** what Solana can index by authority — native SOL,
+SPL + Token-2022 accounts, and stake accounts. Mint/freeze authorities and
+arbitrary program authorities are **not** indexed by authority, so you declare
+them (`mints`, `accounts`) and the scanner verifies each one points at the PDA.
+`report.complete` is true only when nothing controllable remains on the old key.
+
 ## Air-gapped signing
 
 Signing is **synchronous and offline** — `authorize`/`chain`/`branch` take a

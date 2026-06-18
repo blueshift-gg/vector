@@ -42,6 +42,9 @@ export * from "./digest.js";
 
 export * from "./vector.js";
 export * from "./inspect.js";
+export * from "./wallet.js";
+export * from "./migrate.js";
+export * from "./scan.js";
 
 export * from "./schemes/ed25519.js";
 export * from "./schemes/eip191.js";
