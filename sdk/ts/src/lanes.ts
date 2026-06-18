@@ -5,7 +5,8 @@
  * master seed. Use this ONLY for non-exclusive parallelism (A-and-B); for
  * ordered or mutually-exclusive flows use `branching.ts`.
  */
-import { hkdfSync } from "crypto";
+import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha256";
 import { Address } from "@solana/web3.js";
 
 import { findVectorPda } from "./scheme.js";
@@ -32,7 +33,7 @@ export function deriveLaneSeed(
     throw new Error(`laneIndex must be a non-negative integer, got ${laneIndex}`);
   }
   const info = new TextEncoder().encode(`vector-lane:${schemeName}:${laneIndex}`);
-  return new Uint8Array(hkdfSync("sha256", masterSeed, LANE_KDF_SALT, info, 32));
+  return hkdf(sha256, masterSeed, LANE_KDF_SALT, info, 32);
 }
 
 /** Derive one Ed25519 lane (sub-key → identity → PDA). */

@@ -40,6 +40,9 @@ export * from "./scheme.js";
 export * from "./instructions.js";
 export * from "./digest.js";
 
+export * from "./branching.js";
+export * from "./lanes.js";
+
 export * from "./schemes/ed25519.js";
 export * from "./schemes/eip191.js";
 export * from "./schemes/secp256k1.js";
