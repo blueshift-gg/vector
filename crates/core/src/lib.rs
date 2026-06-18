@@ -29,6 +29,7 @@
 
 pub mod artifact_serde;
 pub mod branching;
+pub mod inspect;
 pub mod instructions;
 pub mod protocol;
 pub mod scheme;
@@ -39,6 +40,7 @@ pub mod vector;
 // so a glob per module can't collide.
 pub use artifact_serde::*;
 pub use branching::*;
+pub use inspect::*;
 pub use instructions::*;
 pub use protocol::*;
 pub use scheme::*;
