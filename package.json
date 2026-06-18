@@ -22,13 +22,13 @@
       "import": "./sdk/ts/dist/digest.js",
       "types": "./sdk/ts/dist/digest.d.ts"
     },
+    "./vector": {
+      "import": "./sdk/ts/dist/vector.js",
+      "types": "./sdk/ts/dist/vector.d.ts"
+    },
     "./branching": {
       "import": "./sdk/ts/dist/branching.js",
       "types": "./sdk/ts/dist/branching.d.ts"
-    },
-    "./lanes": {
-      "import": "./sdk/ts/dist/lanes.js",
-      "types": "./sdk/ts/dist/lanes.d.ts"
     },
     "./ed25519": {
       "import": "./sdk/ts/dist/schemes/ed25519.js",

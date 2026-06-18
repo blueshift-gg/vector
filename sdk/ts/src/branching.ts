@@ -10,6 +10,8 @@
  * be explicit about the exact sequence(s) of events that may occur.
  */
 import { Address, Connection, TransactionInstruction } from "@solana/web3.js";
+import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha256";
 
 import { Scheme, fetchVectorAccount } from "./scheme.js";
 import {
@@ -192,4 +194,26 @@ export async function fetchChainStatus(
   } catch {
     return { state: "orphaned" };
   }
+}
+
+// ── Sub-key derivation (independent parallel chains) ──────────────────
+
+/** Domain-separation salt for sub-account derivation; bumping it re-derives. */
+export const LANE_KDF_SALT = new TextEncoder().encode("vector-lane-kdf-v1");
+
+/**
+ * Deterministic 32-byte child seed for an independent sub-account, derived
+ * from a master seed via HKDF-SHA256 (domain-separated by scheme + index).
+ * The same master always yields the same stable, independent sub-keys.
+ */
+export function deriveLaneSeed(
+  masterSeed: Uint8Array,
+  schemeName: string,
+  index: number
+): Uint8Array {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error(`index must be a non-negative integer, got ${index}`);
+  }
+  const info = new TextEncoder().encode(`vector-lane:${schemeName}:${index}`);
+  return hkdf(sha256, masterSeed, LANE_KDF_SALT, info, 32);
 }
