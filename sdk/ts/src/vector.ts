@@ -88,6 +88,12 @@ export interface Artifact {
   nextNonce: Uint8Array;
   /** Fee payer the digest was bound to, if any (needed to re-verify offline). */
   feePayer?: Address;
+  /**
+   * Verification public key when it differs from {@link identity} — i.e. the
+   * Falcon/Hawk wire pubkey (`identity` is its `sha256`). Needed to verify the
+   * artifact offline; omitted for schemes where `identity` is the key itself.
+   */
+  publicKey?: Uint8Array;
   /** Instructions to broadcast in order: `[advance]` or `[advance, passthrough]`. */
   instructions: TransactionInstruction[];
   /** A fresh `Transaction` of {@link instructions} (relayer adds blockhash + fee-payer sig). */
@@ -106,6 +112,7 @@ export class Vector {
   private readonly feePayer?: Address;
   private readonly initIx: (payer: Address) => TransactionInstruction;
   private readonly deriveChild?: (index: number) => Vector;
+  private readonly publicKey?: Uint8Array;
 
   private constructor(args: {
     scheme: Scheme;
@@ -114,6 +121,7 @@ export class Vector {
     initIx: (payer: Address) => TransactionInstruction;
     feePayer?: Address;
     deriveChild?: (index: number) => Vector;
+    publicKey?: Uint8Array;
   }) {
     this.scheme = args.scheme;
     this.signer = args.signer;
@@ -122,6 +130,7 @@ export class Vector {
     this.initIx = args.initIx;
     this.feePayer = args.feePayer;
     this.deriveChild = args.deriveChild;
+    this.publicKey = args.publicKey;
   }
 
   /** Bind a `Vector` to a 32-byte Ed25519 private-key seed. */
@@ -185,6 +194,7 @@ export class Vector {
       pda,
       initIx: (payer) => createInitializeFalcon512(payer, keypair.publicKey),
       feePayer: opts?.feePayer,
+      publicKey: keypair.publicKey,
     });
   }
 
@@ -311,6 +321,7 @@ export class Vector {
       nonce: step.nonce,
       nextNonce: step.nextNonce,
       feePayer: this.feePayer,
+      publicKey: this.publicKey,
       instructions,
       transaction: () => new Transaction().add(...instructions),
     };

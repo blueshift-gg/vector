@@ -141,8 +141,11 @@ verifyArtifact(a);   // true | false — recompute digest + check signature, off
 console.log(review(a));   // deterministic, human-readable block for sign-off
 ```
 
-Unknown programs are rendered raw (program id + byte/account counts), never
-silently hidden — so a reviewer always sees the full intent.
+`verifyArtifact` covers all four facade schemes (Ed25519, secp256k1, EIP-191,
+Falcon-512 — Falcon artifacts carry their wire pubkey); Hawk-512 is
+on-chain-verify-only. Unknown programs are rendered raw (program id +
+byte/account counts), never silently hidden — so a reviewer always sees the
+full intent.
 
 ## Migration & the scanner (fund-in-PDA)
 

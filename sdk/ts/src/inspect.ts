@@ -6,6 +6,9 @@
  */
 import { Address, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519";
+import { secp256k1 } from "@noble/curves/secp256k1";
+import { keccak_256 } from "@noble/hashes/sha3";
+import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 
 import {
   Scheme,
@@ -83,6 +86,7 @@ export function serializeArtifact(a: Artifact): string {
     nonce: toHex(a.nonce),
     nextNonce: toHex(a.nextNonce),
     feePayer: a.feePayer ? a.feePayer.toBase58() : undefined,
+    publicKey: a.publicKey ? toHex(a.publicKey) : undefined,
     instructions: a.instructions.map(ixToSerialized),
   });
 }
@@ -97,6 +101,7 @@ export function deserializeArtifact(json: string): Artifact {
     nonce: fromHex(o.nonce),
     nextNonce: fromHex(o.nextNonce),
     feePayer: o.feePayer ? new Address(o.feePayer) : undefined,
+    publicKey: o.publicKey ? fromHex(o.publicKey) : undefined,
     instructions,
     transaction: () => new Transaction().add(...instructions),
   };
@@ -182,22 +187,54 @@ export function summarize(a: Artifact): string[] {
 
 // ── Offline verification ─────────────────────────────────────────────
 
+const EIP191_PREFIX = new TextEncoder().encode("\x19Ethereum Signed Message:\n32");
+
+function eip191Hash(digest: Uint8Array): Uint8Array {
+  const buf = new Uint8Array(EIP191_PREFIX.length + digest.length);
+  buf.set(EIP191_PREFIX);
+  buf.set(digest, EIP191_PREFIX.length);
+  return keccak_256(buf);
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+
 /**
  * Recompute the canonical digest from the artifact's instruction layout and
- * verify the signature against its identity — no chain access. Returns
- * `false` for a bad signature. **Throws** for schemes whose offline verify is
- * not implemented yet (only Ed25519 is today) — catch it if you inspect mixed
- * schemes. Assumes facade-shaped artifacts (`[advance, ...passthrough]`).
+ * verify the signature offline — no chain access. Supports the four facade
+ * schemes (Ed25519, secp256k1, EIP-191, Falcon-512). Returns `false` for a
+ * bad signature; **throws** for a scheme it can't verify offline (Hawk-512)
+ * or a Falcon artifact missing its `publicKey`. Assumes facade-shaped
+ * artifacts (`[advance, ...passthrough]`).
  */
 export function verifyArtifact(a: Artifact): boolean {
   const scheme = schemeForProgramId(a.programId);
-  if (scheme.programId.toBase58() !== ED25519.programId.toBase58()) {
+  const pid = scheme.programId.toBase58();
+
+  const supported = [
+    ED25519.programId.toBase58(),
+    SECP256K1.programId.toBase58(),
+    EIP191.programId.toBase58(),
+    FALCON512.programId.toBase58(),
+  ];
+  if (!supported.includes(pid)) {
     throw new Error(
-      `verifyArtifact: offline verification for ${a.programId.toBase58()} is not implemented yet`
+      `verifyArtifact: offline verification for ${pid} is not implemented (e.g. Hawk-512 — use on-chain verification)`
     );
   }
+  if (pid === FALCON512.programId.toBase58() && !a.publicKey) {
+    throw new Error(
+      "verifyArtifact: Falcon artifact is missing publicKey (the wire pubkey)"
+    );
+  }
+
   const advanceData = new Uint8Array(a.instructions[0].data);
   if (advanceData[0] !== ADVANCE_DISCRIMINATOR) return false;
+  const signature = advanceData.slice(1, 1 + scheme.signatureLen);
   const digest = advanceVectorDigest(
     scheme,
     a.nonce,
@@ -206,9 +243,39 @@ export function verifyArtifact(a: Artifact): boolean {
     a.instructions.slice(1),
     a.feePayer
   );
-  const signature = advanceData.slice(1, 1 + scheme.signatureLen);
+
   try {
-    return ed25519.verify(signature, digest, a.identity);
+    if (pid === ED25519.programId.toBase58()) {
+      return ed25519.verify(signature, digest, a.identity);
+    }
+    if (pid === SECP256K1.programId.toBase58()) {
+      return secp256k1.verify(signature, digest, a.identity);
+    }
+    if (pid === EIP191.programId.toBase58()) {
+      const recovered = secp256k1.Signature.fromCompact(signature.slice(0, 64))
+        .addRecoveryBit(signature[64])
+        .recoverPublicKey(eip191Hash(digest))
+        .toRawBytes(false); // 65-byte uncompressed: 0x04 || x || y
+      return bytesEqual(keccak_256(recovered.slice(1)).slice(12, 32), a.identity);
+    }
+    // Falcon-512: identity is sha256(wire), so verify against the wire pubkey.
+    // The on-chain wire zero-pads the compressed signature to a fixed size,
+    // but noble needs its exact detached length. Recover it by scanning from
+    // the last non-zero byte up to the padded size — exactly one length
+    // verifies (shorter truncates, longer carries trailing padding noble
+    // rejects).
+    let end = signature.length;
+    while (end > 0 && signature[end - 1] === 0) end--;
+    for (let len = end; len <= signature.length; len++) {
+      try {
+        if (nobleFalcon.verify(signature.slice(0, len), digest, a.publicKey!)) {
+          return true;
+        }
+      } catch {
+        // wrong length — keep scanning
+      }
+    }
+    return false;
   } catch {
     return false;
   }

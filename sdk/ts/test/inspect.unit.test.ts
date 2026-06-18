@@ -2,7 +2,8 @@ import { describe, test, expect } from "vitest";
 import { Address, SystemProgram, Transaction } from "@solana/web3.js";
 import {
   Vector,
-  SECP256K1,
+  HAWK512,
+  falcon512Keygen,
   serializeArtifact,
   deserializeArtifact,
   decodeOps,
@@ -71,11 +72,38 @@ describe("verifyArtifact with a fee payer", () => {
   });
 });
 
+describe("verifyArtifact across schemes", () => {
+  const secpKey = new Uint8Array(32);
+  secpKey[31] = 7;
+  const op = SystemProgram.transfer({ fromPubkey: A, toPubkey: B, lamports: 5 });
+
+  test("ed25519", () => {
+    expect(verifyArtifact(Vector.ed25519(KEY).authorize(NONCE, op))).toBe(true);
+  });
+  test("secp256k1", () => {
+    expect(verifyArtifact(Vector.secp256k1(secpKey).authorize(NONCE, op))).toBe(true);
+  });
+  test("eip191", () => {
+    expect(verifyArtifact(Vector.eip191(secpKey).authorize(NONCE, op))).toBe(true);
+  });
+  test("falcon512 carries the wire pubkey and verifies", () => {
+    const art = Vector.falcon512(falcon512Keygen()).authorize(NONCE, op);
+    expect(art.publicKey).toBeDefined();
+    expect(verifyArtifact(art)).toBe(true);
+  });
+  test("tamper is rejected (secp256k1)", () => {
+    const art = Vector.secp256k1(secpKey).authorize(NONCE, op);
+    const data = art.instructions[1].data;
+    data[data.length - 1] ^= 0xff;
+    expect(verifyArtifact(art)).toBe(false);
+  });
+});
+
 describe("verifyArtifact unsupported scheme", () => {
-  test("throws for a non-ed25519 artifact", () => {
+  test("throws for a scheme it can't verify offline (Hawk-512)", () => {
     const fake = {
-      programId: SECP256K1.programId,
-      identity: new Uint8Array(33),
+      programId: HAWK512.programId,
+      identity: new Uint8Array(32),
       nonce: new Uint8Array(32),
       nextNonce: new Uint8Array(32),
       instructions: [],
