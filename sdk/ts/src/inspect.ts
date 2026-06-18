@@ -1,30 +1,23 @@
 /**
  * Inspect, serialize, and offline-verify Vector {@link Artifact}s — so policy
- * engines and air-gapped reviewers see *intent* instead of signing an opaque
- * blob, and so a counterparty can transport an artifact and check it without a
- * chain connection.
+ * engines and air-gapped reviewers see *intent* instead of an opaque blob, and
+ * a counterparty can transport an artifact and check it without a chain.
+ *
+ * This module is **crypto-free**. Offline verification is dispatched through a
+ * registry that each scheme subpath module populates on import — so
+ * `verifyArtifact` only pulls the crypto for the schemes you actually import
+ * (e.g. importing `vector-sdk/ed25519` registers Ed25519 verification).
  */
 import { Address, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { ed25519 } from "@noble/curves/ed25519";
-import { secp256k1 } from "@noble/curves/secp256k1";
-import { keccak_256 } from "@noble/hashes/sha3";
-import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
-import { hawk512 as nobleHawk } from "@blueshift-gg/hawk512";
-
 import {
   Scheme,
   readU16LE,
   ADVANCE_DISCRIMINATOR,
-  PASSTHROUGH_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
   WITHDRAW_DISCRIMINATOR,
+  PASSTHROUGH_DISCRIMINATOR,
 } from "./scheme.js";
 import { advanceVectorDigest } from "./digest.js";
-import { ED25519 } from "./schemes/ed25519.js";
-import { SECP256K1 } from "./schemes/secp256k1.js";
-import { EIP191 } from "./schemes/eip191.js";
-import { FALCON512 } from "./schemes/falcon512.js";
-import { HAWK512 } from "./schemes/hawk512.js";
 import { Artifact } from "./vector.js";
 
 const toHex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
@@ -32,15 +25,6 @@ const fromHex = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, "hex"))
 
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-
-/** Resolve a {@link Scheme} from its on-chain program id. */
-export function schemeForProgramId(programId: Address | string): Scheme {
-  const id = typeof programId === "string" ? programId : programId.toBase58();
-  for (const s of [ED25519, SECP256K1, EIP191, FALCON512, HAWK512]) {
-    if (s.programId.toBase58() === id) return s;
-  }
-  throw new Error(`unknown scheme program id: ${id}`);
-}
 
 // ── Serialization ────────────────────────────────────────────────────
 
@@ -188,100 +172,6 @@ export function summarize(a: Artifact): string[] {
   });
 }
 
-// ── Offline verification ─────────────────────────────────────────────
-
-const EIP191_PREFIX = new TextEncoder().encode("\x19Ethereum Signed Message:\n32");
-
-function eip191Hash(digest: Uint8Array): Uint8Array {
-  const buf = new Uint8Array(EIP191_PREFIX.length + digest.length);
-  buf.set(EIP191_PREFIX);
-  buf.set(digest, EIP191_PREFIX.length);
-  return keccak_256(buf);
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
-  return d === 0;
-}
-
-/**
- * Recompute the canonical digest from the artifact's instruction layout and
- * verify the signature offline — no chain access. Supports the four facade
- * schemes (Ed25519, secp256k1, EIP-191, Falcon-512). Returns `false` for a
- * bad signature; **throws** for a scheme it can't verify offline (Hawk-512)
- * or a Falcon artifact missing its `publicKey`. Assumes facade-shaped
- * artifacts (`[advance, ...passthrough]`).
- */
-export function verifyArtifact(a: Artifact): boolean {
-  const scheme = schemeForProgramId(a.programId);
-  const pid = scheme.programId.toBase58();
-
-  const needsPubkey =
-    pid === FALCON512.programId.toBase58() || pid === HAWK512.programId.toBase58();
-  if (needsPubkey && !a.publicKey) {
-    throw new Error(
-      "verifyArtifact: post-quantum artifact is missing publicKey (the wire pubkey)"
-    );
-  }
-
-  const idx = a.advanceIndex ?? 0;
-  const advanceData = new Uint8Array(a.instructions[idx].data);
-  if (advanceData[0] !== ADVANCE_DISCRIMINATOR) return false;
-  const signature = advanceData.slice(1, 1 + scheme.signatureLen);
-  const digest = advanceVectorDigest(
-    scheme,
-    a.nonce,
-    a.identity,
-    a.instructions.slice(0, idx),
-    a.instructions.slice(idx + 1),
-    a.feePayer
-  );
-
-  try {
-    if (pid === ED25519.programId.toBase58()) {
-      return ed25519.verify(signature, digest, a.identity);
-    }
-    if (pid === SECP256K1.programId.toBase58()) {
-      return secp256k1.verify(signature, digest, a.identity);
-    }
-    if (pid === HAWK512.programId.toBase58()) {
-      // Hawk signature is fixed-size — no length recovery needed (unlike Falcon).
-      return nobleHawk.verify(signature, digest, a.publicKey!);
-    }
-    if (pid === EIP191.programId.toBase58()) {
-      const recovered = secp256k1.Signature.fromCompact(signature.slice(0, 64))
-        .addRecoveryBit(signature[64])
-        .recoverPublicKey(eip191Hash(digest))
-        .toRawBytes(false); // 65-byte uncompressed: 0x04 || x || y
-      return bytesEqual(keccak_256(recovered.slice(1)).slice(12, 32), a.identity);
-    }
-    // Falcon-512: identity is sha256(wire), so verify against the wire pubkey.
-    // The on-chain wire zero-pads the compressed signature to a fixed size,
-    // but noble needs its exact detached length. Recover it by scanning from
-    // the last non-zero byte up to the padded size — exactly one length
-    // verifies (shorter truncates, longer carries trailing padding noble
-    // rejects).
-    let end = signature.length;
-    while (end > 0 && signature[end - 1] === 0) end--;
-    for (let len = end; len <= signature.length; len++) {
-      try {
-        if (nobleFalcon.verify(signature.slice(0, len), digest, a.publicKey!)) {
-          return true;
-        }
-      } catch {
-        // wrong length — keep scanning
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-// ── Review rendering ─────────────────────────────────────────────────
-
 /** A deterministic, human-readable review block for a policy engine / display. */
 export function review(a: Artifact): string {
   const lines = ["VECTOR ARTIFACT"];
@@ -292,4 +182,63 @@ export function review(a: Artifact): string {
   lines.push("intent:");
   for (const line of summarize(a)) lines.push(`  - ${line}`);
   return lines.join("\n");
+}
+
+// ── Offline verification (registry) ──────────────────────────────────
+
+/** Recompute-and-check verifier for one scheme's artifacts. */
+export type ArtifactVerifier = (artifact: Artifact) => boolean;
+
+const verifiers = new Map<string, ArtifactVerifier>();
+
+/**
+ * Register a scheme's offline verifier. Called at module load by each scheme
+ * subpath (e.g. importing `vector-sdk/ed25519` registers Ed25519), so
+ * {@link verifyArtifact} only pulls the crypto for imported schemes.
+ */
+export function registerArtifactVerifier(
+  programId: Address,
+  verify: ArtifactVerifier
+): void {
+  verifiers.set(programId.toBase58(), verify);
+}
+
+/**
+ * Verify an artifact's signature offline. Throws if no verifier is registered
+ * for its scheme — import the scheme module (e.g. `vector-sdk/ed25519`) to
+ * register it.
+ */
+export function verifyArtifact(a: Artifact): boolean {
+  const verify = verifiers.get(a.programId.toBase58());
+  if (!verify) {
+    throw new Error(
+      `verifyArtifact: no verifier registered for ${a.programId.toBase58()} — import its scheme module (e.g. "vector-sdk/ed25519")`
+    );
+  }
+  return verify(a);
+}
+
+/**
+ * Shared helper for scheme verifiers: pull the advance signature and recompute
+ * the canonical digest from a facade-shaped artifact (`[...pre, advance,
+ * ...post]`). Returns `null` if the advance isn't an advance instruction.
+ * Uses only native SHA-256 (via {@link advanceVectorDigest}) — no scheme
+ * crypto — so this module stays free of the per-scheme libraries.
+ */
+export function artifactParts(
+  a: Artifact,
+  scheme: Scheme
+): { signature: Uint8Array; digest: Uint8Array } | null {
+  const advanceData = new Uint8Array(a.instructions[a.advanceIndex].data);
+  if (advanceData[0] !== ADVANCE_DISCRIMINATOR) return null;
+  const signature = advanceData.slice(1, 1 + scheme.signatureLen);
+  const digest = advanceVectorDigest(
+    scheme,
+    a.nonce,
+    a.identity,
+    a.instructions.slice(0, a.advanceIndex),
+    a.instructions.slice(a.advanceIndex + 1),
+    a.feePayer
+  );
+  return { signature, digest };
 }

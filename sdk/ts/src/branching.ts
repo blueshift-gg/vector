@@ -10,37 +10,9 @@
  * be explicit about the exact sequence(s) of events that may occur.
  */
 import { Address, Connection, TransactionInstruction } from "@solana/web3.js";
-import { hkdf } from "@noble/hashes/hkdf";
-import { sha256 } from "@noble/hashes/sha256";
+import { createHmac } from "crypto";
 
 import { Scheme, fetchVectorAccount } from "./scheme.js";
-import {
-  ED25519,
-  ed25519Identity,
-  signAdvanceInstructionEd25519,
-} from "./schemes/ed25519.js";
-import {
-  SECP256K1,
-  secp256k1Identity,
-  signAdvanceInstructionSecp256k1,
-} from "./schemes/secp256k1.js";
-import {
-  EIP191,
-  eip191Identity,
-  signAdvanceInstructionEip191,
-} from "./schemes/eip191.js";
-import {
-  FALCON512,
-  falcon512Identity,
-  signAdvanceInstructionFalcon512,
-  Falcon512Keypair,
-} from "./schemes/falcon512.js";
-import {
-  HAWK512,
-  hawk512Identity,
-  signAdvanceInstructionHawk512,
-  Hawk512Keypair,
-} from "./schemes/hawk512.js";
 import { advanceVectorDigest } from "./digest.js";
 
 /** Per-scheme signer for a single chain (one key / identity). */
@@ -54,56 +26,6 @@ export interface ChainSigner {
     post: TransactionInstruction[],
     feePayer?: Address
   ): TransactionInstruction;
-}
-
-/** Ed25519 chain signer bound to a 32-byte private-key seed. */
-export function ed25519ChainSigner(signingKey: Uint8Array): ChainSigner {
-  return {
-    scheme: ED25519,
-    identity: ed25519Identity(signingKey),
-    sign: (nonce, pre, post, feePayer) =>
-      signAdvanceInstructionEd25519(signingKey, nonce, pre, post, feePayer),
-  };
-}
-
-/** Plain secp256k1 ECDSA chain signer (32-byte private key). */
-export function secp256k1ChainSigner(privateKey: Uint8Array): ChainSigner {
-  return {
-    scheme: SECP256K1,
-    identity: secp256k1Identity(privateKey),
-    sign: (nonce, pre, post, feePayer) =>
-      signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer),
-  };
-}
-
-/** EIP-191 (Ethereum) chain signer (32-byte secp256k1 private key). */
-export function eip191ChainSigner(privateKey: Uint8Array): ChainSigner {
-  return {
-    scheme: EIP191,
-    identity: eip191Identity(privateKey),
-    sign: (nonce, pre, post, feePayer) =>
-      signAdvanceInstructionEip191(privateKey, nonce, pre, post, feePayer),
-  };
-}
-
-/** Falcon-512 (post-quantum) chain signer (1281-byte secret + 897-byte wire pubkey). */
-export function falcon512ChainSigner(keypair: Falcon512Keypair): ChainSigner {
-  return {
-    scheme: FALCON512,
-    identity: falcon512Identity(keypair.publicKey),
-    sign: (nonce, pre, post, feePayer) =>
-      signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer),
-  };
-}
-
-/** Hawk-512 (post-quantum) chain signer (184-byte secret + 1024-byte wire pubkey). */
-export function hawk512ChainSigner(keypair: Hawk512Keypair): ChainSigner {
-  return {
-    scheme: HAWK512,
-    identity: hawk512Identity(keypair.publicKey),
-    sign: (nonce, pre, post, feePayer) =>
-      signAdvanceInstructionHawk512(keypair, nonce, pre, post, feePayer),
-  };
 }
 
 /** One step in a chain: instructions placed around the advance. */
@@ -263,6 +185,31 @@ export async function fetchChainStatus(
 /** Domain-separation salt for sub-account derivation; bumping it re-derives. */
 export const LANE_KDF_SALT = new TextEncoder().encode("vector-lane-kdf-v1");
 
+/** Native HKDF-SHA256 (RFC 5869) — same output as `@noble/hashes`, no dep. */
+function hkdfSha256(
+  ikm: Uint8Array,
+  salt: Uint8Array,
+  info: Uint8Array,
+  length: number
+): Uint8Array {
+  const prk = createHmac("sha256", Buffer.from(salt))
+    .update(Buffer.from(ikm))
+    .digest();
+  const out = Buffer.alloc(length);
+  let t = Buffer.alloc(0);
+  let pos = 0;
+  for (let counter = 1; pos < length; counter++) {
+    t = createHmac("sha256", prk)
+      .update(t)
+      .update(Buffer.from(info))
+      .update(Buffer.from([counter]))
+      .digest();
+    t.copy(out, pos);
+    pos += t.length;
+  }
+  return new Uint8Array(out.subarray(0, length));
+}
+
 /**
  * Deterministic 32-byte child seed for an independent sub-account, derived
  * from a master seed via HKDF-SHA256 (domain-separated by scheme + index).
@@ -277,5 +224,5 @@ export function deriveLaneSeed(
     throw new Error(`index must be a non-negative integer, got ${index}`);
   }
   const info = new TextEncoder().encode(`vector-lane:${schemeName}:${index}`);
-  return hkdf(sha256, masterSeed, LANE_KDF_SALT, info, 32);
+  return hkdfSha256(masterSeed, LANE_KDF_SALT, info, 32);
 }

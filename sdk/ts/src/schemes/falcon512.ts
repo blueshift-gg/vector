@@ -17,6 +17,7 @@ import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 
 import {
   Scheme,
+  findVectorPda,
   sha256,
   FALCON_PUBKEY_LEN,
   FALCON_SIGNATURE_LEN,
@@ -27,6 +28,9 @@ import {
   createAdvanceInstruction,
 } from "../instructions.js";
 import { advanceVectorDigest } from "../digest.js";
+import { Vector, Artifact } from "../vector.js";
+import { ChainSigner } from "../branching.js";
+import { registerArtifactVerifier, artifactParts } from "../inspect.js";
 
 export {
   FALCON_PUBKEY_LEN,
@@ -123,3 +127,57 @@ export function signAdvanceInstructionFalcon512(
 
   return createAdvanceInstruction(FALCON512, identity, signature);
 }
+
+/** Falcon-512 (post-quantum) chain signer (1281-byte secret + 897-byte wire pubkey). */
+export function falcon512ChainSigner(keypair: Falcon512Keypair): ChainSigner {
+  return {
+    scheme: FALCON512,
+    identity: falcon512Identity(keypair.publicKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer),
+  };
+}
+
+/**
+ * Construct a Falcon-512 {@link Vector} from a keypair. `derive` is unavailable
+ * (Falcon has no 32-byte seed) — build each sub-account from its own keypair.
+ */
+export function vectorFalcon512(
+  keypair: Falcon512Keypair,
+  opts?: { feePayer?: Address }
+): Vector {
+  const signer = falcon512ChainSigner(keypair);
+  const [pda] = findVectorPda(FALCON512, signer.identity);
+  return Vector.fromParts({
+    scheme: FALCON512,
+    signer,
+    pda,
+    initIx: (payer) => createInitializeFalcon512(payer, keypair.publicKey),
+    feePayer: opts?.feePayer,
+    publicKey: keypair.publicKey,
+  });
+}
+
+registerArtifactVerifier(FALCON512.programId, (a: Artifact) => {
+  if (!a.publicKey) {
+    throw new Error(
+      "verifyArtifact: Falcon artifact is missing publicKey (the wire pubkey)"
+    );
+  }
+  const parts = artifactParts(a, FALCON512);
+  if (!parts) return false;
+  // The on-chain wire zero-pads the compressed signature; noble needs the exact
+  // detached length. Recover it by scanning from the last non-zero byte up.
+  let end = parts.signature.length;
+  while (end > 0 && parts.signature[end - 1] === 0) end--;
+  for (let len = end; len <= parts.signature.length; len++) {
+    try {
+      if (nobleFalcon.verify(parts.signature.slice(0, len), parts.digest, a.publicKey)) {
+        return true;
+      }
+    } catch {
+      // wrong length — keep scanning
+    }
+  }
+  return false;
+});

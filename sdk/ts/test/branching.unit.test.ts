@@ -2,7 +2,6 @@ import { describe, test, expect } from "vitest";
 import { Address, SystemProgram } from "@solana/web3.js";
 import type { Connection } from "@solana/web3.js";
 import {
-  ed25519ChainSigner,
   signChain,
   signBranches,
   resolveChainStatus,
@@ -10,12 +9,11 @@ import {
   fetchChainStatus,
 } from "../src/branching.js";
 import {
-  ED25519,
-  ed25519Identity,
   ADVANCE_DISCRIMINATOR,
   advanceVectorDigest,
   serializeVectorAccountHeader,
 } from "../src/index.js";
+import { ED25519, ed25519Identity, ed25519ChainSigner } from "../src/schemes/ed25519.js";
 
 const KEY = new Uint8Array(32);
 KEY[31] = 0x07;

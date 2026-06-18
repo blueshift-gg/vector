@@ -1,6 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { Address, Connection, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
-import { Vector, hawk512Keygen } from "../src/index.js";
+import { vectorEd25519 } from "../src/schemes/ed25519.js";
+import { vectorSecp256k1 } from "../src/schemes/secp256k1.js";
+import { vectorEip191 } from "../src/schemes/eip191.js";
+import { vectorHawk512, hawk512Keygen } from "../src/schemes/hawk512.js";
 import { RPC_URL, WS_URL, FEE_PAYER_SEED, sendTx } from "./helpers.js";
 
 // Distinct keys so this suite never collides with the per-scheme tests.
@@ -25,7 +28,7 @@ describe("Vector (front door, on-chain)", () => {
   });
 
   test("chain enforces order (forward-secrecy)", async () => {
-    const v = Vector.ed25519(CHAIN_KEY, { feePayer: feePayer.address });
+    const v = vectorEd25519(CHAIN_KEY, { feePayer: feePayer.address });
     await sendTx(
       connection,
       new Transaction().add(v.initialize(feePayer.address)),
@@ -44,7 +47,7 @@ describe("Vector (front door, on-chain)", () => {
   });
 
   test("branch is mutually exclusive (sign two, execute one)", async () => {
-    const v = Vector.ed25519(BRANCH_KEY, { feePayer: feePayer.address });
+    const v = vectorEd25519(BRANCH_KEY, { feePayer: feePayer.address });
     await sendTx(
       connection,
       new Transaction().add(v.initialize(feePayer.address)),
@@ -65,7 +68,7 @@ describe("Vector (front door, on-chain)", () => {
   });
 
   test("derived sub-accounts advance independently", async () => {
-    const root = Vector.ed25519(ROOT_KEY, { feePayer: feePayer.address });
+    const root = vectorEd25519(ROOT_KEY, { feePayer: feePayer.address });
     const a = root.derive(0);
     const b = root.derive(1);
 
@@ -92,8 +95,8 @@ describe("Vector (front door, on-chain)", () => {
 
   // Non-ed25519 schemes verify on-chain through the same facade.
   const SCHEMES = [
-    { name: "secp256k1", last: 0x61, make: (k: Uint8Array, o: { feePayer: Address }) => Vector.secp256k1(k, o) },
-    { name: "eip191", last: 0x62, make: (k: Uint8Array, o: { feePayer: Address }) => Vector.eip191(k, o) },
+    { name: "secp256k1", last: 0x61, make: (k: Uint8Array, o: { feePayer: Address }) => vectorSecp256k1(k, o) },
+    { name: "eip191", last: 0x62, make: (k: Uint8Array, o: { feePayer: Address }) => vectorEip191(k, o) },
   ];
   for (const s of SCHEMES) {
     test(`${s.name}: facade init + authorize advances on-chain`, async () => {
@@ -109,7 +112,7 @@ describe("Vector (front door, on-chain)", () => {
   }
 
   test("hawk512: 3-tx registration + advance on-chain", async () => {
-    const v = Vector.hawk512(hawk512Keygen(), { feePayer: feePayer.address });
+    const v = vectorHawk512(hawk512Keygen(), { feePayer: feePayer.address });
     // register() returns one group per transaction (initialize / storeWire / finalize)
     for (const group of v.register(feePayer.address)) {
       await sendTx(connection, new Transaction().add(...group), [feePayer]);

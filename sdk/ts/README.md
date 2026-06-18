@@ -10,92 +10,72 @@ be reordered, skipped, or partially replayed.
 bun add vector-sdk        # or npm / pnpm
 ```
 
-## The front door: `Vector`
+## Import model
 
-A `Vector` is bound once to a signing key. It computes its identity and PDA up
-front, and lets you authorize work in terms of plain Solana **instructions** —
-the CPIs you want executed under the account's PDA. The SDK wires the `advance`
-+ `passthrough` and the transaction layout for you.
+The default entrypoint is light — it pulls **no per-scheme crypto**. You
+construct a `Vector` from its scheme's subpath, so you only install and bundle
+the crypto you actually use. Importing a scheme subpath also registers its
+offline verifier with `verifyArtifact`.
+
+| Subpath | Pulls | Constructor |
+| :-- | :-- | :-- |
+| `vector-sdk/ed25519` | `@noble/curves/ed25519` | `vectorEd25519(seed)` |
+| `vector-sdk/secp256k1` | `@noble/curves/secp256k1` | `vectorSecp256k1(privKey)` |
+| `vector-sdk/eip191` | `@noble/curves/secp256k1` + keccak | `vectorEip191(privKey)` |
+| `vector-sdk/falcon512` | `@noble/post-quantum` | `vectorFalcon512(keypair)` |
+| `vector-sdk/hawk512` | `@blueshift-gg/hawk512` | `vectorHawk512(keypair)` |
+
+`identity` is the pubkey/address for ed25519/secp256k1/eip191, and
+`sha256(wire pubkey)` for the post-quantum schemes. `eip191` lets you sign with
+any Ethereum `personal_sign` wallet. Core (`import … from "vector-sdk"`) gives
+you the `Vector` type, inspection, migration, and the scanner; the low-level
+chain engine is at `vector-sdk/branching`.
+
+## Quickstart
 
 ```ts
-import { Vector } from "vector-sdk";
-import { Connection, Keypair, sendAndConfirmTransaction } from "@solana/web3.js";
+import { vectorEd25519 } from "vector-sdk/ed25519";
+import { Connection, sendAndConfirmTransaction } from "@solana/web3.js";
 
 const connection = new Connection("https://api.devnet.solana.com");
-const v = Vector.ed25519(signingKey, { feePayer: relayer.address });
+const v = vectorEd25519(signingKey, { feePayer: relayer.address });
 
 v.identity;  // 32-byte pubkey
 v.pda;       // the account's on-chain address
-```
 
-### One-time setup
-
-```ts
+// one-time setup
 await sendAndConfirmTransaction(
   connection,
   new Transaction().add(v.initialize(payer.address)),
   [payer]
 );
-```
 
-### Authorize one action
-
-An **op** is the CPI(s) to run under the PDA — a single instruction or a list:
-
-```ts
-const nonce = await v.nonce(connection);          // read current state
-const art = v.authorize(nonce, withdrawIx);       // op: Instruction | Instruction[]
-
-// `art` is broadcast-ready; the relayer adds blockhash + signs as fee payer:
+// authorize one action — op = Instruction | Instruction[] (the CPIs to run under the PDA)
+const nonce = await v.nonce(connection);          // the only async call
+const art = v.authorize(nonce, withdrawIx);
 await sendAndConfirmTransaction(connection, art.transaction(), [relayer]);
 ```
 
-An `Artifact` is what every builder returns:
-
-```ts
-art.nonce          // the nonce it's bound to (valid only while the PDA sits here)
-art.nextNonce      // the nonce after it executes
-art.instructions   // [advance] or [advance, passthrough]
-art.transaction()  // a fresh Transaction of those instructions
-```
+An `Artifact` is what every builder returns: `art.nonce` / `art.nextNonce`,
+`art.instructions` (`[...pre, advance, ...passthrough]`), `art.transaction()`,
+and `art.advanceIndex` (where the advance sits — 0 except when the scheme
+prepends, e.g. Hawk's compute-budget bump).
 
 ## Three strategies
 
-### Sequence — `chain` (ordered, forward-secure)
-
-Each op can only execute after the previous one. Reordering or skipping fails
-verification, so a pre-signed batch executes in exactly the order you signed.
-
 ```ts
-const steps = v.chain(nonce, [opA, opB, opC]);   // Artifact[]
-// broadcast steps[0], then steps[1], then steps[2]
+// SEQUENCE — ordered, forward-secure (each op only executes after the prior)
+const steps = v.chain(nonce, [opA, opB, opC]);
+
+// ALTERNATIVES — sign N, execute one; the rest orphan atomically
+const { settle, cancel } = v.branch(nonce, { settle: paymentIx, cancel: [] }); // [] = inert
+
+// PARALLEL — independent sub-accounts (one per RFQ deal), same API, own chain
+const pos0 = v.derive(0);
 ```
 
-### Alternatives — `branch` (sign N, execute one)
-
-All branches share one parent state, so whichever lands first orphans the rest
-**atomically** — ideal for "settle or cancel" and clean abandonment.
-
-```ts
-const { settle, cancel } = v.branch(nonce, {
-  settle: paymentIx,
-  cancel: [],          // empty op = inert advance (no side effects)
-});
-await sendAndConfirmTransaction(connection, settle.transaction(), [relayer]);
-// `cancel` is now permanently dead.
-```
-
-### Parallel — `derive` (independent sub-accounts)
-
-For non-exclusive parallel work (e.g. many simultaneous RFQ positions), derive
-sub-accounts. Each is another `Vector` with the same API, its own chain, and a
-distinct, deterministic identity/PDA.
-
-```ts
-const position0 = v.derive(0);
-const position1 = v.derive(1);
-await position1.authorize(nonce1, []);   // revoke just position 1
-```
+`derive` works for the 32-byte-key schemes (ed25519 / secp256k1 / eip191);
+post-quantum sub-accounts are built from their own keypairs.
 
 ## Revocation
 
@@ -111,27 +91,16 @@ await sendAndConfirmTransaction(
 );
 ```
 
-## Checking validity
-
-```ts
-const status = v.status(steps, await v.nonce(connection));
-// { state: "pending", nextStepIndex } | { state: "completed" } | { state: "orphaned" }
-```
-
-An artifact is broadcastable iff its chain is still at the nonce it was signed
-against.
-
 ## Inspecting & verifying artifacts
 
 Artifacts are transportable and self-describing — a counterparty or policy
 engine can decode the intent and verify the signature **without a chain
-connection**.
+connection**. `verifyArtifact` works for any scheme whose subpath you've
+imported (importing `vector-sdk/ed25519` registers Ed25519, etc.).
 
 ```ts
-import {
-  serializeArtifact, deserializeArtifact,
-  summarize, verifyArtifact, review,
-} from "vector-sdk";
+import { serializeArtifact, deserializeArtifact, summarize, verifyArtifact, review } from "vector-sdk";
+import "vector-sdk/ed25519"; // registers the Ed25519 verifier
 
 const wire = serializeArtifact(art);     // deterministic JSON for transport
 const a = deserializeArtifact(wire);
@@ -141,10 +110,8 @@ verifyArtifact(a);   // true | false — recompute digest + check signature, off
 console.log(review(a));   // deterministic, human-readable block for sign-off
 ```
 
-`verifyArtifact` covers all five facade schemes (Ed25519, secp256k1, EIP-191,
-Falcon-512, Hawk-512 — the post-quantum artifacts carry their wire pubkey).
-Unknown programs are rendered raw (program id + byte/account counts), never
-silently hidden — so a reviewer always sees the full intent.
+Verification covers all five schemes (the post-quantum artifacts carry their
+wire pubkey). Unknown programs are rendered raw — never silently hidden.
 
 ## Migration & the scanner (fund-in-PDA)
 
@@ -156,74 +123,52 @@ cutoff.
 ```ts
 import {
   createMigrateSolInstruction, createPdaAtaInstruction,
-  associatedTokenAddress, createSplTransferIx,
-  scanMigration,
+  associatedTokenAddress, createSplTransferIx, scanMigration,
 } from "vector-sdk";
 
-// spend SOL out of the PDA — facade convenience for the program's own withdraw
-v.withdraw(nonce, to, 1_000n);
-
-// spend tokens out of the PDA's ATA
+v.withdraw(nonce, to, 1_000n);                              // spend SOL out of the PDA
 const source = associatedTokenAddress(mint, v.pda);
-v.authorize(nonce, createSplTransferIx(source, destAta, v.pda, 50n));
+v.authorize(nonce, createSplTransferIx(source, destAta, v.pda, 50n)); // spend tokens
 
-// audit: did everything leave the old key?
 const report = await scanMigration(connection, {
   owner: oldKey,        // the keypair you're migrating away from
-  pda: v.pda,           // the Vector account it should now point at
+  pda: v.pda,
   mints: [usdcMint],    // declared — mint/freeze authorities aren't queryable by authority
 });
-if (!report.complete) console.table(report.unmigrated);   // your migration to-do list
+if (!report.complete) console.table(report.unmigrated);    // your migration to-do list
 ```
 
-The scanner **auto-discovers** what Solana can index by authority — native SOL,
-SPL + Token-2022 accounts, and stake accounts. Mint/freeze authorities and
-arbitrary program authorities are **not** indexed by authority, so you declare
-them (`mints`, `accounts`) and the scanner verifies each one points at the PDA.
+The scanner auto-discovers native SOL, SPL + Token-2022 accounts, and stake
+accounts; declared mints/accounts are verified to point at the PDA.
 `report.complete` is true only when nothing controllable remains on the old key.
+
+## Registration
+
+`register(payer)` returns the account-creation transactions in order — one
+instruction-group per transaction — and is the uniform path across schemes.
+Single-transaction schemes return one group (and offer `initialize(payer)` as a
+shorthand); **Hawk-512** returns three (`initialize` → `storeWire` →
+`finalize`, its prepared pubkey is ~18 KB), and its advance carries a
+compute-budget bump committed to by the digest — both handled by the facade.
 
 ## Air-gapped signing
 
-Signing is **synchronous and offline** — `authorize`/`chain`/`branch` take a
-nonce and never touch the network. Only `nonce()` reads on-chain. For a cold
+Signing is **synchronous and offline** — `authorize` / `chain` / `branch` take
+a nonce and never touch the network; only `nonce()` reads on-chain. For a cold
 ceremony: read the nonce online, carry it to the air-gapped signer, sign there,
 carry the artifact back out for the relayer to broadcast.
 
 ```ts
-// online watcher
-const nonce = await v.nonce(connection);
-// air-gapped signer (no connection)
-const art = Vector.ed25519(coldKey, { feePayer }).authorize(nonce, withdrawIx);
+const nonce = await watcher.nonce(connection);             // online
+const art = vectorEd25519(coldKey, { feePayer }).authorize(nonce, withdrawIx); // air-gapped
 ```
 
 ## Low-level engine
 
 `Vector` is a facade over composable primitives in `vector-sdk/branching`
 (`signChain`, `signBranches`, `resolveChainStatus`, `ChainSigner`,
-`deriveLaneSeed`) and the instruction builders in `vector-sdk` (`createAdvanceInstruction`,
-`createPassthroughInstruction`, `advanceVectorDigest`, …). Reach for these only
-when you need control the facade doesn't expose (custom pre/post instructions,
-non-Ed25519 schemes, bespoke digest handling).
-
-## Schemes
-
-The facade covers five schemes — same API, different `Vector.*` constructor:
-
-| Constructor | Key material | Identity |
-| :-- | :-- | :-- |
-| `Vector.ed25519(seed)` | 32-byte Ed25519 seed | 32-byte public key |
-| `Vector.secp256k1(privKey)` | 32-byte secp256k1 key | 33-byte compressed pubkey |
-| `Vector.eip191(privKey)` | 32-byte secp256k1 key | 20-byte Ethereum address — sign with any `personal_sign` wallet |
-| `Vector.falcon512(keypair)` | Falcon-512 keypair | `sha256(wire pubkey)` (post-quantum) |
-| `Vector.hawk512(keypair)` | Hawk-512 keypair | `sha256(wire pubkey)` (post-quantum) |
-
-`derive(i)` works for the 32-byte-key schemes (ed25519 / secp256k1 / eip191);
-post-quantum sub-accounts are built from their own keypairs.
-
-**Registration.** `register(payer)` returns the account-creation transactions
-in order — one instruction-group per transaction — and is the uniform path
-across schemes. Single-transaction schemes return one group (and offer
-`initialize(payer)` as a shorthand); **Hawk-512** returns three (`initialize` →
-`storeWire` → `finalize`, its prepared pubkey is ~18 KB), and its advance
-carries a compute-budget bump committed to by the digest — both handled by the
-facade.
+`deriveLaneSeed`) and the instruction builders in `vector-sdk`
+(`createAdvanceInstruction`, `createPassthroughInstruction`,
+`advanceVectorDigest`, …). Reach for these only when you need control the
+facade doesn't expose (custom pre/post instructions, bespoke digest handling).
+```

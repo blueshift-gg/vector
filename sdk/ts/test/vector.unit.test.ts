@@ -1,24 +1,26 @@
 import { describe, test, expect } from "vitest";
 import { Address, SystemProgram, Transaction } from "@solana/web3.js";
 import {
-  Vector,
-  ED25519,
-  SECP256K1,
-  EIP191,
-  FALCON512,
-  HAWK512,
-  ed25519Identity,
-  secp256k1Identity,
-  eip191Identity,
-  falcon512Identity,
-  falcon512Keygen,
-  hawk512Identity,
-  hawk512Keygen,
   findVectorPda,
   ADVANCE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
   INITIALIZE_DISCRIMINATOR,
 } from "../src/index.js";
+import { ED25519, ed25519Identity, vectorEd25519 } from "../src/schemes/ed25519.js";
+import { SECP256K1, secp256k1Identity, vectorSecp256k1 } from "../src/schemes/secp256k1.js";
+import { EIP191, eip191Identity, vectorEip191 } from "../src/schemes/eip191.js";
+import {
+  FALCON512,
+  falcon512Identity,
+  falcon512Keygen,
+  vectorFalcon512,
+} from "../src/schemes/falcon512.js";
+import {
+  HAWK512,
+  hawk512Identity,
+  hawk512Keygen,
+  vectorHawk512,
+} from "../src/schemes/hawk512.js";
 
 const KEY = new Uint8Array(32);
 KEY[31] = 0x11;
@@ -29,14 +31,14 @@ const ix = (lamports: number) =>
 
 describe("Vector construction", () => {
   test("binds identity + pda", () => {
-    const v = Vector.ed25519(KEY);
+    const v = vectorEd25519(KEY);
     expect(Buffer.from(v.identity)).toEqual(Buffer.from(ed25519Identity(KEY)));
     const [pda] = findVectorPda(ED25519, v.identity);
     expect(v.pda.toBase58()).toBe(pda.toBase58());
   });
 
   test("initialize targets the pda", () => {
-    const v = Vector.ed25519(KEY);
+    const v = vectorEd25519(KEY);
     const i = v.initialize(PAY);
     expect(i.data[0]).toBe(INITIALIZE_DISCRIMINATOR);
     expect(i.keys[1].pubkey.toBase58()).toBe(v.pda.toBase58());
@@ -44,7 +46,7 @@ describe("Vector construction", () => {
 });
 
 describe("authorize", () => {
-  const v = Vector.ed25519(KEY, { feePayer: PAY });
+  const v = vectorEd25519(KEY, { feePayer: PAY });
 
   test("single op → [advance, passthrough] artifact", () => {
     const art = v.authorize(NONCE, ix(1));
@@ -69,7 +71,7 @@ describe("authorize", () => {
 });
 
 describe("chain", () => {
-  const v = Vector.ed25519(KEY, { feePayer: PAY });
+  const v = vectorEd25519(KEY, { feePayer: PAY });
   test("ops are chained: each starts where the previous ended", () => {
     const arts = v.chain(NONCE, [ix(1), ix(2), []]);
     expect(arts.length).toBe(3);
@@ -80,7 +82,7 @@ describe("chain", () => {
 });
 
 describe("branch", () => {
-  const v = Vector.ed25519(KEY, { feePayer: PAY });
+  const v = vectorEd25519(KEY, { feePayer: PAY });
   test("alternatives share the parent nonce, diverge after", () => {
     const { settle, cancel } = v.branch(NONCE, { settle: ix(10), cancel: [] });
     expect(Buffer.from(settle.nonce)).toEqual(Buffer.from(NONCE));
@@ -91,7 +93,7 @@ describe("branch", () => {
 
 describe("derive", () => {
   test("sub-accounts are deterministic and distinct", () => {
-    const v = Vector.ed25519(KEY);
+    const v = vectorEd25519(KEY);
     expect(v.derive(0).pda.toBase58()).toBe(v.derive(0).pda.toBase58());
     expect(v.derive(0).pda.toBase58()).not.toBe(v.derive(1).pda.toBase58());
     expect(v.derive(0).pda.toBase58()).not.toBe(v.pda.toBase58());
@@ -99,7 +101,7 @@ describe("derive", () => {
 });
 
 describe("withdraw / close", () => {
-  const v = Vector.ed25519(KEY, { feePayer: PAY });
+  const v = vectorEd25519(KEY, { feePayer: PAY });
   const to = new Address("11111111111111111111111111111119");
 
   test("withdraw builds a passthrough'd withdraw artifact", () => {
@@ -121,7 +123,7 @@ describe("multi-scheme facade", () => {
   secpKey[31] = 7; // valid secp256k1 scalar
 
   test("secp256k1 binds compressed-pubkey identity + signs", () => {
-    const v = Vector.secp256k1(secpKey, { feePayer: PAY });
+    const v = vectorSecp256k1(secpKey, { feePayer: PAY });
     expect(v.scheme.programId.toBase58()).toBe(SECP256K1.programId.toBase58());
     expect(Buffer.from(v.identity)).toEqual(Buffer.from(secp256k1Identity(secpKey)));
     expect(v.pda.toBase58()).toBe(findVectorPda(SECP256K1, v.identity)[0].toBase58());
@@ -131,7 +133,7 @@ describe("multi-scheme facade", () => {
   });
 
   test("eip191 binds the 20-byte ETH address identity + signs (65-byte sig)", () => {
-    const v = Vector.eip191(secpKey, { feePayer: PAY });
+    const v = vectorEip191(secpKey, { feePayer: PAY });
     expect(v.scheme.programId.toBase58()).toBe(EIP191.programId.toBase58());
     expect(v.identity.length).toBe(20);
     expect(Buffer.from(v.identity)).toEqual(Buffer.from(eip191Identity(secpKey)));
@@ -141,7 +143,7 @@ describe("multi-scheme facade", () => {
 
   test("falcon512 binds sha256(wire) identity; derive throws", () => {
     const kp = falcon512Keygen();
-    const v = Vector.falcon512(kp, { feePayer: PAY });
+    const v = vectorFalcon512(kp, { feePayer: PAY });
     expect(v.scheme.programId.toBase58()).toBe(FALCON512.programId.toBase58());
     expect(Buffer.from(v.identity)).toEqual(Buffer.from(falcon512Identity(kp.publicKey)));
     const art = v.authorize(NONCE, ix(1));
@@ -150,14 +152,14 @@ describe("multi-scheme facade", () => {
   });
 
   test("secp256k1 derive yields deterministic, distinct sub-accounts", () => {
-    const v = Vector.secp256k1(secpKey);
+    const v = vectorSecp256k1(secpKey);
     expect(v.derive(0).pda.toBase58()).toBe(v.derive(0).pda.toBase58());
     expect(v.derive(0).pda.toBase58()).not.toBe(v.derive(1).pda.toBase58());
   });
 
   test("hawk512: 3-tx register(), compute-budget pre, no single initialize/derive", () => {
     const kp = hawk512Keygen();
-    const v = Vector.hawk512(kp, { feePayer: PAY });
+    const v = vectorHawk512(kp, { feePayer: PAY });
     expect(v.scheme.programId.toBase58()).toBe(HAWK512.programId.toBase58());
     expect(Buffer.from(v.identity)).toEqual(Buffer.from(hawk512Identity(kp.publicKey)));
 
@@ -173,7 +175,7 @@ describe("multi-scheme facade", () => {
 });
 
 describe("status", () => {
-  const v = Vector.ed25519(KEY, { feePayer: PAY });
+  const v = vectorEd25519(KEY, { feePayer: PAY });
   const arts = v.chain(NONCE, [ix(1), ix(2)]);
   test("pending / completed / orphaned", () => {
     expect(v.status(arts, arts[0].nonce)).toEqual({ state: "pending", nextStepIndex: 0 });

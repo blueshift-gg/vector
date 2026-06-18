@@ -1,12 +1,11 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { Connection, Keypair, Transaction } from "@solana/web3.js";
 import {
-  Vector,
-  ED25519,
   createWithdrawSubinstruction,
   createFundWalletInstruction,
   scanMigration,
 } from "../src/index.js";
+import { ED25519, vectorEd25519 } from "../src/schemes/ed25519.js";
 import { RPC_URL, WS_URL, FEE_PAYER_SEED, sendTx } from "./helpers.js";
 
 const KEY = new Uint8Array(32);
@@ -26,7 +25,7 @@ describe("fund-in-PDA wallet (on-chain)", () => {
   });
 
   test("PDA holds SOL and spends it via an offline-signed artifact", async () => {
-    const v = Vector.ed25519(KEY, { feePayer: feePayer.address });
+    const v = vectorEd25519(KEY, { feePayer: feePayer.address });
     await sendTx(
       connection,
       new Transaction()
@@ -48,7 +47,7 @@ describe("fund-in-PDA wallet (on-chain)", () => {
   });
 
   test("scanMigration runs against real RPC and flags the old key's SOL", async () => {
-    const v = Vector.ed25519(KEY);
+    const v = vectorEd25519(KEY);
     // Scanning the funded fee payer exercises getBalance / getTokenAccountsByOwner
     // / getProgramAccounts against the live validator (shape validation).
     const report = await scanMigration(connection, { owner: feePayer.address, pda: v.pda });

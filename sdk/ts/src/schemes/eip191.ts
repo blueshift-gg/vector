@@ -10,12 +10,15 @@ import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 
-import { Scheme } from "../scheme.js";
+import { Scheme, findVectorPda } from "../scheme.js";
 import {
   createInitializeInstruction,
   createAdvanceInstruction,
 } from "../instructions.js";
 import { advanceVectorDigest } from "../digest.js";
+import { Vector, Artifact } from "../vector.js";
+import { ChainSigner, deriveLaneSeed } from "../branching.js";
+import { registerArtifactVerifier, artifactParts } from "../inspect.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
 export const EIP191: Scheme = {
@@ -87,3 +90,52 @@ export function signAdvanceInstructionEip191(
 
   return createAdvanceInstruction(EIP191, identity, sigBytes);
 }
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+
+/** EIP-191 (Ethereum) chain signer (32-byte secp256k1 private key). */
+export function eip191ChainSigner(privateKey: Uint8Array): ChainSigner {
+  return {
+    scheme: EIP191,
+    identity: eip191Identity(privateKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionEip191(privateKey, nonce, pre, post, feePayer),
+  };
+}
+
+/** Construct an EIP-191 {@link Vector} from a 32-byte secp256k1 private key. */
+export function vectorEip191(
+  privateKey: Uint8Array,
+  opts?: { feePayer?: Address }
+): Vector {
+  const signer = eip191ChainSigner(privateKey);
+  const [pda] = findVectorPda(EIP191, signer.identity);
+  return Vector.fromParts({
+    scheme: EIP191,
+    signer,
+    pda,
+    initIx: (payer) => createInitializeEip191(payer, signer.identity),
+    feePayer: opts?.feePayer,
+    deriveChild: (i) =>
+      vectorEip191(deriveLaneSeed(privateKey, "eip191", i), opts),
+  });
+}
+
+registerArtifactVerifier(EIP191.programId, (a: Artifact) => {
+  const parts = artifactParts(a, EIP191);
+  if (!parts) return false;
+  try {
+    const recovered = secp256k1.Signature.fromCompact(parts.signature.slice(0, 64))
+      .addRecoveryBit(parts.signature[64])
+      .recoverPublicKey(eip191Hash(parts.digest))
+      .toRawBytes(false); // 65-byte uncompressed: 0x04 || x || y
+    return bytesEqual(keccak_256(recovered.slice(1)).slice(12, 32), a.identity);
+  } catch {
+    return false;
+  }
+});

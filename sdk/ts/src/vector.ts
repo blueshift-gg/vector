@@ -1,35 +1,18 @@
 /**
- * `Vector` — the front door to the Vector SDK.
+ * `Vector` — the scheme-agnostic core of the SDK.
  *
- * A `Vector` is bound once to a signing key and computes its on-chain
- * identity and PDA up front. You then authorize work in terms of plain
- * Solana **instructions** (the CPIs you want executed under the PDA); the
- * SDK wires the `advance` + `passthrough` and the transaction layout for you,
- * so you never assemble those by hand.
+ * You authorize work in terms of plain Solana **instructions** (the CPIs to
+ * run under the PDA); the SDK wires the `advance` + `passthrough` and the
+ * transaction layout. Three ways to authorize, all returning ready-to-
+ * broadcast {@link Artifact}s: {@link Vector.authorize} (one op),
+ * {@link Vector.chain} (ordered, forward-secure), {@link Vector.branch}
+ * (mutually-exclusive alternatives). {@link Vector.derive} gives independent
+ * sub-accounts. Signing is synchronous and offline; only {@link Vector.nonce}
+ * touches the network.
  *
- * Three ways to authorize, all returning ready-to-broadcast {@link Artifact}s:
- *
- * - {@link Vector.authorize} — one op.
- * - {@link Vector.chain} — an ordered, forward-secure sequence (each op can
- *   only execute after the previous one).
- * - {@link Vector.branch} — mutually-exclusive alternatives ("sign N, execute
- *   one"); whichever lands first orphans the rest.
- *
- * For independent, non-exclusive parallel work (e.g. many simultaneous RFQ
- * positions) derive sub-accounts with {@link Vector.derive} — each is another
- * `Vector` with the same API.
- *
- * Signing is **synchronous and offline** (air-gapped friendly): you pass the
- * nonce you signed against. The only networked call is {@link Vector.nonce},
- * which reads the current on-chain nonce.
- *
- * @example
- * ```ts
- * const v = Vector.ed25519(key, { feePayer });
- * const nonce = await v.nonce(connection);
- * const art = v.authorize(nonce, withdrawIx);   // op = Instruction | Instruction[]
- * await sendAndConfirmTransaction(connection, art.transaction(), [feePayer]);
- * ```
+ * Construct a `Vector` with a per-scheme constructor from its subpath so you
+ * only pull the crypto you use, e.g.
+ * `import { vectorEd25519 } from "vector-sdk/ed25519"`.
  */
 import {
   Address,
@@ -38,22 +21,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 
-import { Scheme, findVectorPda, fetchVectorAccount } from "./scheme.js";
-import { ED25519, createInitializeEd25519 } from "./schemes/ed25519.js";
-import { SECP256K1, createInitializeSecp256k1 } from "./schemes/secp256k1.js";
-import { EIP191, createInitializeEip191 } from "./schemes/eip191.js";
-import {
-  FALCON512,
-  createInitializeFalcon512,
-  Falcon512Keypair,
-} from "./schemes/falcon512.js";
-import {
-  HAWK512,
-  createInitializeHawk512,
-  createHawk512StoreWire,
-  createHawk512Finalize,
-  Hawk512Keypair,
-} from "./schemes/hawk512.js";
+import { Scheme, fetchVectorAccount } from "./scheme.js";
 import {
   createPassthroughInstruction,
   createWithdrawSubinstruction,
@@ -61,38 +29,13 @@ import {
 } from "./instructions.js";
 import {
   ChainSigner,
-  ed25519ChainSigner,
-  secp256k1ChainSigner,
-  eip191ChainSigner,
-  falcon512ChainSigner,
-  hawk512ChainSigner,
   signChain,
   signBranches,
   resolveChainStatus,
-  deriveLaneSeed,
   BranchStep,
   SignedStep,
   ChainStatus,
 } from "./branching.js";
-
-const COMPUTE_BUDGET_PROGRAM_ID = new Address(
-  "ComputeBudget111111111111111111111111111111"
-);
-
-/** `ComputeBudgetProgram.setComputeUnitLimit` ix, built by hand (disc 2 + u32 LE). */
-function setComputeUnitLimitIx(units: number): TransactionInstruction {
-  const data = new Uint8Array(5);
-  data[0] = 2;
-  data[1] = units & 0xff;
-  data[2] = (units >>> 8) & 0xff;
-  data[3] = (units >>> 16) & 0xff;
-  data[4] = (units >>> 24) & 0xff;
-  return new TransactionInstruction({
-    programId: COMPUTE_BUDGET_PROGRAM_ID,
-    keys: [],
-    data: Buffer.from(data),
-  });
-}
 
 export type { ChainStatus } from "./branching.js";
 
@@ -133,6 +76,24 @@ export interface Artifact {
   transaction(): Transaction;
 }
 
+/** The pieces a per-scheme constructor assembles into a {@link Vector}. */
+export interface VectorParts {
+  scheme: Scheme;
+  signer: ChainSigner;
+  pda: Address;
+  /** Single-transaction registration instruction (single-tx schemes). */
+  initIx?: (payer: Address) => TransactionInstruction;
+  /** Multi-transaction registration groups (e.g. Hawk-512). */
+  registerGroups?: (payer: Address) => TransactionInstruction[][];
+  /** Derive an independent sub-account (omit for schemes without seed derivation). */
+  deriveChild?: (index: number) => Vector;
+  /** Verification pubkey when it differs from the identity (Falcon/Hawk wire). */
+  publicKey?: Uint8Array;
+  /** Top-level instructions prepended to every advance (e.g. compute budget). */
+  preIxs?: TransactionInstruction[];
+  feePayer?: Address;
+}
+
 export class Vector {
   /** The signing scheme (program) this account uses. */
   readonly scheme: Scheme;
@@ -149,17 +110,7 @@ export class Vector {
   private readonly publicKey?: Uint8Array;
   private readonly preIxs: TransactionInstruction[];
 
-  private constructor(args: {
-    scheme: Scheme;
-    signer: ChainSigner;
-    pda: Address;
-    initIx?: (payer: Address) => TransactionInstruction;
-    registerGroups?: (payer: Address) => TransactionInstruction[][];
-    feePayer?: Address;
-    deriveChild?: (index: number) => Vector;
-    publicKey?: Uint8Array;
-    preIxs?: TransactionInstruction[];
-  }) {
+  private constructor(args: VectorParts) {
     this.scheme = args.scheme;
     this.signer = args.signer;
     this.identity = args.signer.identity;
@@ -172,94 +123,13 @@ export class Vector {
     this.preIxs = args.preIxs ?? [];
   }
 
-  /** Bind a `Vector` to a 32-byte Ed25519 private-key seed. */
-  static ed25519(key: Uint8Array, opts?: { feePayer?: Address }): Vector {
-    const signer = ed25519ChainSigner(key);
-    const [pda] = findVectorPda(ED25519, signer.identity);
-    return new Vector({
-      scheme: ED25519,
-      signer,
-      pda,
-      initIx: (payer) => createInitializeEd25519(payer, signer.identity),
-      feePayer: opts?.feePayer,
-      deriveChild: (i) => Vector.ed25519(deriveLaneSeed(key, "ed25519", i), opts),
-    });
-  }
-
-  /** Bind a `Vector` to a 32-byte plain secp256k1 (ECDSA) private key. */
-  static secp256k1(privateKey: Uint8Array, opts?: { feePayer?: Address }): Vector {
-    const signer = secp256k1ChainSigner(privateKey);
-    const [pda] = findVectorPda(SECP256K1, signer.identity);
-    return new Vector({
-      scheme: SECP256K1,
-      signer,
-      pda,
-      initIx: (payer) => createInitializeSecp256k1(payer, signer.identity),
-      feePayer: opts?.feePayer,
-      deriveChild: (i) =>
-        Vector.secp256k1(deriveLaneSeed(privateKey, "secp256k1", i), opts),
-    });
-  }
-
-  /** Bind a `Vector` to a 32-byte secp256k1 key, signing as an Ethereum (EIP-191) address. */
-  static eip191(privateKey: Uint8Array, opts?: { feePayer?: Address }): Vector {
-    const signer = eip191ChainSigner(privateKey);
-    const [pda] = findVectorPda(EIP191, signer.identity);
-    return new Vector({
-      scheme: EIP191,
-      signer,
-      pda,
-      initIx: (payer) => createInitializeEip191(payer, signer.identity),
-      feePayer: opts?.feePayer,
-      deriveChild: (i) =>
-        Vector.eip191(deriveLaneSeed(privateKey, "eip191", i), opts),
-    });
-  }
-
   /**
-   * Bind a `Vector` to a post-quantum Falcon-512 keypair. `derive` is
-   * unavailable (Falcon has no 32-byte seed) — construct each sub-account from
-   * its own keypair.
+   * Assemble a `Vector` from its parts. Used by the per-scheme constructors
+   * (`vectorEd25519`, `vectorSecp256k1`, …) in the scheme subpath modules —
+   * prefer those over calling this directly.
    */
-  static falcon512(
-    keypair: Falcon512Keypair,
-    opts?: { feePayer?: Address }
-  ): Vector {
-    const signer = falcon512ChainSigner(keypair);
-    const [pda] = findVectorPda(FALCON512, signer.identity);
-    return new Vector({
-      scheme: FALCON512,
-      signer,
-      pda,
-      initIx: (payer) => createInitializeFalcon512(payer, keypair.publicKey),
-      feePayer: opts?.feePayer,
-      publicKey: keypair.publicKey,
-    });
-  }
-
-  /**
-   * Bind a `Vector` to a post-quantum Hawk-512 keypair. Registration is a
-   * three-transaction flow (see {@link register}), so `initialize` throws —
-   * use `register`. `derive` is unavailable (build each sub-account from its
-   * own keypair). The advance carries a compute-budget bump (Hawk verification
-   * is heavy), committed to by the digest.
-   */
-  static hawk512(keypair: Hawk512Keypair, opts?: { feePayer?: Address }): Vector {
-    const signer = hawk512ChainSigner(keypair);
-    const [pda] = findVectorPda(HAWK512, signer.identity);
-    return new Vector({
-      scheme: HAWK512,
-      signer,
-      pda,
-      registerGroups: (payer) => [
-        [createInitializeHawk512(payer, keypair.publicKey)],
-        [createHawk512StoreWire(keypair.publicKey)],
-        [setComputeUnitLimitIx(600_000), createHawk512Finalize(keypair.publicKey)],
-      ],
-      feePayer: opts?.feePayer,
-      publicKey: keypair.publicKey,
-      preIxs: [setComputeUnitLimitIx(450_000)],
-    });
+  static fromParts(args: VectorParts): Vector {
+    return new Vector(args);
   }
 
   /**
@@ -279,8 +149,8 @@ export class Vector {
   /**
    * All account-registration transactions, in order — one inner array per
    * transaction. Single-transaction schemes return one group of one
-   * instruction; Hawk-512 returns three (initialize → store wire → finalize).
-   * Send each group as its own transaction, in order.
+   * instruction; Hawk-512 returns three. Send each group as its own
+   * transaction, in order.
    */
   register(payer: Address): TransactionInstruction[][] {
     if (this.registerGroups) return this.registerGroups(payer);
@@ -304,8 +174,7 @@ export class Vector {
 
   /**
    * Authorize a SOL withdrawal from this account's PDA to `to`. Convenience
-   * for the program's own `withdraw` instruction — no need to reach for the
-   * low-level builder or supply the scheme/identity.
+   * for the program's own `withdraw` instruction.
    */
   withdraw(nonce: Uint8Array, to: Address, lamports: bigint): Artifact {
     return this.authorize(
@@ -324,7 +193,7 @@ export class Vector {
 
   /**
    * Authorize an ordered, forward-secure chain of ops starting at `nonce`.
-   * Op `i` is signed against the nonce op `i-1` produces, so the ops can only
+   * Op `i` is signed against the nonce op `i-1` produces, so they can only
    * execute in order. Broadcast each returned artifact's `transaction()`.
    */
   chain(nonce: Uint8Array, ops: Op[]): Artifact[] {
@@ -362,7 +231,9 @@ export class Vector {
    * Derive an independent sub-account (its own chain) from this account's key.
    * Use for non-exclusive parallel work (e.g. one position per RFQ deal). The
    * returned `Vector` has the same API and a distinct identity/PDA, and
-   * inherits this account's `feePayer`.
+   * inherits this account's `feePayer`. Unavailable for schemes without
+   * seed-based derivation (Falcon/Hawk) — build those sub-accounts from their
+   * own keypairs.
    */
   derive(index: number): Vector {
     if (!this.deriveChild) {
@@ -375,23 +246,20 @@ export class Vector {
 
   /**
    * Where a pre-signed chain stands given the current on-chain nonce:
-   * `pending` (and which op is next), `completed`, or `orphaned`. Assumes
-   * facade-shaped artifacts (`[advance, ...passthrough]`), which is everything
-   * the facade emits.
+   * `pending` (and which op is next), `completed`, or `orphaned`.
    */
   status(artifacts: Artifact[], currentNonce: Uint8Array): ChainStatus {
     const steps: SignedStep[] = artifacts.map((a, index) => ({
       index,
       nonce: a.nonce,
       nextNonce: a.nextNonce,
-      advanceIx: a.instructions[0],
-      pre: [],
-      post: a.instructions.slice(1),
+      advanceIx: a.instructions[a.advanceIndex],
+      pre: a.instructions.slice(0, a.advanceIndex),
+      post: a.instructions.slice(a.advanceIndex + 1),
     }));
     return resolveChainStatus(steps, currentNonce);
   }
 
-  /** Wrap an op's CPIs in a passthrough (or nothing, for an inert advance). */
   private toStep(op: Op): BranchStep {
     const ixs = Array.isArray(op) ? op : [op];
     const pre = this.preIxs.length ? this.preIxs : undefined;
