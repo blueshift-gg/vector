@@ -39,11 +39,14 @@ import {
 } from "@solana/web3.js";
 
 import { Scheme, findVectorPda, fetchVectorAccount } from "./scheme.js";
+import { ED25519, createInitializeEd25519 } from "./schemes/ed25519.js";
+import { SECP256K1, createInitializeSecp256k1 } from "./schemes/secp256k1.js";
+import { EIP191, createInitializeEip191 } from "./schemes/eip191.js";
 import {
-  ED25519,
-  ed25519Identity,
-  createInitializeEd25519,
-} from "./schemes/ed25519.js";
+  FALCON512,
+  createInitializeFalcon512,
+  Falcon512Keypair,
+} from "./schemes/falcon512.js";
 import {
   createPassthroughInstruction,
   createWithdrawSubinstruction,
@@ -52,6 +55,9 @@ import {
 import {
   ChainSigner,
   ed25519ChainSigner,
+  secp256k1ChainSigner,
+  eip191ChainSigner,
+  falcon512ChainSigner,
   signChain,
   signBranches,
   resolveChainStatus,
@@ -96,35 +102,95 @@ export class Vector {
   /** The account's PDA — its on-chain address. */
   readonly pda: Address;
 
-  private readonly key: Uint8Array;
   private readonly signer: ChainSigner;
   private readonly feePayer?: Address;
+  private readonly initIx: (payer: Address) => TransactionInstruction;
+  private readonly deriveChild?: (index: number) => Vector;
 
-  private constructor(
-    scheme: Scheme,
-    key: Uint8Array,
-    signer: ChainSigner,
-    pda: Address,
-    feePayer?: Address
-  ) {
-    this.scheme = scheme;
-    this.key = key;
-    this.signer = signer;
-    this.identity = signer.identity;
-    this.pda = pda;
-    this.feePayer = feePayer;
+  private constructor(args: {
+    scheme: Scheme;
+    signer: ChainSigner;
+    pda: Address;
+    initIx: (payer: Address) => TransactionInstruction;
+    feePayer?: Address;
+    deriveChild?: (index: number) => Vector;
+  }) {
+    this.scheme = args.scheme;
+    this.signer = args.signer;
+    this.identity = args.signer.identity;
+    this.pda = args.pda;
+    this.initIx = args.initIx;
+    this.feePayer = args.feePayer;
+    this.deriveChild = args.deriveChild;
   }
 
   /** Bind a `Vector` to a 32-byte Ed25519 private-key seed. */
   static ed25519(key: Uint8Array, opts?: { feePayer?: Address }): Vector {
     const signer = ed25519ChainSigner(key);
     const [pda] = findVectorPda(ED25519, signer.identity);
-    return new Vector(ED25519, key, signer, pda, opts?.feePayer);
+    return new Vector({
+      scheme: ED25519,
+      signer,
+      pda,
+      initIx: (payer) => createInitializeEd25519(payer, signer.identity),
+      feePayer: opts?.feePayer,
+      deriveChild: (i) => Vector.ed25519(deriveLaneSeed(key, "ed25519", i), opts),
+    });
+  }
+
+  /** Bind a `Vector` to a 32-byte plain secp256k1 (ECDSA) private key. */
+  static secp256k1(privateKey: Uint8Array, opts?: { feePayer?: Address }): Vector {
+    const signer = secp256k1ChainSigner(privateKey);
+    const [pda] = findVectorPda(SECP256K1, signer.identity);
+    return new Vector({
+      scheme: SECP256K1,
+      signer,
+      pda,
+      initIx: (payer) => createInitializeSecp256k1(payer, signer.identity),
+      feePayer: opts?.feePayer,
+      deriveChild: (i) =>
+        Vector.secp256k1(deriveLaneSeed(privateKey, "secp256k1", i), opts),
+    });
+  }
+
+  /** Bind a `Vector` to a 32-byte secp256k1 key, signing as an Ethereum (EIP-191) address. */
+  static eip191(privateKey: Uint8Array, opts?: { feePayer?: Address }): Vector {
+    const signer = eip191ChainSigner(privateKey);
+    const [pda] = findVectorPda(EIP191, signer.identity);
+    return new Vector({
+      scheme: EIP191,
+      signer,
+      pda,
+      initIx: (payer) => createInitializeEip191(payer, signer.identity),
+      feePayer: opts?.feePayer,
+      deriveChild: (i) =>
+        Vector.eip191(deriveLaneSeed(privateKey, "eip191", i), opts),
+    });
+  }
+
+  /**
+   * Bind a `Vector` to a post-quantum Falcon-512 keypair. `derive` is
+   * unavailable (Falcon has no 32-byte seed) — construct each sub-account from
+   * its own keypair.
+   */
+  static falcon512(
+    keypair: Falcon512Keypair,
+    opts?: { feePayer?: Address }
+  ): Vector {
+    const signer = falcon512ChainSigner(keypair);
+    const [pda] = findVectorPda(FALCON512, signer.identity);
+    return new Vector({
+      scheme: FALCON512,
+      signer,
+      pda,
+      initIx: (payer) => createInitializeFalcon512(payer, keypair.publicKey),
+      feePayer: opts?.feePayer,
+    });
   }
 
   /** The one-time `initialize` instruction that creates this account on-chain. */
   initialize(payer: Address): TransactionInstruction {
-    return createInitializeEd25519(payer, this.identity);
+    return this.initIx(payer);
   }
 
   /** Read the current on-chain nonce. The only networked call. */
@@ -204,8 +270,12 @@ export class Vector {
    * inherits this account's `feePayer`.
    */
   derive(index: number): Vector {
-    const childSeed = deriveLaneSeed(this.key, "ed25519", index);
-    return Vector.ed25519(childSeed, { feePayer: this.feePayer });
+    if (!this.deriveChild) {
+      throw new Error(
+        `derive() is unavailable for ${this.scheme.programId.toBase58()} (no seed-based sub-key derivation); construct each sub-account from its own keypair`
+      );
+    }
+    return this.deriveChild(index);
   }
 
   /**

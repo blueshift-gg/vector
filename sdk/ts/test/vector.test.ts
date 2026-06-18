@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
-import { Connection, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
+import { Address, Connection, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
 import { Vector } from "../src/index.js";
 import { RPC_URL, WS_URL, FEE_PAYER_SEED, sendTx } from "./helpers.js";
 
@@ -89,4 +89,22 @@ describe("Vector (front door, on-chain)", () => {
     expect(Buffer.from(await a.nonce(connection))).not.toEqual(Buffer.from(na)); // a moved
     expect(Buffer.from(await b.nonce(connection))).toEqual(Buffer.from(nb)); // b untouched
   });
+
+  // Non-ed25519 schemes verify on-chain through the same facade.
+  const SCHEMES = [
+    { name: "secp256k1", last: 0x61, make: (k: Uint8Array, o: { feePayer: Address }) => Vector.secp256k1(k, o) },
+    { name: "eip191", last: 0x62, make: (k: Uint8Array, o: { feePayer: Address }) => Vector.eip191(k, o) },
+  ];
+  for (const s of SCHEMES) {
+    test(`${s.name}: facade init + authorize advances on-chain`, async () => {
+      const key = new Uint8Array(32);
+      key[31] = s.last;
+      const v = s.make(key, { feePayer: feePayer.address });
+      await sendTx(connection, new Transaction().add(v.initialize(feePayer.address)), [feePayer]);
+      const nonce = await v.nonce(connection);
+      const art = v.authorize(nonce, []); // inert advance
+      await sendTx(connection, art.transaction(), [feePayer]);
+      expect(Buffer.from(await v.nonce(connection))).toEqual(Buffer.from(art.nextNonce));
+    });
+  }
 });

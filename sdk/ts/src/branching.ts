@@ -19,6 +19,22 @@ import {
   ed25519Identity,
   signAdvanceInstructionEd25519,
 } from "./schemes/ed25519.js";
+import {
+  SECP256K1,
+  secp256k1Identity,
+  signAdvanceInstructionSecp256k1,
+} from "./schemes/secp256k1.js";
+import {
+  EIP191,
+  eip191Identity,
+  signAdvanceInstructionEip191,
+} from "./schemes/eip191.js";
+import {
+  FALCON512,
+  falcon512Identity,
+  signAdvanceInstructionFalcon512,
+  Falcon512Keypair,
+} from "./schemes/falcon512.js";
 import { advanceVectorDigest } from "./digest.js";
 
 /** Per-scheme signer for a single chain (one key / identity). */
@@ -41,6 +57,36 @@ export function ed25519ChainSigner(signingKey: Uint8Array): ChainSigner {
     identity: ed25519Identity(signingKey),
     sign: (nonce, pre, post, feePayer) =>
       signAdvanceInstructionEd25519(signingKey, nonce, pre, post, feePayer),
+  };
+}
+
+/** Plain secp256k1 ECDSA chain signer (32-byte private key). */
+export function secp256k1ChainSigner(privateKey: Uint8Array): ChainSigner {
+  return {
+    scheme: SECP256K1,
+    identity: secp256k1Identity(privateKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer),
+  };
+}
+
+/** EIP-191 (Ethereum) chain signer (32-byte secp256k1 private key). */
+export function eip191ChainSigner(privateKey: Uint8Array): ChainSigner {
+  return {
+    scheme: EIP191,
+    identity: eip191Identity(privateKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionEip191(privateKey, nonce, pre, post, feePayer),
+  };
+}
+
+/** Falcon-512 (post-quantum) chain signer (1281-byte secret + 897-byte wire pubkey). */
+export function falcon512ChainSigner(keypair: Falcon512Keypair): ChainSigner {
+  return {
+    scheme: FALCON512,
+    identity: falcon512Identity(keypair.publicKey),
+    sign: (nonce, pre, post, feePayer) =>
+      signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer),
   };
 }
 

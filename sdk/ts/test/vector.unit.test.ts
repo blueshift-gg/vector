@@ -3,7 +3,14 @@ import { Address, SystemProgram, Transaction } from "@solana/web3.js";
 import {
   Vector,
   ED25519,
+  SECP256K1,
+  EIP191,
+  FALCON512,
   ed25519Identity,
+  secp256k1Identity,
+  eip191Identity,
+  falcon512Identity,
+  falcon512Keygen,
   findVectorPda,
   ADVANCE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
@@ -103,6 +110,46 @@ describe("withdraw / close", () => {
     const art = v.close(NONCE, to);
     expect(art.instructions.length).toBe(2);
     expect(art.instructions[1].data[0]).toBe(PASSTHROUGH_DISCRIMINATOR);
+  });
+});
+
+describe("multi-scheme facade", () => {
+  const secpKey = new Uint8Array(32);
+  secpKey[31] = 7; // valid secp256k1 scalar
+
+  test("secp256k1 binds compressed-pubkey identity + signs", () => {
+    const v = Vector.secp256k1(secpKey, { feePayer: PAY });
+    expect(v.scheme.programId.toBase58()).toBe(SECP256K1.programId.toBase58());
+    expect(Buffer.from(v.identity)).toEqual(Buffer.from(secp256k1Identity(secpKey)));
+    expect(v.pda.toBase58()).toBe(findVectorPda(SECP256K1, v.identity)[0].toBase58());
+    const art = v.authorize(NONCE, ix(1));
+    expect(art.instructions[0].data[0]).toBe(ADVANCE_DISCRIMINATOR);
+    expect(art.instructions[0].data.length).toBe(1 + SECP256K1.signatureLen); // 65
+  });
+
+  test("eip191 binds the 20-byte ETH address identity + signs (65-byte sig)", () => {
+    const v = Vector.eip191(secpKey, { feePayer: PAY });
+    expect(v.scheme.programId.toBase58()).toBe(EIP191.programId.toBase58());
+    expect(v.identity.length).toBe(20);
+    expect(Buffer.from(v.identity)).toEqual(Buffer.from(eip191Identity(secpKey)));
+    const art = v.authorize(NONCE, ix(1));
+    expect(art.instructions[0].data.length).toBe(1 + EIP191.signatureLen); // 1 + 65
+  });
+
+  test("falcon512 binds sha256(wire) identity; derive throws", () => {
+    const kp = falcon512Keygen();
+    const v = Vector.falcon512(kp, { feePayer: PAY });
+    expect(v.scheme.programId.toBase58()).toBe(FALCON512.programId.toBase58());
+    expect(Buffer.from(v.identity)).toEqual(Buffer.from(falcon512Identity(kp.publicKey)));
+    const art = v.authorize(NONCE, ix(1));
+    expect(art.instructions[0].data.length).toBe(1 + FALCON512.signatureLen); // 1 + 666
+    expect(() => v.derive(0)).toThrow();
+  });
+
+  test("secp256k1 derive yields deterministic, distinct sub-accounts", () => {
+    const v = Vector.secp256k1(secpKey);
+    expect(v.derive(0).pda.toBase58()).toBe(v.derive(0).pda.toBase58());
+    expect(v.derive(0).pda.toBase58()).not.toBe(v.derive(1).pda.toBase58());
   });
 });
 

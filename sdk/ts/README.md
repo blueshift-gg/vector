@@ -205,6 +205,16 @@ non-Ed25519 schemes, bespoke digest handling).
 
 ## Schemes
 
-`Vector.ed25519` is implemented today. The protocol also ships secp256k1,
-EIP-191 (Ethereum wallets), and post-quantum Falcon-512 / Hawk-512 programs with
-the identical instruction set; their facade constructors follow the same shape.
+The facade covers four schemes — same API, different `Vector.*` constructor:
+
+| Constructor | Key material | Identity |
+| :-- | :-- | :-- |
+| `Vector.ed25519(seed)` | 32-byte Ed25519 seed | 32-byte public key |
+| `Vector.secp256k1(privKey)` | 32-byte secp256k1 key | 33-byte compressed pubkey |
+| `Vector.eip191(privKey)` | 32-byte secp256k1 key | 20-byte Ethereum address — sign with any `personal_sign` wallet |
+| `Vector.falcon512(keypair)` | Falcon-512 keypair | `sha256(wire pubkey)` (post-quantum) |
+
+`derive(i)` works for the 32-byte-key schemes (ed25519 / secp256k1 / eip191);
+Falcon sub-accounts are constructed from their own keypairs. **Hawk-512** isn't
+on the facade — its registration is a 3-transaction flow (`initialize` →
+`storeWire` → `finalize`); use the low-level scheme builders for it.
