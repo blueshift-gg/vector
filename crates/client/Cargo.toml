@@ -26,6 +26,10 @@ solana-instruction = { workspace = true }
 # solana-instruction major-minor (3.3.x) alongside the workspace 3.4.0 and
 # break handing vector_core instructions to the tx builder.
 solana-rpc-client = "3.1"
+# RPC request/response + config/filter types for the migration scanner
+# (`scan.rs`). Matched to the `solana-rpc-client 3.1.14` release line, so it
+# pulls the SAME `solana-instruction 3.4.0` node — no second major is added.
+solana-rpc-client-api = "3.1"
 solana-commitment-config = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
 # Transaction assembly + signing. All matched to what `solana-rpc-client 3.1`
