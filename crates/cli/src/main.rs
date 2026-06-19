@@ -1,3 +1,4 @@
+mod offline;
 mod scheme_arg;
 
 use clap::{Parser, Subcommand};
@@ -64,17 +65,19 @@ async fn main() {
 async fn dispatch(cli: Cli) -> Result<(), String> {
     match cli.command {
         Commands::Inspect { file } => {
-            let _ = file;
-            todo!("C2: inspect")
+            offline::inspect(&file).map(|lines| lines.iter().for_each(|l| println!("{l}")))
         }
-        Commands::Review { file } => {
-            let _ = file;
-            todo!("C2: review")
-        }
-        Commands::Verify { file } => {
-            let _ = file;
-            todo!("C2: verify")
-        }
+        Commands::Review { file } => offline::review(&file).map(|s| println!("{s}")),
+        Commands::Verify { file } => match offline::verify(&file)? {
+            true => {
+                println!("OK");
+                Ok(())
+            }
+            false => {
+                eprintln!("INVALID");
+                std::process::exit(1)
+            }
+        },
         Commands::Nonce { url, pda } => {
             let _ = (url, pda);
             todo!("C3: nonce")
