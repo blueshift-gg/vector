@@ -150,9 +150,9 @@ mod tests {
     use solana_address::address;
     use solana_instruction::{AccountMeta, Instruction};
 
-    #[test]
-    fn json_roundtrip_and_optional_omitted() {
-        let a = Artifact {
+    /// Build a minimal valid Artifact for serde tests.
+    fn minimal_artifact() -> Artifact {
+        Artifact {
             program_id: address!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV"),
             identity: vec![1, 2, 3],
             nonce: [4u8; 32],
@@ -168,7 +168,12 @@ mod tests {
                 )],
                 data: vec![9, 9],
             }],
-        };
+        }
+    }
+
+    #[test]
+    fn json_roundtrip_and_optional_omitted() {
+        let a = minimal_artifact();
         let json = serialize_artifact(&a);
         assert!(!json.contains("feePayer")); // None omitted, matches TS
         assert!(json.contains("\"advanceIndex\":0"));
@@ -176,5 +181,94 @@ mod tests {
         let b = deserialize_artifact(&json).unwrap();
         assert_eq!(b.nonce, a.nonce);
         assert_eq!(b.instructions[0].data, a.instructions[0].data);
+    }
+
+    // ── Robustness / adversarial deserialization tests ───────────────────────
+
+    #[test]
+    fn rejects_invalid_json() {
+        assert!(matches!(
+            deserialize_artifact("{not valid json"),
+            Err(DeserializeError::Json(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_hex_identity() {
+        // Start from a valid artifact JSON; replace the identity hex value with non-hex.
+        // identity is checked AFTER programId (which is valid base58), so we get Hex.
+        let json = serialize_artifact(&minimal_artifact());
+        // The identity field value in the JSON is a hex string like "010203".
+        // Replace it with a clearly non-hex sentinel. Use a JSON-safe replacement:
+        // "identity":"010203" -> "identity":"ZZZZZZ"
+        let identity_hex = hex_enc(&minimal_artifact().identity);
+        let corrupted = json.replace(
+            &format!("\"identity\":\"{}\"", identity_hex),
+            "\"identity\":\"ZZZZZZ\"",
+        );
+        assert!(
+            corrupted != json,
+            "replacement did not find the identity field"
+        );
+        assert!(matches!(
+            deserialize_artifact(&corrupted),
+            Err(DeserializeError::Hex("identity"))
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_length_nonce() {
+        // Valid hex but only 2 bytes instead of 32 => Length error for "nonce".
+        // nonce is checked after identity (valid hex), so we must also have identity valid.
+        let json = serialize_artifact(&minimal_artifact());
+        let nonce_hex = hex_enc(&[4u8; 32]); // 64-char hex for [4u8;32]
+        let corrupted = json.replace(
+            &format!("\"nonce\":\"{}\"", nonce_hex),
+            "\"nonce\":\"0102\"", // valid hex, but only 2 bytes
+        );
+        assert!(
+            corrupted != json,
+            "replacement did not find the nonce field"
+        );
+        assert!(matches!(
+            deserialize_artifact(&corrupted),
+            Err(DeserializeError::Length("nonce"))
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_base58_program_id() {
+        // programId is the FIRST address checked, so an invalid base58 there
+        // immediately yields Address(_).
+        let json = serialize_artifact(&minimal_artifact());
+        // Replace the program id string value with an invalid base58 (contains '0').
+        let corrupted = json.replace(
+            "\"programId\":\"vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV\"",
+            "\"programId\":\"not-a-valid-base58-address!!!\"",
+        );
+        assert!(
+            corrupted != json,
+            "replacement did not find the programId field"
+        );
+        assert!(matches!(
+            deserialize_artifact(&corrupted),
+            Err(DeserializeError::Address(_))
+        ));
+    }
+
+    #[test]
+    fn empty_instructions_is_ok() {
+        // An artifact with zero instructions must deserialize without panic.
+        let a = Artifact {
+            instructions: vec![],
+            ..minimal_artifact()
+        };
+        let json = serialize_artifact(&a);
+        let result = deserialize_artifact(&json);
+        assert!(
+            result.is_ok(),
+            "expected Ok for empty instructions, got {result:?}"
+        );
+        assert_eq!(result.unwrap().instructions.len(), 0);
     }
 }

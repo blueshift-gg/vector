@@ -330,4 +330,106 @@ mod tests {
         );
         assert!(verify_artifact(&art2).unwrap());
     }
+
+    // ── Adversarial verify tests ─────────────────────────────────────────────
+
+    #[test]
+    fn rejects_wrong_identity() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let mut art = v.authorize(&[0u8; 32], Op::Inert);
+        art.identity = vec![9u8; 32]; // valid length, wrong key => PDA binding fails
+        assert!(matches!(verify_artifact(&art), Err(VerifyError::Malformed)));
+    }
+
+    #[test]
+    fn rejects_oob_advance_index() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let mut art = v.authorize(&[0u8; 32], Op::Inert);
+        art.advance_index = 9;
+        assert!(matches!(verify_artifact(&art), Err(VerifyError::Malformed)));
+    }
+
+    #[test]
+    fn rejects_advance_index_pointing_at_passthrough() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        // withdraw produces [advance(0), passthrough(1)]; point advance_index at passthrough
+        let mut art = v.withdraw(
+            &[0u8; 32],
+            &solana_address::address!("11111111111111111111111111111111"),
+            1,
+        );
+        art.advance_index = 1;
+        assert!(matches!(verify_artifact(&art), Err(VerifyError::Malformed)));
+    }
+
+    #[test]
+    fn zeroed_signature_is_invalid_not_malformed() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let mut art = v.authorize(&[0u8; 32], Op::Inert);
+        // keep byte[0] (discriminator), zero out the signature bytes => length intact
+        for b in art.instructions[0].data[1..].iter_mut() {
+            *b = 0;
+        }
+        assert_eq!(verify_artifact(&art), Ok(false));
+    }
+
+    // ── summarize / review decode coverage ───────────────────────────────────
+
+    #[test]
+    fn summarize_withdraw_contains_lamport_amount() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let art = v.withdraw(
+            &[0u8; 32],
+            &solana_address::address!("11111111111111111111111111111111"),
+            42_000,
+        );
+        let lines = summarize(&art);
+        // The passthrough line must decode the withdraw sub-ix with the lamport amount
+        let passthrough_line = lines
+            .iter()
+            .find(|l| l.contains("passthrough"))
+            .expect("expected a passthrough line in summarize output");
+        assert!(
+            passthrough_line.contains("withdraw"),
+            "expected 'withdraw' label in passthrough line, got: {passthrough_line:?}"
+        );
+        assert!(
+            passthrough_line.contains("42000"),
+            "expected lamport amount '42000' in passthrough line, got: {passthrough_line:?}"
+        );
+    }
+
+    #[test]
+    fn review_contains_program_id_and_nonce() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let nonce = [0xabu8; 32];
+        let art = v.authorize(&nonce, Op::Inert);
+        let r = review(&art);
+        // review() emits "program: <PROGRAM_ID>" — must contain the Vector program address
+        assert!(
+            r.contains("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV"),
+            "expected program id in review output, got:\n{r}"
+        );
+        // review() emits "nonce: ababab…" — first 4 bytes of [0xab; 32] are "abababab"
+        assert!(
+            r.contains("abababab"),
+            "expected nonce hex prefix 'abababab' in review output, got:\n{r}"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "falcon512"))]
+mod pq_tests {
+    use super::*;
+    use crate::schemes::falcon512::Falcon512;
+    use crate::vector::{Op, Vector};
+
+    #[test]
+    fn missing_pq_public_key_is_invalid() {
+        let v = Vector::new(Falcon512::generate());
+        let mut art = v.authorize(&[0u8; 32], Op::Inert);
+        art.public_key = None;
+        // Falcon verifier returns false when public_key is None (no panic, no Malformed)
+        assert_eq!(verify_artifact(&art), Ok(false));
+    }
 }
