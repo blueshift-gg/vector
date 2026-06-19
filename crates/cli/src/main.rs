@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 mod offline;
 mod online;
 mod scheme_arg;

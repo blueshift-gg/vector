@@ -40,9 +40,13 @@ impl Scheme {
 
 /// Const dimensions + program id for one Vector program.
 pub trait SchemeMeta {
+    /// On-chain program ID for this scheme.
     const PROGRAM_ID: Address;
+    /// Wire signature length in bytes carried in the `advance` instruction data.
     const SIGNATURE_LEN: usize;
+    /// Client-side identity length: the value hashed into the digest and used for PDA derivation.
     const IDENTITY_LEN: usize;
+    /// On-chain stored identity length: may differ from `IDENTITY_LEN` for PQ schemes.
     const STORED_IDENTITY_LEN: usize;
     /// Runtime descriptor for value-taking APIs (the digest builder).
     fn descriptor() -> Scheme {
@@ -111,5 +115,6 @@ pub trait Verifier: SchemeMeta {
 
 /// SDK-only sub-key lanes; only 32-byte-key schemes implement it.
 pub trait Derivable: Signer + Sized {
+    /// Derive child key at `index` using HKDF-SHA256 over the scheme's master secret.
     fn derive(&self, index: u32) -> Self;
 }

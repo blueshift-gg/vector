@@ -11,6 +11,7 @@ use crate::instructions::{create_advance_instruction, create_initialize_instruct
 use crate::protocol::advance_vector_digest;
 use crate::scheme::Scheme;
 
+/// Length of an Ethereum address in bytes.
 pub const EIP191_ETH_ADDRESS_LEN: usize = 20;
 
 /// secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address.
@@ -107,6 +108,7 @@ pub struct Eip191 {
 }
 
 impl Eip191 {
+    /// Construct an EIP-191 signer from a 32-byte secp256k1 scalar (panics if invalid).
     pub fn from_seed(seed: &[u8; 32]) -> Self {
         Self {
             key: SigningKey::from_slice(seed).expect("valid secp256k1 scalar"),

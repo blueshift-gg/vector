@@ -19,6 +19,7 @@ use vector_core::VectorAccount;
 
 /// Async client for reading Vector accounts.
 pub struct VectorClient {
+    /// Underlying async Solana RPC client.
     pub rpc: RpcClient,
 }
 

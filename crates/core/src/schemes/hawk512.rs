@@ -14,6 +14,7 @@ use crate::scheme::{Scheme, SchemeMeta, Signer, Verifier};
 
 /// Hawk-512 wire pubkey length.
 pub const HAWK512_WIRE_PUBKEY_LEN: usize = 1024;
+/// Maximum length of a Hawk-512 wire signature in bytes (fixed-width transport).
 pub const HAWK512_SIGNATURE_LEN: usize = 555;
 /// Hawk-512 prepared pubkey blob.
 pub const HAWK512_PREPARED_PUBKEY_LEN: usize = 18464;

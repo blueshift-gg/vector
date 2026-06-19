@@ -4,10 +4,13 @@ use crate::protocol::encoding::ADVANCE_DISCRIMINATOR;
 use crate::scheme::{SchemeMeta, Verifier};
 use crate::vector::Artifact;
 
+/// Error returned by [`verify_artifact`] when the artifact cannot be verified.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum VerifyError {
+    /// The artifact's `program_id` is not a scheme compiled into this build.
     #[error("artifact program id is not a supported (compiled-in) scheme")]
     UnsupportedProgram,
+    /// The advance instruction, account list, or field lengths are not canonical.
     #[error("artifact is malformed: bad advance instruction, layout, or field length")]
     Malformed,
 }

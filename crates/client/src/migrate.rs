@@ -9,13 +9,17 @@ use solana_instruction::{AccountMeta, Instruction};
 
 // ── Program IDs ──────────────────────────────────────────────────────────────
 
+/// SPL Token program address (legacy Token program).
 pub const TOKEN_PROGRAM_ID: Address = address!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
+/// SPL Token-2022 program address.
 pub const TOKEN_2022_PROGRAM_ID: Address = address!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
+/// Associated Token Account program address.
 pub const ASSOCIATED_TOKEN_PROGRAM_ID: Address =
     address!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
+/// Solana System Program address.
 pub const SYSTEM_PROGRAM_ID: Address = address!("11111111111111111111111111111111");
 
 // ── ATA derivation ───────────────────────────────────────────────────────────

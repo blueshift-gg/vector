@@ -12,7 +12,9 @@ use solana_instruction::Instruction;
 use crate::instructions::create_initialize_instruction;
 use crate::scheme::{Scheme, SchemeMeta, Signer, Verifier};
 
+/// Length of a Falcon-512 wire public key in bytes.
 pub const FALCON512_WIRE_PUBKEY_LEN: usize = FALCON_512_PUBKEY_LEN;
+/// Length of a Falcon-512 wire signature in bytes (fixed-width, zero-padded).
 pub const FALCON512_SIGNATURE_LEN: usize = FALCON_512_SIGNATURE_LEN;
 /// Falcon-512 prepared pubkey (`N * 2`, `N = 512`).
 pub const FALCON512_PREPARED_PUBKEY_LEN: usize = 1024;
@@ -59,11 +61,13 @@ pub struct Falcon512 {
 }
 
 impl Falcon512 {
+    /// Generate a fresh Falcon-512 keypair using the OS RNG.
     pub fn generate() -> Self {
         let (pk, sk) = pqf::keypair();
         Self { pk, sk }
     }
 
+    /// Construct a `Falcon512` from an existing `pqcrypto-falcon` keypair.
     pub fn from_keypair(pk: pqf::PublicKey, sk: pqf::SecretKey) -> Self {
         Self { pk, sk }
     }

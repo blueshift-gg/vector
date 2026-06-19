@@ -43,39 +43,54 @@ pub const STAKE_PROGRAM_ID: Address =
 /// What kind of authority/asset an audited item represents.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScanKind {
+    /// Native SOL balance of the old wallet.
     Sol,
+    /// SPL Token (legacy) account owned by the old wallet.
     Token,
+    /// SPL Token-2022 account owned by the old wallet.
     Token2022,
+    /// Stake account where the old wallet is staker or withdraw authority.
     Stake,
+    /// Mint authority on a declared mint.
     MintAuthority,
+    /// Freeze authority on a declared mint.
     FreezeAuthority,
+    /// Generic account with a declared authority offset.
     Account,
 }
 
 /// Whether an item has been migrated off the old authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScanStatus {
+    /// The authority on this item now points at the target PDA.
     Migrated,
+    /// The authority on this item still points at the old wallet.
     Unmigrated,
 }
 
 /// One audited item: an account the old authority did or did not migrate.
 #[derive(Clone, Debug)]
 pub struct ScanItem {
+    /// Category of this asset (SOL, token, stake, etc.).
     pub kind: ScanKind,
     /// Base58 address of the controlled account (or the old wallet, for SOL).
     pub address: String,
+    /// Whether this item has been migrated to the target PDA.
     pub status: ScanStatus,
+    /// Optional human-readable detail string explaining the status.
     pub detail: Option<String>,
 }
 
 /// Full migration audit for one `owner` → `pda` pair.
 #[derive(Clone, Debug)]
 pub struct MigrationReport {
+    /// Base58 address of the old authority being migrated away from.
     pub owner: String,
+    /// Base58 address of the target Vector PDA.
     pub pda: String,
     /// True iff nothing controllable remains on the old authority.
     pub complete: bool,
+    /// All audited items (both migrated and unmigrated).
     pub items: Vec<ScanItem>,
     /// Convenience: just the items still on the old key — your to-do list.
     pub unmigrated: Vec<ScanItem>,
@@ -102,9 +117,13 @@ impl MigrationReport {
 /// A generic account to audit: verify the 32-byte authority at `authority_offset`.
 #[derive(Clone, Debug)]
 pub struct DeclaredAccount {
+    /// On-chain address of the account to audit.
     pub address: Address,
+    /// Byte offset within the account data where the 32-byte authority pubkey lives.
     pub authority_offset: usize,
+    /// Optional scan category override; defaults to [`ScanKind::Account`] if `None`.
     pub kind: Option<ScanKind>,
+    /// Optional human-readable label included in the `detail` string.
     pub label: Option<String>,
 }
 

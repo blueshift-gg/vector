@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
 //! Off-chain helpers for constructing Vector program instructions and
 //! computing the digests the on-chain programs verify.
 //!

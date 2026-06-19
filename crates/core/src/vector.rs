@@ -14,12 +14,16 @@ use crate::scheme::{Registration, Signer, SingleTxRegister};
 /// or many — all run under the vector PDA's signer seeds.
 #[derive(Clone, Debug)]
 pub enum Op {
+    /// No-op advance: rotate the nonce only (revoke / checkpoint).
     Inert,
+    /// A single CPI instruction to run under the PDA's signer seeds.
     One(Instruction),
+    /// Multiple CPI instructions to run sequentially under the PDA's signer seeds.
     Many(Vec<Instruction>),
 }
 
 impl Op {
+    /// Flatten the op into a `Vec<Instruction>` (empty for `Inert`).
     pub fn into_vec(self) -> Vec<Instruction> {
         match self {
             Op::Inert => vec![],
@@ -48,21 +52,25 @@ pub struct Vector<S: Signer> {
 }
 
 impl<S: Signer> Vector<S> {
+    /// Create a `Vector` with no explicit fee payer (the runtime default will be used).
     pub fn new(signer: S) -> Self {
         Self {
             signer,
             fee_payer: None,
         }
     }
+    /// Create a `Vector` and record `fee_payer` in every emitted [`Artifact`].
     pub fn with_fee_payer(signer: S, fee_payer: Address) -> Self {
         Self {
             signer,
             fee_payer: Some(fee_payer),
         }
     }
+    /// Client-side identity bytes for this signer (delegated to `S::identity`).
     pub fn identity(&self) -> Vec<u8> {
         self.signer.identity()
     }
+    /// Derive the on-chain PDA address for this identity.
     pub fn pda(&self) -> Address {
         find_vector_pda(&S::descriptor(), &self.identity()).0
     }
@@ -132,10 +140,12 @@ impl<S: Registration> Vector<S> {
             .collect()
     }
 
+    /// Authorize a `withdraw` sub-instruction: drain `lamports` from the PDA to `to`.
     pub fn withdraw(&self, nonce: &[u8; 32], to: &Address, lamports: u64) -> Artifact {
         let ix = create_withdraw_subinstruction(&S::descriptor(), &self.identity(), to, lamports);
         self.authorize(nonce, Op::One(ix))
     }
+    /// Authorize a `close` sub-instruction: drain the entire PDA balance to `to`.
     pub fn close(&self, nonce: &[u8; 32], to: &Address) -> Artifact {
         let ix = create_close_subinstruction(&S::descriptor(), &self.identity(), to);
         self.authorize(nonce, Op::One(ix))
@@ -234,12 +244,20 @@ mod branch_tests {
 /// advance sits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Artifact {
+    /// Program ID of the scheme that produced this artifact.
     pub program_id: Address,
+    /// Client-side identity bytes (pubkey or `sha256(wire_pk)` for PQ schemes).
     pub identity: Vec<u8>,
+    /// Nonce the signer committed to; becomes stale once the advance lands.
     pub nonce: [u8; 32],
+    /// The advance digest: becomes the new on-chain nonce after the advance lands.
     pub next_nonce: [u8; 32],
+    /// Optional explicit fee payer; `None` means the runtime default.
     pub fee_payer: Option<Address>,
+    /// Wire public key (PQ schemes only); `None` for curve schemes.
     pub public_key: Option<Vec<u8>>,
+    /// Index of the `advance` instruction within `instructions`.
     pub advance_index: usize,
+    /// Full ordered instruction layout: `[..pre, advance, ..passthrough]`.
     pub instructions: Vec<Instruction>,
 }

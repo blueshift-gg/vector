@@ -11,6 +11,7 @@ use crate::instructions::{create_advance_instruction, create_initialize_instruct
 use crate::protocol::advance_vector_digest;
 use crate::scheme::{Scheme, SchemeMeta, Signer, Verifier};
 
+/// Length of an Ed25519 public key in bytes.
 pub const ED25519_PUBKEY_LEN: usize = 32;
 
 /// Ed25519 — identity is the 32-byte public key.
@@ -68,12 +69,14 @@ pub struct Ed25519 {
 }
 
 impl Ed25519 {
+    /// Construct an Ed25519 signer from a 32-byte raw seed.
     pub fn from_seed(seed: &[u8; 32]) -> Self {
         Self {
             key: SigningKey::from_bytes(seed),
         }
     }
 
+    /// Borrow the inner `ed25519_dalek` signing key.
     pub fn signing_key(&self) -> &SigningKey {
         &self.key
     }

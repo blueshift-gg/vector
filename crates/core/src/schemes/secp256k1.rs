@@ -9,6 +9,7 @@ use crate::instructions::{create_advance_instruction, create_initialize_instruct
 use crate::protocol::advance_vector_digest;
 use crate::scheme::Scheme;
 
+/// Length of a sec1-compressed secp256k1 public key in bytes.
 pub const SECP256K1_COMPRESSED_PUBKEY_LEN: usize = 33;
 
 /// Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey.
@@ -78,6 +79,7 @@ pub struct Secp256k1 {
 }
 
 impl Secp256k1 {
+    /// Construct a secp256k1 signer from a 32-byte scalar (panics if not a valid scalar).
     pub fn from_seed(seed: &[u8; 32]) -> Self {
         Self {
             key: Secp256k1SigningKey::from_slice(seed).expect("valid secp256k1 scalar"),

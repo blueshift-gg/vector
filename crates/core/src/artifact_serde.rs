@@ -84,12 +84,16 @@ pub fn serialize_artifact(a: &Artifact) -> String {
 /// Why an artifact JSON failed to decode.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DeserializeError {
+    /// The outer JSON is malformed or has an unexpected structure.
     #[error("invalid artifact JSON: {0}")]
     Json(String),
+    /// A field that must contain a lowercase hex string has invalid hex.
     #[error("invalid hex in field `{0}`")]
     Hex(&'static str),
+    /// A field that must contain a base58 Solana address failed to parse.
     #[error("invalid base58 address: `{0}`")]
     Address(String),
+    /// A decoded byte buffer has the wrong length for its field.
     #[error("field `{0}` has the wrong byte length")]
     Length(&'static str),
 }
