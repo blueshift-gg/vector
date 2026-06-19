@@ -160,9 +160,13 @@ fn summarize_ix(ix: &Instruction, program_id: &Address) -> String {
     // Vector passthrough instruction
     if pid == program_id && data.first() == Some(&PASSTHROUGH_DISCRIMINATOR) {
         let n = data.get(1).copied().unwrap_or(0);
-        // Try to decode sub-instructions and label them
+        // Try to decode sub-instructions and label them.
+        // Account-meta cursor: index 0 = vector_pda, index 1 = instructions_sysvar,
+        // then per sub-ix: index `acct_cursor` = sub_program, followed by num_accounts
+        // sub-ix accounts. Advance cursor by 1 + num_accounts per sub-ix.
         let mut labels: Vec<String> = Vec::new();
         let mut d_off: usize = 2;
+        let mut acct_cursor: usize = 2; // points at the sub-ix program account in ix.accounts
         for _ in 0..n {
             let num_accounts = match data.get(d_off) {
                 Some(&v) => v as usize,
@@ -173,20 +177,35 @@ fn summarize_ix(ix: &Instruction, program_id: &Address) -> String {
                 None => break,
             };
             let sub_data = data.get(d_off + 3..d_off + 3 + data_len).unwrap_or(&[]);
-            let label = if num_accounts == 0 && !sub_data.is_empty() {
-                format!("sub-ix({}B)", sub_data.len())
-            } else {
-                match sub_data.first() {
-                    Some(&WITHDRAW_DISCRIMINATOR) => {
-                        let lamports = read_u64_le(sub_data, 1).unwrap_or(0);
-                        format!("withdraw {} lamports", lamports)
+
+            // Recover sub-ix program id from account metas (safe: use .get())
+            let sub_program_id = ix.accounts.get(acct_cursor).map(|m| &m.pubkey);
+
+            let label = match sub_program_id {
+                Some(sub_pid) if sub_pid == program_id => {
+                    // This sub-ix targets the Vector program — apply Vector-op labels
+                    match sub_data.first() {
+                        Some(&WITHDRAW_DISCRIMINATOR) => {
+                            let lamports = read_u64_le(sub_data, 1).unwrap_or(0);
+                            format!("withdraw {} lamports", lamports)
+                        }
+                        Some(&CLOSE_DISCRIMINATOR) => "close".to_string(),
+                        _ => format!("sub-ix({}B)", sub_data.len()),
                     }
-                    Some(&CLOSE_DISCRIMINATOR) => "close".to_string(),
-                    _ => format!("sub-ix({}B)", sub_data.len()),
+                }
+                Some(sub_pid) => {
+                    // Foreign program — render neutrally, include program id so reviewer
+                    // can see what runs. Mirror the top-level "raw <pid>: <hex>…" style.
+                    format!("raw {}: {}…", sub_pid, hex8(sub_data))
+                }
+                None => {
+                    // Account-meta cursor overflowed (corrupt artifact) — degrade safely
+                    format!("sub-ix({}B)", sub_data.len())
                 }
             };
             labels.push(label);
             d_off += 3 + data_len;
+            acct_cursor += 1 + num_accounts;
         }
         if labels.is_empty() {
             return format!("passthrough: {} sub-instruction(s)", n);
@@ -396,6 +415,54 @@ mod tests {
         assert!(
             passthrough_line.contains("42000"),
             "expected lamport amount '42000' in passthrough line, got: {passthrough_line:?}"
+        );
+    }
+
+    #[test]
+    fn summarize_labels_genuine_vector_withdraw() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let to = solana_address::address!("11111111111111111111111111111111");
+        let art = v.withdraw(&[0u8; 32], &to, 1234);
+        let lines = summarize(&art);
+        assert!(
+            lines.iter().any(|l| l.contains("withdraw 1234 lamports")),
+            "expected a line with 'withdraw 1234 lamports', got: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn summarize_does_not_mislabel_foreign_sub_ix() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let some_addr = solana_address::address!("So11111111111111111111111111111111111111112");
+        let other_addr = solana_address::address!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+        let auth_addr = solana_address::address!("7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs");
+        let foreign = solana_instruction::Instruction {
+            program_id: solana_address::address!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+            accounts: vec![
+                solana_instruction::AccountMeta::new(some_addr, false),
+                solana_instruction::AccountMeta::new(other_addr, false),
+                solana_instruction::AccountMeta::new_readonly(auth_addr, true),
+            ],
+            data: {
+                let mut d = vec![3u8]; // same byte as WITHDRAW_DISCRIMINATOR
+                d.extend_from_slice(&1000u64.to_le_bytes()); // SPL Transfer shape
+                d
+            },
+        };
+        let art = v.authorize(&[0u8; 32], Op::One(foreign));
+        let lines = summarize(&art);
+        // No line should claim this is a "withdraw"
+        assert!(
+            !lines.iter().any(|l| l.contains("withdraw")),
+            "expected no 'withdraw' label for foreign sub-ix, got: {lines:?}"
+        );
+        // The passthrough line should reference the token program id
+        let token_program = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains(token_program) || l.contains("Toke") || l.contains("Q5DA")),
+            "expected token program id referenced in summarize output, got: {lines:?}"
         );
     }
 
