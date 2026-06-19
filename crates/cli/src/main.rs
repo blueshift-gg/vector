@@ -1,4 +1,5 @@
 mod offline;
+mod online;
 mod scheme_arg;
 
 use clap::{Parser, Subcommand};
@@ -34,6 +35,8 @@ enum Commands {
         url: String,
         #[arg(long)]
         keypair: String,
+        #[arg(long)]
+        signer_seed: String,
         #[arg(long, value_enum)]
         scheme: SchemeArg,
         #[arg(long)]
@@ -78,23 +81,15 @@ async fn dispatch(cli: Cli) -> Result<(), String> {
                 std::process::exit(1)
             }
         },
-        Commands::Nonce { url, pda } => {
-            let _ = (url, pda);
-            todo!("C3: nonce")
-        }
+        Commands::Nonce { url, pda } => online::nonce(&url, &pda).await,
         Commands::Advance {
             url,
             keypair,
+            signer_seed,
             scheme,
             to,
             lamports,
-        } => {
-            let _ = (url, keypair, scheme, to, lamports);
-            todo!("C3: advance")
-        }
-        Commands::Scan { url, owner, pda } => {
-            let _ = (url, owner, pda);
-            todo!("C3: scan")
-        }
+        } => online::advance(&url, &keypair, &signer_seed, scheme, to, lamports).await,
+        Commands::Scan { url, owner, pda } => online::scan(&url, &owner, &pda).await,
     }
 }

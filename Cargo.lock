@@ -5247,6 +5247,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "serde_json",
+ "solana-address 2.6.0",
+ "solana-keypair",
+ "solana-signer",
  "tokio",
  "vector-client",
  "vector-core",
