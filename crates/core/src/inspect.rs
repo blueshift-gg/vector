@@ -1,6 +1,5 @@
 //! Offline inspection + verification of [`Artifact`]s — decode intent and
 //! check signatures without a chain connection.
-use crate::protocol::digest::advance_vector_digest;
 use crate::protocol::encoding::ADVANCE_DISCRIMINATOR;
 use crate::scheme::{SchemeMeta, Verifier};
 use crate::vector::Artifact;
@@ -11,10 +10,17 @@ pub enum VerifyError {
     Malformed,
 }
 
-/// Recompute the advance digest from the artifact layout and verify the
-/// signature with the matching scheme's offline verifier. Dispatch covers
-/// only the compiled-in schemes (feature-gated). Tampered sig => Ok(false);
-/// unknown program => Err(UnsupportedProgram).
+/// Verify the artifact's signature against the digest computed over the
+/// REAL instruction layout in hand (not a normalized reconstruction).
+///
+/// Before verifying, the advance ix is asserted to be the canonical shape
+/// and bound to the correct PDA + instructions sysvar: a mutated account
+/// list, an advance pointing at the wrong PDA, or trailing bytes after the
+/// signature all yield `Err(Malformed)`. This restores the "offline verify
+/// == will run on chain" guarantee. Dispatch covers only the compiled-in
+/// schemes (feature-gated). Tampered sig => Ok(false); unknown program =>
+/// Err(UnsupportedProgram); hostile/malformed bytes => Err(Malformed)
+/// (never a panic).
 pub fn verify_artifact(a: &Artifact) -> Result<bool, VerifyError> {
     let adv = a
         .instructions
@@ -23,9 +29,6 @@ pub fn verify_artifact(a: &Artifact) -> Result<bool, VerifyError> {
     if adv.data.first() != Some(&ADVANCE_DISCRIMINATOR) {
         return Err(VerifyError::Malformed);
     }
-    let pre = &a.instructions[..a.advance_index];
-    let post = &a.instructions[a.advance_index + 1..];
-    let signature = &adv.data[1..]; // [discriminator, ...signature]
 
     macro_rules! dispatch {
         ($($feat:literal => $ty:path),* $(,)?) => {{
@@ -33,13 +36,36 @@ pub fn verify_artifact(a: &Artifact) -> Result<bool, VerifyError> {
                 #[cfg(feature = $feat)]
                 {
                     if a.program_id == <$ty as SchemeMeta>::PROGRAM_ID {
-                        let digest = advance_vector_digest(
-                            &<$ty as SchemeMeta>::descriptor(),
+                        let adv = &a.instructions[a.advance_index];
+                        let scheme = <$ty as SchemeMeta>::descriptor();
+                        if a.identity.len() != <$ty as SchemeMeta>::IDENTITY_LEN {
+                            return Err(VerifyError::Malformed);
+                        }
+                        if adv.program_id != a.program_id {
+                            return Err(VerifyError::Malformed);
+                        }
+                        if adv.data.len() != 1 + <$ty as SchemeMeta>::SIGNATURE_LEN {
+                            return Err(VerifyError::Malformed);
+                        }
+                        let pda = crate::protocol::pda::find_vector_pda(&scheme, &a.identity).0;
+                        if adv.accounts.len() != 2
+                            || adv.accounts[0].pubkey != pda
+                            || adv.accounts[1].pubkey
+                                != crate::protocol::encoding::INSTRUCTIONS_SYSVAR_ID
+                        {
+                            return Err(VerifyError::Malformed);
+                        }
+                        let signature = &adv.data[1..];
+                        // FAITHFUL digest over the REAL instruction layout
+                        // (not a reconstruction):
+                        let digest = crate::protocol::digest::vector_digest(
+                            a.advance_index,
+                            <$ty as SchemeMeta>::SIGNATURE_LEN,
                             &a.nonce,
                             &a.identity,
-                            pre,
-                            post,
-                        );
+                            &a.instructions,
+                        )
+                        .ok_or(VerifyError::Malformed)?;
                         return Ok(<$ty as Verifier>::verify(
                             &a.identity,
                             a.public_key.as_deref(),
@@ -255,5 +281,48 @@ mod tests {
         let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
         let art = v.authorize(&[0u8; 32], Op::Inert);
         assert!(!summarize(&art).is_empty());
+    }
+    #[test]
+    fn rejects_mutated_advance_accounts() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let mut art = v.authorize(&[0u8; 32], Op::Inert);
+        // append a bogus extra account to the advance ix -> no longer canonical shape
+        art.instructions[0]
+            .accounts
+            .push(solana_instruction::AccountMeta::new_readonly(
+                solana_address::address!("11111111111111111111111111111111"),
+                false,
+            ));
+        assert!(matches!(verify_artifact(&art), Err(VerifyError::Malformed)));
+    }
+    #[test]
+    fn rejects_advance_pointing_at_wrong_pda() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let mut art = v.authorize(&[0u8; 32], Op::Inert);
+        art.instructions[0].accounts[0] = solana_instruction::AccountMeta::new(
+            solana_address::address!("11111111111111111111111111111111"),
+            false,
+        );
+        assert!(matches!(verify_artifact(&art), Err(VerifyError::Malformed)));
+    }
+    #[test]
+    fn rejects_trailing_bytes_on_advance() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let mut art = v.authorize(&[0u8; 32], Op::Inert);
+        art.instructions[0].data.push(0xab); // extra byte after the signature
+        assert!(matches!(verify_artifact(&art), Err(VerifyError::Malformed)));
+    }
+    #[test]
+    fn genuine_still_verifies_after_hardening() {
+        let v = Vector::new(Ed25519::from_seed(&[1u8; 32]));
+        let art = v.authorize(&[0u8; 32], Op::Inert);
+        assert!(verify_artifact(&art).unwrap());
+        // and a withdraw (has a passthrough post-ix) still verifies
+        let art2 = v.withdraw(
+            &[0u8; 32],
+            &solana_address::address!("11111111111111111111111111111111"),
+            1,
+        );
+        assert!(verify_artifact(&art2).unwrap());
     }
 }

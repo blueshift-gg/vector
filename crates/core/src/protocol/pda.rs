@@ -25,8 +25,14 @@ pub fn pda_seed_from_identity(identity: &[u8]) -> [u8; 32] {
 /// Derive the canonical `(vector_pda, bump)` for a scheme + identity.
 /// Seeds: `["vector", identity_seed]` (no scheme byte — the program ID is
 /// the discriminator).
+///
+/// Callers must pass an identity of the scheme's `identity_len`. A
+/// wrong-length identity won't OOB (the seed length is clamped to 32 and
+/// `pda_seed_from_identity` handles any length) but will derive a PDA that
+/// does not match the on-chain account; verification paths check the
+/// identity length up front before calling this.
 pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
-    debug_assert_eq!(identity.len(), scheme.identity_len);
+    // Tolerant guard: a mismatched length must not panic or OOB here.
     let seed_bytes = pda_seed_from_identity(identity);
     let seed_len = identity.len().min(32);
     Address::find_program_address(
