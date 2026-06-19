@@ -1,13 +1,26 @@
 //! Generic instruction builders, scheme-independent. Per-scheme convenience
 //! wrappers (e.g. `create_initialize_ed25519`) live in [`crate::schemes`].
 
-use solana_address::Address;
+use solana_address::{address, Address};
 use solana_instruction::{AccountMeta, Instruction};
 
-use crate::scheme::{
-    find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
+use crate::protocol::{
+    find_vector_pda, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
     INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
 };
+use crate::scheme::Scheme;
+
+/// ComputeBudget `SetComputeUnitLimit` (instruction 2): data = [2, units_le(4)], no accounts.
+pub fn set_compute_unit_limit(units: u32) -> Instruction {
+    let mut data = Vec::with_capacity(5);
+    data.push(2u8);
+    data.extend_from_slice(&units.to_le_bytes());
+    Instruction {
+        program_id: address!("ComputeBudget111111111111111111111111111111"),
+        accounts: vec![],
+        data,
+    }
+}
 
 /// Build an `initialize` instruction. `init_payload`'s shape is
 /// scheme-defined; there is no scheme byte (the program ID identifies it).

@@ -10,7 +10,7 @@ publish = false
 path = "lib.rs"
 
 [dependencies]
-vector-core = { path = "../crates/core" }
+vector-core = { path = "../crates/core", features = ["ed25519", "secp256k1", "eip191", "falcon512", "hawk512"] }
 mollusk-svm = "0.12.0"
 mollusk-svm-programs-token = "0.12.0"
 solana-account = "3.2.0"

@@ -1,21 +1,13 @@
 //! The scheme/program/account primitives shared by every scheme: the
-//! [`Scheme`] descriptor, the host-side [`VectorAccount`] header mirror, and
-//! canonical PDA derivation. Per-scheme details (identity derivation,
-//! signing, init builders) live in [`crate::schemes`].
+//! [`Scheme`] descriptor. Per-scheme details (identity derivation,
+//! signing, init builders) live in [`crate::schemes`]. Protocol-level
+//! constants, [`VectorAccount`], and PDA derivation live in
+//! [`crate::protocol`].
 
-use sha2::{Digest as Sha2Digest, Sha256};
-use solana_address::{address, Address};
-
-pub const SYSTEM_PROGRAM_ID: Address = address!("11111111111111111111111111111111");
-pub const INSTRUCTIONS_SYSVAR_ID: Address = address!("Sysvar1nstructions1111111111111111111111111");
-
-pub const INITIALIZE_DISCRIMINATOR: u8 = 0;
-pub const ADVANCE_DISCRIMINATOR: u8 = 1;
-pub const CLOSE_DISCRIMINATOR: u8 = 2;
-pub const WITHDRAW_DISCRIMINATOR: u8 = 3;
-pub const PASSTHROUGH_DISCRIMINATOR: u8 = 4;
-
-pub const VECTOR_PDA_SEED: &[u8] = b"vector";
+use crate::instructions::create_initialize_instruction;
+use crate::protocol::VectorAccount;
+use solana_address::Address;
+use solana_instruction::Instruction;
 
 /// Everything a client needs to address one Vector program. Each on-chain
 /// scheme is a separate program; this is the off-chain mirror of "which
@@ -46,63 +38,83 @@ impl Scheme {
     }
 }
 
-/// Host-side mirror of the on-chain `VectorAccount` *header*:
-/// `nonce (32) || bump (1)` — 33 bytes. The scheme's identity bytes follow
-/// at offset [`HEADER_LEN`](Self::HEADER_LEN).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VectorAccount {
-    pub nonce: [u8; 32],
-    pub bump: u8,
-}
-
-impl VectorAccount {
-    pub const HEADER_LEN: usize = 33;
-
-    /// Total on-chain account length for an identity of `identity_len` bytes.
-    pub const fn account_len(identity_len: usize) -> usize {
-        Self::HEADER_LEN + identity_len
-    }
-
-    pub fn header_bytes(&self) -> [u8; Self::HEADER_LEN] {
-        let mut bytes = [0u8; Self::HEADER_LEN];
-        bytes[..32].copy_from_slice(&self.nonce);
-        bytes[32] = self.bump;
-        bytes
-    }
-
-    pub fn from_header_bytes(bytes: &[u8; Self::HEADER_LEN]) -> Self {
-        let mut nonce = [0u8; 32];
-        nonce.copy_from_slice(&bytes[..32]);
-        VectorAccount {
-            nonce,
-            bump: bytes[32],
+/// Const dimensions + program id for one Vector program.
+pub trait SchemeMeta {
+    /// On-chain program ID for this scheme.
+    const PROGRAM_ID: Address;
+    /// Wire signature length in bytes carried in the `advance` instruction data.
+    const SIGNATURE_LEN: usize;
+    /// Client-side identity length: the value hashed into the digest and used for PDA derivation.
+    const IDENTITY_LEN: usize;
+    /// On-chain stored identity length: may differ from `IDENTITY_LEN` for PQ schemes.
+    const STORED_IDENTITY_LEN: usize;
+    /// Runtime descriptor for value-taking APIs (the digest builder).
+    fn descriptor() -> Scheme {
+        Scheme {
+            program_id: Self::PROGRAM_ID,
+            signature_len: Self::SIGNATURE_LEN,
+            identity_len: Self::IDENTITY_LEN,
+            stored_identity_len: Self::STORED_IDENTITY_LEN,
         }
     }
 }
 
-/// 32-byte PDA-seed input derived from a scheme's identity: identity bytes
-/// themselves when `identity.len() <= 32`, `sha256(identity)` otherwise.
-/// Off-chain mirror of `IdentitySeed::default_from` in `vector-common`.
-pub fn pda_seed_from_identity(identity: &[u8]) -> [u8; 32] {
-    if identity.len() <= 32 {
-        let mut out = [0u8; 32];
-        out[..identity.len()].copy_from_slice(identity);
-        out
-    } else {
-        Sha256::digest(identity).into()
+/// Holds a secret; produces the wire signature over the advance digest.
+pub trait Signer: SchemeMeta {
+    /// Client identity (`IDENTITY_LEN` bytes): pubkey/address, or
+    /// `sha256(wire)` for PQ schemes.
+    fn identity(&self) -> Vec<u8>;
+    /// Wire pubkey carried in the artifact for PQ schemes; `None` for the
+    /// curve schemes.
+    fn public_key(&self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Wire signature over `digest`, `SIGNATURE_LEN` bytes.
+    fn sign(&self, digest: &[u8; 32]) -> Vec<u8>;
+}
+
+/// Transaction-layout for account lifecycle (NOT key custody): the
+/// registration transaction(s) and any pre-instructions the advance digest
+/// must commit to (e.g. a compute-budget bump for an expensive verify).
+pub trait Registration: Signer {
+    /// Top-level instructions that must precede the advance and be committed
+    /// by the digest. Default: none.
+    fn advance_pre_instructions(&self) -> Vec<Instruction> {
+        Vec::new()
+    }
+    /// Account-registration transactions, one group per transaction. Default:
+    /// a single `initialize` (init payload = wire pubkey for PQ schemes, else identity).
+    fn registration_groups(&self, payer: &Address) -> Vec<Vec<Instruction>> {
+        let id = self.identity();
+        let init_payload = self.public_key().unwrap_or_else(|| id.clone());
+        vec![vec![create_initialize_instruction(
+            payer,
+            &Self::descriptor(),
+            &id,
+            &init_payload,
+        )]]
     }
 }
 
-/// Derive the canonical `(vector_pda, bump)` for a scheme + identity.
-/// Seeds: `["vector", identity_seed]` (no scheme byte — the program ID is
-/// the discriminator).
-pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
-    debug_assert_eq!(identity.len(), scheme.identity_len);
-    let seed_bytes = pda_seed_from_identity(identity);
-    let seed_len = identity.len().min(32);
-    Address::find_program_address(
-        &[VECTOR_PDA_SEED, &seed_bytes[..seed_len]],
-        &scheme.program_id,
-    )
+/// Marker for schemes whose registration is a single transaction, so
+/// `Vector::initialize` (a one-tx convenience) is available. Multi-tx schemes
+/// (Hawk-512) implement only `Registration` and must use `register()`.
+pub trait SingleTxRegister: Registration {}
+
+/// Pure, offline signature check. No secret, no RPC.
+pub trait Verifier: SchemeMeta {
+    /// `identity` is the client identity; `public_key` is the PQ wire pubkey
+    /// when present.
+    fn verify(
+        identity: &[u8],
+        public_key: Option<&[u8]>,
+        digest: &[u8; 32],
+        signature: &[u8],
+    ) -> bool;
+}
+
+/// SDK-only sub-key lanes; only 32-byte-key schemes implement it.
+pub trait Derivable: Signer + Sized {
+    /// Derive child key at `index` using HKDF-SHA256 over the scheme's master secret.
+    fn derive(&self, index: u32) -> Self;
 }

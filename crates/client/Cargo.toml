@@ -1,0 +1,56 @@
+[package]
+name = "vector-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Async RPC client, migration, and scanner for Vector"
+
+[features]
+default = ["ed25519", "secp256k1", "eip191"]
+ed25519 = ["vector-core/ed25519"]
+secp256k1 = ["vector-core/secp256k1"]
+eip191 = ["vector-core/eip191"]
+falcon512 = ["vector-core/falcon512"]
+hawk512 = ["vector-core/hawk512"]
+
+[dependencies]
+vector-core = { path = "../core", default-features = false }
+solana-address = { workspace = true, features = ["curve25519"] }
+solana-instruction = { workspace = true }
+# Async RPC client. The 3.1.x line requires `solana-instruction = ^3.0.0`
+# (resolves to the workspace 3.4.0) and `solana-address = ^2.1.0` (resolves to
+# 2.6.0), so the offline `vector-core` Instruction/Address types are the SAME
+# types the RPC client's transaction builder expects in later tasks.
+# NOTE: do NOT bump to 4.x — solana-rpc-client 4.0.0 pins
+# `solana-instruction = >=3.2.0, <3.4.0`, which would force a SECOND
+# solana-instruction major-minor (3.3.x) alongside the workspace 3.4.0 and
+# break handing vector_core instructions to the tx builder.
+solana-rpc-client = "3.1"
+# RPC request/response + config/filter types for the migration scanner
+# (`scan.rs`). Matched to the `solana-rpc-client 3.1.14` release line, so it
+# pulls the SAME `solana-instruction 3.4.0` node — no second major is added.
+solana-rpc-client-api = "3.1"
+solana-commitment-config = "3"
+tokio = { version = "1", features = ["rt", "macros"] }
+# Transaction assembly + signing. All matched to what `solana-rpc-client 3.1`
+# already pulls in transitively, so no second major of any shared crate is
+# introduced and `solana-instruction` stays a single 3.4.0 node:
+#   solana-transaction 3.1.0  -> solana-message 3.1.0, solana-signer 3.0.0,
+#                                solana-signature 3.4.0, solana-instruction ^3 (3.4.0)
+#   solana-message 3.1.0      -> solana-address ^2.1 (2.6.0), solana-hash ^4.1 (4.3.0)
+# Note on solana-hash: `solana-message`/`solana-transaction` use `solana-hash 4.x`
+# for `recent_blockhash`, while `solana-rpc-client::get_latest_blockhash` returns
+# `solana-hash 3.1.0`. Both versions already existed in the tree before this task;
+# we pin `= "4"` to hold a direct handle to the tx-side `Hash` and bridge the RPC
+# 3.1.0 blockhash -> 4.x via bytes in `send_artifact` (same byte-bridge pattern
+# read.rs uses for Address/Pubkey).
+solana-transaction = "3"
+solana-message = "3"
+solana-keypair = "3"
+solana-signer = "3"
+solana-hash = "4"
+solana-signature = "3"
+thiserror = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }

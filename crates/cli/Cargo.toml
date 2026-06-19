@@ -1,0 +1,24 @@
+[package]
+name = "vector-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI for Vector: inspect, verify, and relay artifacts"
+
+[[bin]]
+name = "vector"
+path = "src/main.rs"
+
+[dependencies]
+vector-core = { path = "../core", features = ["ed25519", "secp256k1", "eip191", "falcon512", "hawk512"] }
+vector-client = { path = "../client" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde_json = "1"
+# `online.rs` needs the fee-payer key + its address: `solana-address` (workspace
+# 2.6.0, the same Address `vector-core`/`vector-client` use) for parsing/holding
+# addresses, `solana-keypair 3` to load the JSON key file, and `solana-signer 3`
+# for the `Signer` trait that exposes `Keypair::pubkey()`.
+solana-address = { workspace = true }
+solana-keypair = "3"
+solana-signer = "3"

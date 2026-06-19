@@ -7,10 +7,11 @@ use sha3::{Digest as Sha3Digest, Keccak256};
 use solana_address::{address, Address};
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
+use crate::protocol::advance_vector_digest;
 use crate::scheme::Scheme;
 
+/// Length of an Ethereum address in bytes.
 pub const EIP191_ETH_ADDRESS_LEN: usize = 20;
 
 /// secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address.
@@ -90,4 +91,100 @@ pub fn sign_advance_instruction_secp256k1_eip191(
     sig_bytes[..64].copy_from_slice(&sig.to_bytes());
     sig_bytes[64] = recid.to_byte();
     create_advance_instruction(&EIP191, &identity, &sig_bytes)
+}
+
+// ---------------------------------------------------------------------------
+// Eip191 struct — implements SchemeMeta + Signer + Verifier
+// ---------------------------------------------------------------------------
+
+use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
+
+use crate::scheme::{SchemeMeta, Signer, Verifier};
+
+/// EIP-191 secp256k1 signer/verifier. Identity is the 20-byte Ethereum address.
+#[derive(Clone)]
+pub struct Eip191 {
+    key: SigningKey,
+}
+
+impl Eip191 {
+    /// Construct an EIP-191 signer from a 32-byte secp256k1 scalar (panics if invalid).
+    pub fn from_seed(seed: &[u8; 32]) -> Self {
+        Self {
+            key: SigningKey::from_slice(seed).expect("valid secp256k1 scalar"),
+        }
+    }
+}
+
+impl SchemeMeta for Eip191 {
+    const PROGRAM_ID: solana_address::Address = EIP191.program_id;
+    const SIGNATURE_LEN: usize = 65;
+    const IDENTITY_LEN: usize = 20;
+    const STORED_IDENTITY_LEN: usize = 20;
+}
+
+impl Signer for Eip191 {
+    fn identity(&self) -> Vec<u8> {
+        let unc = self.key.verifying_key().to_encoded_point(false);
+        eth_address_from_pubkey(unc.as_bytes()).to_vec()
+    }
+
+    fn sign(&self, digest: &[u8; 32]) -> Vec<u8> {
+        let eth = eip191_envelope_hash(digest);
+        let (sig, rid): (Signature, RecoveryId) = self.key.sign_prehash(&eth).expect("sign");
+        let mut out = vec![0u8; 65];
+        out[..64].copy_from_slice(&sig.to_bytes());
+        out[64] = rid.to_byte();
+        out
+    }
+}
+
+impl crate::scheme::Registration for Eip191 {}
+impl crate::scheme::SingleTxRegister for Eip191 {}
+
+use crate::branching::derive_lane_seed;
+impl crate::scheme::Derivable for Eip191 {
+    fn derive(&self, index: u32) -> Self {
+        let master: [u8; 32] = self.key.to_bytes().into();
+        Self::from_seed(&derive_lane_seed(&master, "eip191", index))
+    }
+}
+
+impl Verifier for Eip191 {
+    fn verify(identity: &[u8], _pk: Option<&[u8]>, digest: &[u8; 32], signature: &[u8]) -> bool {
+        if signature.len() != 65 {
+            return false;
+        }
+        let eth = eip191_envelope_hash(digest);
+        let Ok(sig) = Signature::from_slice(&signature[..64]) else {
+            return false;
+        };
+        let Some(rid) = RecoveryId::from_byte(signature[64]) else {
+            return false;
+        };
+        let Ok(vk) = VerifyingKey::recover_from_prehash(&eth, &sig, rid) else {
+            return false;
+        };
+        let unc = vk.to_encoded_point(false);
+        eth_address_from_pubkey(unc.as_bytes()).as_slice() == identity
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scheme::{Signer, Verifier};
+
+    #[test]
+    fn sign_then_verify_roundtrip() {
+        let k = Eip191::from_seed(&[8u8; 32]);
+        let digest = [4u8; 32];
+        let sig = k.sign(&digest);
+        assert_eq!(sig.len(), 65);
+        assert_eq!(k.identity().len(), 20);
+        assert!(Eip191::verify(&k.identity(), None, &digest, &sig));
+        let mut bad = sig.clone();
+        bad[0] ^= 1;
+        assert!(!Eip191::verify(&k.identity(), None, &digest, &bad));
+    }
 }
