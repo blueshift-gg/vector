@@ -1,0 +1,97 @@
+mod scheme_arg;
+
+use clap::{Parser, Subcommand};
+use scheme_arg::SchemeArg;
+
+#[derive(Parser)]
+#[command(
+    name = "vector",
+    about = "Offline-signed Solana transactions that replace durable nonces"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Decode an artifact's intent (offline).
+    Inspect { file: String },
+    /// Human-readable sign-off block for an artifact (offline).
+    Review { file: String },
+    /// Verify an artifact's signature offline (exit 0 = valid).
+    Verify { file: String },
+    /// Read the current nonce of a vector PDA.
+    Nonce {
+        #[arg(long)]
+        url: String,
+        pda: String,
+    },
+    /// Sign + broadcast an advance (optionally with a withdraw op).
+    Advance {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        keypair: String,
+        #[arg(long, value_enum)]
+        scheme: SchemeArg,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        lamports: Option<u64>,
+    },
+    /// Audit whether an old authority's holdings have migrated to a PDA.
+    Scan {
+        #[arg(long)]
+        url: String,
+        #[arg(long)]
+        owner: String,
+        #[arg(long)]
+        pda: String,
+    },
+}
+
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    let result: Result<(), String> = dispatch(cli).await;
+    if let Err(e) = result {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+async fn dispatch(cli: Cli) -> Result<(), String> {
+    match cli.command {
+        Commands::Inspect { file } => {
+            let _ = file;
+            todo!("C2: inspect")
+        }
+        Commands::Review { file } => {
+            let _ = file;
+            todo!("C2: review")
+        }
+        Commands::Verify { file } => {
+            let _ = file;
+            todo!("C2: verify")
+        }
+        Commands::Nonce { url, pda } => {
+            let _ = (url, pda);
+            todo!("C3: nonce")
+        }
+        Commands::Advance {
+            url,
+            keypair,
+            scheme,
+            to,
+            lamports,
+        } => {
+            let _ = (url, keypair, scheme, to, lamports);
+            todo!("C3: advance")
+        }
+        Commands::Scan { url, owner, pda } => {
+            let _ = (url, owner, pda);
+            todo!("C3: scan")
+        }
+    }
+}
