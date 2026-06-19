@@ -6,7 +6,7 @@ use solana_signer::Signer as _;
 use std::str::FromStr;
 use vector_client::read::VectorClient;
 use vector_client::scan::{MigrationReport, ScanOptions};
-use vector_core::{Artifact, Ed25519, Eip191, Hawk512, Op, Secp256k1, Signer, Vector};
+use vector_core::{Artifact, Ed25519, Eip191, Hawk512, Op, Registration, Secp256k1, Vector};
 
 fn addr(s: &str) -> Result<Address, String> {
     Address::from_str(s).map_err(|_| format!("bad address: {s}"))
@@ -76,7 +76,7 @@ pub async fn scan(url: &str, owner: &str, pda: &str) -> Result<(), String> {
 
 /// Read the current nonce and produce a signed artifact (inert, or a withdraw
 /// if `to`+`lamports` are given). Generic so every scheme shares this path.
-async fn make_artifact<S: Signer>(
+async fn make_artifact<S: Registration>(
     client: &VectorClient,
     v: Vector<S>,
     to: Option<Address>,

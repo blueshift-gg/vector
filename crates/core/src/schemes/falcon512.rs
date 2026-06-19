@@ -100,6 +100,9 @@ impl Signer for Falcon512 {
     }
 }
 
+impl crate::scheme::Registration for Falcon512 {}
+impl crate::scheme::SingleTxRegister for Falcon512 {}
+
 impl Verifier for Falcon512 {
     fn verify(
         identity: &[u8],

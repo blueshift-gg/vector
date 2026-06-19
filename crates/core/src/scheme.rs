@@ -67,17 +67,19 @@ pub trait Signer: SchemeMeta {
     }
     /// Wire signature over `digest`, `SIGNATURE_LEN` bytes.
     fn sign(&self, digest: &[u8; 32]) -> Vec<u8>;
+}
 
-    /// Top-level instructions that must precede the advance and be committed by
-    /// the digest (e.g. a compute-budget bump for an expensive on-chain verify).
-    /// Default: none.
+/// Transaction-layout for account lifecycle (NOT key custody): the
+/// registration transaction(s) and any pre-instructions the advance digest
+/// must commit to (e.g. a compute-budget bump for an expensive verify).
+pub trait Registration: Signer {
+    /// Top-level instructions that must precede the advance and be committed
+    /// by the digest. Default: none.
     fn advance_pre_instructions(&self) -> Vec<Instruction> {
         Vec::new()
     }
-
     /// Account-registration transactions, one group per transaction. Default:
-    /// a single `initialize` (init payload = the wire pubkey for PQ schemes,
-    /// else the identity itself). Multi-tx schemes (Hawk) override this.
+    /// a single `initialize` (init payload = wire pubkey for PQ schemes, else identity).
     fn registration_groups(&self, payer: &Address) -> Vec<Vec<Instruction>> {
         let id = self.identity();
         let init_payload = self.public_key().unwrap_or_else(|| id.clone());
@@ -89,6 +91,11 @@ pub trait Signer: SchemeMeta {
         )]]
     }
 }
+
+/// Marker for schemes whose registration is a single transaction, so
+/// `Vector::initialize` (a one-tx convenience) is available. Multi-tx schemes
+/// (Hawk-512) implement only `Registration` and must use `register()`.
+pub trait SingleTxRegister: Registration {}
 
 /// Pure, offline signature check. No secret, no RPC.
 pub trait Verifier: SchemeMeta {

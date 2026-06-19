@@ -96,6 +96,9 @@ impl Signer for Ed25519 {
     }
 }
 
+impl crate::scheme::Registration for Ed25519 {}
+impl crate::scheme::SingleTxRegister for Ed25519 {}
+
 use crate::branching::derive_lane_seed;
 impl crate::scheme::Derivable for Ed25519 {
     fn derive(&self, index: u32) -> Self {

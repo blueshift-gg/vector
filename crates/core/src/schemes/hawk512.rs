@@ -190,7 +190,9 @@ impl Signer for Hawk512 {
         let sig = hawk::sign(digest, &self.sk, &mut rng).expect("hawk sign");
         sig.as_bytes().to_vec()
     }
+}
 
+impl crate::scheme::Registration for Hawk512 {
     fn advance_pre_instructions(&self) -> Vec<Instruction> {
         // Hawk's on-chain verify draws ~410k CU; commit a budget bump as a signed pre-ix.
         vec![crate::instructions::set_compute_unit_limit(600_000)]

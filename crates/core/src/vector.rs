@@ -8,7 +8,7 @@ use crate::instructions::{
 };
 use crate::protocol::digest::advance_vector_digest;
 use crate::protocol::pda::find_vector_pda;
-use crate::scheme::Signer;
+use crate::scheme::{Registration, Signer, SingleTxRegister};
 
 /// What an authorization executes: nothing (inert advance / revoke), one CPI,
 /// or many — all run under the vector PDA's signer seeds.
@@ -66,19 +66,12 @@ impl<S: Signer> Vector<S> {
     pub fn pda(&self) -> Address {
         find_vector_pda(&S::descriptor(), &self.identity()).0
     }
+}
 
+impl<S: Registration> Vector<S> {
     /// Account-registration txs (one group per tx). Single-tx schemes return one group.
     pub fn register(&self, payer: &Address) -> Vec<Vec<Instruction>> {
         self.signer.registration_groups(payer)
-    }
-    /// Convenience for single-tx schemes; panics for multi-tx schemes (use `register`).
-    pub fn initialize(&self, payer: &Address) -> Instruction {
-        let mut g = self.signer.registration_groups(payer);
-        assert!(
-            g.len() == 1 && g[0].len() == 1,
-            "multi-tx scheme: use register()"
-        );
-        g.remove(0).remove(0)
     }
 
     /// Authorize an op against `nonce`: sign the advance digest, lay out
@@ -146,6 +139,14 @@ impl<S: Signer> Vector<S> {
     pub fn close(&self, nonce: &[u8; 32], to: &Address) -> Artifact {
         let ix = create_close_subinstruction(&S::descriptor(), &self.identity(), to);
         self.authorize(nonce, Op::One(ix))
+    }
+}
+
+impl<S: SingleTxRegister> Vector<S> {
+    /// Convenience for single-tx schemes: the lone `initialize` instruction.
+    /// Compile-time-guaranteed single group by the `SingleTxRegister` bound.
+    pub fn initialize(&self, payer: &Address) -> Instruction {
+        self.signer.registration_groups(payer).remove(0).remove(0)
     }
 }
 

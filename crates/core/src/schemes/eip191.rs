@@ -137,6 +137,9 @@ impl Signer for Eip191 {
     }
 }
 
+impl crate::scheme::Registration for Eip191 {}
+impl crate::scheme::SingleTxRegister for Eip191 {}
+
 use crate::branching::derive_lane_seed;
 impl crate::scheme::Derivable for Eip191 {
     fn derive(&self, index: u32) -> Self {

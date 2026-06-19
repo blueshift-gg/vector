@@ -110,6 +110,9 @@ impl Signer for Secp256k1 {
     }
 }
 
+impl crate::scheme::Registration for Secp256k1 {}
+impl crate::scheme::SingleTxRegister for Secp256k1 {}
+
 use crate::branching::derive_lane_seed;
 impl crate::scheme::Derivable for Secp256k1 {
     fn derive(&self, index: u32) -> Self {
