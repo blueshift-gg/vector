@@ -81,43 +81,58 @@ pub fn serialize_artifact(a: &Artifact) -> String {
     serde_json::to_string(&w).expect("serialize artifact")
 }
 
+/// Why an artifact JSON failed to decode.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum DeserializeError {
+    #[error("invalid artifact JSON: {0}")]
+    Json(String),
+    #[error("invalid hex in field `{0}`")]
+    Hex(&'static str),
+    #[error("invalid base58 address: `{0}`")]
+    Address(String),
+    #[error("field `{0}` has the wrong byte length")]
+    Length(&'static str),
+}
+
 /// Rebuild an [`Artifact`] from [`serialize_artifact`] output.
-pub fn deserialize_artifact(json: &str) -> Result<Artifact, String> {
-    let w: Wire = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let addr = |s: &str| Address::from_str(s).map_err(|_| format!("bad address {s}"));
+pub fn deserialize_artifact(json: &str) -> Result<Artifact, DeserializeError> {
+    let w: Wire = serde_json::from_str(json).map_err(|e| DeserializeError::Json(e.to_string()))?;
+    let addr = |s: &str| Address::from_str(s).map_err(|_| DeserializeError::Address(s.to_string()));
     Ok(Artifact {
         program_id: addr(&w.program_id)?,
-        identity: hex_dec(&w.identity).ok_or("bad identity hex")?,
+        identity: hex_dec(&w.identity).ok_or(DeserializeError::Hex("identity"))?,
         nonce: hex_dec(&w.nonce)
-            .and_then(|v| v.try_into().ok())
-            .ok_or("bad nonce")?,
+            .ok_or(DeserializeError::Hex("nonce"))?
+            .try_into()
+            .map_err(|_| DeserializeError::Length("nonce"))?,
         next_nonce: hex_dec(&w.next_nonce)
-            .and_then(|v| v.try_into().ok())
-            .ok_or("bad next_nonce")?,
+            .ok_or(DeserializeError::Hex("nextNonce"))?
+            .try_into()
+            .map_err(|_| DeserializeError::Length("nextNonce"))?,
         fee_payer: w.fee_payer.map(|s| addr(&s)).transpose()?,
         public_key: w
             .public_key
-            .map(|s| hex_dec(&s).ok_or("bad publicKey hex".to_string()))
+            .map(|s| hex_dec(&s).ok_or(DeserializeError::Hex("publicKey")))
             .transpose()?,
         advance_index: w.advance_index,
         instructions: w
             .instructions
             .into_iter()
             .map(|ix| {
-                Ok::<_, String>(Instruction {
+                Ok::<_, DeserializeError>(Instruction {
                     program_id: addr(&ix.program_id)?,
                     accounts: ix
                         .keys
                         .into_iter()
                         .map(|k| {
-                            Ok::<_, String>(AccountMeta {
+                            Ok::<_, DeserializeError>(AccountMeta {
                                 pubkey: addr(&k.pubkey)?,
                                 is_signer: k.is_signer,
                                 is_writable: k.is_writable,
                             })
                         })
                         .collect::<Result<_, _>>()?,
-                    data: hex_dec(&ix.data).ok_or("bad ix data hex")?,
+                    data: hex_dec(&ix.data).ok_or(DeserializeError::Hex("data"))?,
                 })
             })
             .collect::<Result<_, _>>()?,

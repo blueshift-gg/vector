@@ -39,16 +39,12 @@ impl crate::read::VectorClient {
         &self,
         art: &Artifact,
         payer: &solana_keypair::Keypair,
-    ) -> Result<Signature, String> {
+    ) -> Result<Signature, crate::error::ClientError> {
         use solana_signer::Signer;
 
         // RPC returns a `solana-hash 3.1.0` Hash; bridge it to the 4.x Hash the
         // message/transaction crates use, through bytes.
-        let rpc_blockhash = self
-            .rpc
-            .get_latest_blockhash()
-            .await
-            .map_err(|e| e.to_string())?;
+        let rpc_blockhash = self.rpc.get_latest_blockhash().await?;
         let blockhash = Hash::new_from_array(rpc_blockhash.to_bytes());
 
         // `payer.pubkey()` is `solana-pubkey 3.0.0`, a shim over the workspace
@@ -64,10 +60,7 @@ impl crate::read::VectorClient {
 
         // `send_and_confirm_transaction` returns `solana-signature 3.4.0` — the
         // single signature node this crate also pins — so it is returned as-is.
-        self.rpc
-            .send_and_confirm_transaction(&tx)
-            .await
-            .map_err(|e| e.to_string())
+        Ok(self.rpc.send_and_confirm_transaction(&tx).await?)
     }
 }
 

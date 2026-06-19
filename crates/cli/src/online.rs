@@ -42,7 +42,7 @@ fn load_fee_payer(path: &str) -> Result<Keypair, String> {
 
 pub async fn nonce(url: &str, pda: &str) -> Result<(), String> {
     let client = VectorClient::new(url);
-    let n = client.nonce(&addr(pda)?).await?;
+    let n = client.nonce(&addr(pda)?).await.map_err(|e| e.to_string())?;
     println!(
         "{}",
         n.iter().map(|b| format!("{b:02x}")).collect::<String>()
@@ -60,7 +60,8 @@ pub async fn scan(url: &str, owner: &str, pda: &str) -> Result<(), String> {
             accounts: vec![],
             dust_lamports: 0,
         })
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
     println!("complete: {}", report.complete);
     for item in &report.unmigrated {
         println!(
@@ -81,7 +82,7 @@ async fn make_artifact<S: Signer>(
     to: Option<Address>,
     lamports: Option<u64>,
 ) -> Result<Artifact, String> {
-    let n = client.nonce(&v.pda()).await?;
+    let n = client.nonce(&v.pda()).await.map_err(|e| e.to_string())?;
     Ok(match (to, lamports) {
         (Some(t), Some(l)) => v.withdraw(&n, &t, l),
         (None, None) => v.authorize(&n, Op::Inert),
@@ -150,7 +151,10 @@ pub async fn advance(
                 .into(),
         ),
     };
-    let sig = client.send_artifact(&art, &fee_payer).await?;
+    let sig = client
+        .send_artifact(&art, &fee_payer)
+        .await
+        .map_err(|e| e.to_string())?;
     println!("{sig}");
     Ok(())
 }

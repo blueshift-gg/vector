@@ -47,21 +47,13 @@ async fn airdrop_and_confirm(
     client: &VectorClient,
     pubkey: &Address,
     lamports: u64,
-) -> Result<(), String> {
+) -> Result<(), Box<dyn std::error::Error>> {
     // bridge Address -> Pubkey (same type via bytes, explicit for clarity)
     let key = Address::from(pubkey.to_bytes());
-    let sig: Signature = client
-        .rpc
-        .request_airdrop(&key, lamports)
-        .await
-        .map_err(|e| e.to_string())?;
+    let sig: Signature = client.rpc.request_airdrop(&key, lamports).await?;
     // Poll until confirmed.
     for _ in 0..30 {
-        let ok = client
-            .rpc
-            .confirm_transaction(&sig)
-            .await
-            .map_err(|e| e.to_string())?;
+        let ok = client.rpc.confirm_transaction(&sig).await?;
         if ok {
             return Ok(());
         }
@@ -75,25 +67,17 @@ async fn send_plain_tx(
     client: &VectorClient,
     instructions: &[solana_instruction::Instruction],
     payer: &Keypair,
-) -> Result<Signature, String> {
+) -> Result<Signature, Box<dyn std::error::Error>> {
     let payer_addr = Address::from(payer.pubkey().to_bytes());
 
     // Bridge RPC blockhash (solana-hash 3.x) -> tx blockhash (solana-hash 4.x)
-    let rpc_bh = client
-        .rpc
-        .get_latest_blockhash()
-        .await
-        .map_err(|e| e.to_string())?;
+    let rpc_bh = client.rpc.get_latest_blockhash().await?;
     let blockhash = Hash::new_from_array(rpc_bh.to_bytes());
 
     let tx =
         Transaction::new_signed_with_payer(instructions, Some(&payer_addr), &[payer], blockhash);
 
-    client
-        .rpc
-        .send_and_confirm_transaction(&tx)
-        .await
-        .map_err(|e| e.to_string())
+    Ok(client.rpc.send_and_confirm_transaction(&tx).await?)
 }
 
 /// Verify that the Vector PDA can hold SOL and spend it via an offline-signed
@@ -110,7 +94,7 @@ async fn send_plain_tx(
 /// 6. Assert the on-chain nonce advanced to `art.next_nonce`.
 #[tokio::test]
 #[ignore]
-async fn fund_in_pda_holds_and_spends_sol() -> Result<(), String> {
+async fn fund_in_pda_holds_and_spends_sol() -> Result<(), Box<dyn std::error::Error>> {
     let client = VectorClient::new(RPC);
     let payer = Keypair::new();
     let payer_addr = Address::from(payer.pubkey().to_bytes());
@@ -128,11 +112,7 @@ async fn fund_in_pda_holds_and_spends_sol() -> Result<(), String> {
 
     // 3. Read PDA balance before the withdrawal.
     let pda_key = Address::from(v.pda().to_bytes());
-    let balance_before: u64 = client
-        .rpc
-        .get_balance(&pda_key)
-        .await
-        .map_err(|e| e.to_string())?;
+    let balance_before: u64 = client.rpc.get_balance(&pda_key).await?;
 
     let nonce = client.nonce(&v.pda()).await?;
 
@@ -141,18 +121,12 @@ async fn fund_in_pda_holds_and_spends_sol() -> Result<(), String> {
     client.send_artifact(&art, &payer).await?;
 
     // 5. Assert PDA balance dropped by exactly 1_000 lamports.
-    let balance_after: u64 = client
-        .rpc
-        .get_balance(&pda_key)
-        .await
-        .map_err(|e| e.to_string())?;
+    let balance_after: u64 = client.rpc.get_balance(&pda_key).await?;
     let drop = balance_before
         .checked_sub(balance_after)
         .ok_or("balance increased unexpectedly")?;
     if drop != 1_000 {
-        return Err(format!(
-            "expected PDA balance to drop by 1_000 lamports, got {drop}"
-        ));
+        return Err(format!("expected PDA balance to drop by 1_000 lamports, got {drop}").into());
     }
 
     // 6. Assert the on-chain nonce advanced to art.next_nonce.
@@ -161,7 +135,8 @@ async fn fund_in_pda_holds_and_spends_sol() -> Result<(), String> {
         return Err(format!(
             "nonce mismatch: on-chain {new_nonce:?} != artifact next_nonce {:?}",
             art.next_nonce
-        ));
+        )
+        .into());
     }
 
     Ok(())
@@ -179,7 +154,7 @@ async fn fund_in_pda_holds_and_spends_sol() -> Result<(), String> {
 /// 4. Assert at least one `Sol`-kind item is `Unmigrated`.
 #[tokio::test]
 #[ignore]
-async fn scan_flags_funded_old_key() -> Result<(), String> {
+async fn scan_flags_funded_old_key() -> Result<(), Box<dyn std::error::Error>> {
     let client = VectorClient::new(RPC);
     let old = Keypair::new();
     let old_addr = Address::from(old.pubkey().to_bytes());

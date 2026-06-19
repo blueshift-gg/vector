@@ -5270,6 +5270,7 @@ dependencies = [
  "solana-signature",
  "solana-signer",
  "solana-transaction",
+ "thiserror 1.0.69",
  "tokio",
  "vector-core",
 ]
@@ -5303,6 +5304,7 @@ dependencies = [
  "solana-hawk512",
  "solana-instruction",
  "solana-instructions-sysvar",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

@@ -4,9 +4,11 @@ use crate::protocol::encoding::ADVANCE_DISCRIMINATOR;
 use crate::scheme::{SchemeMeta, Verifier};
 use crate::vector::Artifact;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum VerifyError {
+    #[error("artifact program id is not a supported (compiled-in) scheme")]
     UnsupportedProgram,
+    #[error("artifact is malformed: bad advance instruction, layout, or field length")]
     Malformed,
 }
 

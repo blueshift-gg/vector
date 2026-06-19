@@ -32,6 +32,7 @@ use solana_rpc_client_api::config::{
 use solana_rpc_client_api::filter::{Memcmp, RpcFilterType};
 use solana_rpc_client_api::request::TokenAccountsFilter;
 
+use crate::error::ClientError;
 use crate::migrate::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID};
 use crate::read::VectorClient;
 
@@ -138,7 +139,7 @@ impl VectorClient {
     /// Audit the migration of `opts.owner` → `opts.pda`. `complete` is true iff
     /// nothing controllable remains on `owner`. Run it, migrate
     /// `report.unmigrated`, re-run until complete.
-    pub async fn scan_migration(&self, opts: &ScanOptions) -> Result<MigrationReport, String> {
+    pub async fn scan_migration(&self, opts: &ScanOptions) -> Result<MigrationReport, ClientError> {
         let owner = opts.owner.to_string();
         let pda = opts.pda.to_string();
         let mut items: Vec<ScanItem> = Vec::new();
@@ -147,11 +148,7 @@ impl VectorClient {
         let owner_key = Address::from(opts.owner.to_bytes());
 
         // 1. Native SOL.
-        let balance = self
-            .rpc
-            .get_balance(&owner_key)
-            .await
-            .map_err(|e| e.to_string())?;
+        let balance = self.rpc.get_balance(&owner_key).await?;
         if balance > opts.dust_lamports {
             items.push(ScanItem {
                 kind: ScanKind::Sol,
@@ -177,8 +174,7 @@ impl VectorClient {
             let res = self
                 .rpc
                 .get_token_accounts_by_owner(&owner_key, TokenAccountsFilter::ProgramId(prog_key))
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             for keyed in res {
                 items.push(ScanItem {
                     kind: kind.clone(),
@@ -218,8 +214,7 @@ impl VectorClient {
             let accts = self
                 .rpc
                 .get_program_ui_accounts_with_config(&stake_program, config)
-                .await
-                .map_err(|e| e.to_string())?;
+                .await?;
             for (pubkey, _account) in accts {
                 let addr = pubkey.to_string();
                 if !seen_stake.insert(addr.clone()) {

@@ -5,7 +5,7 @@ use vector_core::{
 
 fn load(path: &str) -> Result<Artifact, String> {
     let json = std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
-    deserialize_artifact(&json)
+    deserialize_artifact(&json).map_err(|e| e.to_string())
 }
 
 /// Decoded one-line-per-instruction summary.
@@ -20,7 +20,7 @@ pub fn review(path: &str) -> Result<String, String> {
 
 /// Offline signature check: Ok(true) valid, Ok(false) invalid.
 pub fn verify(path: &str) -> Result<bool, String> {
-    verify_artifact(&load(path)?).map_err(|e| format!("{e:?}"))
+    verify_artifact(&load(path)?).map_err(|e| format!("{e}"))
 }
 
 #[cfg(test)]

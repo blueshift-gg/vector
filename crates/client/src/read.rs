@@ -12,6 +12,7 @@
 //! for explicitness and to silence any potential "different re-export path"
 //! lint; no extra dependencies are needed.
 
+use crate::error::ClientError;
 use solana_address::Address;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use vector_core::VectorAccount;
@@ -30,13 +31,13 @@ impl VectorClient {
     }
 
     /// Current 32-byte nonce from the PDA's account header.
-    pub async fn nonce(&self, pda: &Address) -> Result<[u8; 32], String> {
+    pub async fn nonce(&self, pda: &Address) -> Result<[u8; 32], ClientError> {
         let header = self.read_header(pda).await?;
         Ok(header.nonce)
     }
 
     /// Full account header (nonce + bump).
-    pub async fn status(&self, pda: &Address) -> Result<VectorAccount, String> {
+    pub async fn status(&self, pda: &Address) -> Result<VectorAccount, ClientError> {
         self.read_header(pda).await
     }
 
@@ -46,17 +47,16 @@ impl VectorClient {
     /// 3.0.0), which is `solana_address::Address` re-exported through a 1.1.0
     /// shim but ultimately the same `solana-address 2.6.0` concrete type.
     /// We convert through bytes to make the identity explicit.
-    async fn read_header(&self, pda: &Address) -> Result<VectorAccount, String> {
+    async fn read_header(&self, pda: &Address) -> Result<VectorAccount, ClientError> {
         // bytes conversion: pda (Address 2.6.0) → [u8;32] → Address 2.6.0
         // passed as the Pubkey the RPC client expects.
         let rpc_key = Address::from(pda.to_bytes());
-        let data = self
-            .rpc
-            .get_account_data(&rpc_key)
-            .await
-            .map_err(|e| e.to_string())?;
+        let data = self.rpc.get_account_data(&rpc_key).await?;
         if data.len() < VectorAccount::HEADER_LEN {
-            return Err("account too small for vector header".into());
+            return Err(ClientError::AccountTooSmall {
+                have: data.len(),
+                need: VectorAccount::HEADER_LEN,
+            });
         }
         let mut h = [0u8; VectorAccount::HEADER_LEN];
         h.copy_from_slice(&data[..VectorAccount::HEADER_LEN]);
