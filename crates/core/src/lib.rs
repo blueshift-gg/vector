@@ -16,6 +16,9 @@
 //!   [`create_advance_instruction`], [`create_passthrough_instruction`],
 //!   close/withdraw sub-instructions).
 //! - [`digest`] — [`advance_vector_digest`], the value clients sign.
+//! - [`verify`] — per-scheme offline verification of `advance` signatures
+//!   ([`verify_advance_signature_ed25519`] and friends), returning the
+//!   digest (= next nonce) on success.
 //! - [`schemes`] — one module per program (`ed25519`, `eip191`, `falcon512`,
 //!   `hawk512`, `secp256k1`): its `Scheme`/program-ID const, identity
 //!   derivation, an `initialize` builder, and a signer where one exists.
@@ -31,6 +34,7 @@ pub mod digest;
 pub mod instructions;
 pub mod scheme;
 pub mod schemes;
+pub mod verify;
 
 // Flat re-exports — the ergonomic surface. Names are unique across modules,
 // so a glob per module can't collide.
@@ -38,3 +42,4 @@ pub use digest::*;
 pub use instructions::*;
 pub use scheme::*;
 pub use schemes::{ed25519::*, eip191::*, falcon512::*, hawk512::*, secp256k1::*};
+pub use verify::*;

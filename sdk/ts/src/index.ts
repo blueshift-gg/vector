@@ -16,6 +16,9 @@
  * - `./instructions.js` — generic builders (initialize/advance/passthrough/
  *   close/withdraw, instructions-sysvar serialization).
  * - `./digest.js` — {@link advanceVectorDigest}, the value clients sign.
+ * - `./verify.js` — per-scheme offline verification of `advance` signatures
+ *   ({@link verifyAdvanceSignatureEd25519} and friends), returning the
+ *   digest (= next nonce) on success.
  * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
  *   `falcon512`, `hawk512`, `secp256k1`): its `Scheme`/program-ID const,
  *   identity derivation, an `initialize` builder, and a signer where one
@@ -39,6 +42,7 @@
 export * from "./scheme.js";
 export * from "./instructions.js";
 export * from "./digest.js";
+export * from "./verify.js";
 
 export * from "./schemes/ed25519.js";
 export * from "./schemes/eip191.js";

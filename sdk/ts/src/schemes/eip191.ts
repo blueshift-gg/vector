@@ -45,12 +45,17 @@ export function createInitializeEip191(
   return createInitializeInstruction(payer, EIP191, ethAddress, ethAddress);
 }
 
-/** EIP-191 personal-sign: `keccak256("\x19Ethereum Signed Message:\n32" || digest)` */
 const EIP191_PREFIX = new TextEncoder().encode(
   "\x19Ethereum Signed Message:\n32"
 );
 
-function eip191Hash(digest: Uint8Array): Uint8Array {
+/**
+ * `keccak256("\x19Ethereum Signed Message:\n32" || digest)` — the EIP-191
+ * personal-sign envelope the on-chain program reproduces before
+ * `secp256k1_recover`. Exported so external signers (HSMs, wallets exposing
+ * raw-prehash APIs) can be handed the exact prehash they expect.
+ */
+export function eip191EnvelopeHash(digest: Uint8Array): Uint8Array {
   const buf = new Uint8Array(EIP191_PREFIX.length + digest.length);
   buf.set(EIP191_PREFIX);
   buf.set(digest, EIP191_PREFIX.length);
@@ -79,11 +84,26 @@ export function signAdvanceInstructionEip191(
     feePayer
   );
 
-  const ethDigest = eip191Hash(digest);
+  const ethDigest = eip191EnvelopeHash(digest);
   const sig = secp256k1.sign(ethDigest, privateKey);
   const sigBytes = new Uint8Array(65);
   sigBytes.set(sig.toCompactRawBytes(), 0); // r || s (64 bytes)
   sigBytes[64] = sig.recovery; // v (1 byte)
 
   return createAdvanceInstruction(EIP191, identity, sigBytes);
+}
+
+/**
+ * Sign an inert advance — a revocation — with an EIP-191 secp256k1 key:
+ * {@link signAdvanceInstructionEip191} with empty pre/post instructions.
+ * Landing it only bumps the nonce, orphaning everything pre-signed against
+ * it. The digest (`revocationDigest`) commits to the broadcasting
+ * transaction containing ONLY this instruction; verify with
+ * `verifyAdvanceSignatureEip191` over empty pre/post arrays.
+ */
+export function signRevocationInstructionEip191(
+  privateKey: Uint8Array,
+  nonce: Uint8Array
+): TransactionInstruction {
+  return signAdvanceInstructionEip191(privateKey, nonce, [], []);
 }

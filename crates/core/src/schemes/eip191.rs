@@ -55,8 +55,9 @@ pub fn create_initialize_secp256k1_eip191(
 
 /// `keccak256("\x19Ethereum Signed Message:\n32" || digest)` — the EIP-191
 /// personal-sign envelope the on-chain program reproduces before
-/// `secp256k1_recover`.
-fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
+/// `secp256k1_recover`. Public so external signers (HSMs, wallets exposing
+/// raw-prehash APIs) can be handed the exact prehash they expect.
+pub fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Keccak256::new();
     hasher.update(b"\x19Ethereum Signed Message:\n32");
     hasher.update(digest);
@@ -90,4 +91,19 @@ pub fn sign_advance_instruction_secp256k1_eip191(
     sig_bytes[..64].copy_from_slice(&sig.to_bytes());
     sig_bytes[64] = recid.to_byte();
     create_advance_instruction(&EIP191, &identity, &sig_bytes)
+}
+
+/// Sign an inert advance — a revocation — with an EIP-191 secp256k1 key:
+/// [`sign_advance_instruction_secp256k1_eip191`] with empty pre/post
+/// instructions. Landing it only bumps the nonce, orphaning everything
+/// pre-signed against it. The digest
+/// ([`crate::digest::revocation_digest`]) commits to the broadcasting
+/// transaction containing ONLY this instruction; verify with
+/// [`crate::verify::verify_advance_signature_secp256k1_eip191`] over empty
+/// pre/post slices.
+pub fn sign_revocation_instruction_secp256k1_eip191(
+    signing_key: &Secp256k1SigningKey,
+    nonce: &[u8; 32],
+) -> Instruction {
+    sign_advance_instruction_secp256k1_eip191(signing_key, nonce, &[], &[])
 }
