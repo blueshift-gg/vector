@@ -21,15 +21,13 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
-import { hawk512 as nobleHawk } from "@blueshift-gg/hawk512";
 
-import { Scheme, sha256, FALCON_PUBKEY_LEN, HAWK_PUBKEY_LEN } from "./scheme.js";
+import { Scheme, sha256, FALCON_PUBKEY_LEN } from "./scheme.js";
 import { advanceVectorDigest } from "./digest.js";
 import { ED25519 } from "./schemes/ed25519.js";
 import { EIP191, eip191EnvelopeHash } from "./schemes/eip191.js";
 import { SECP256K1 } from "./schemes/secp256k1.js";
 import { FALCON512 } from "./schemes/falcon512.js";
-import { HAWK512 } from "./schemes/hawk512.js";
 
 // ── Errors ───────────────────────────────────────────────────────────
 
@@ -285,26 +283,3 @@ export function verifyAdvanceSignatureFalcon512(
   );
 }
 
-/**
- * Verify a Hawk-512 `advance` signature offline, given the 1024-byte wire
- * pubkey (the identity, `sha256(wire_pubkey)`, is derived from it).
- * `signature` is the 555-byte wire form. Returns the recomputed digest on
- * success.
- */
-export function verifyAdvanceSignatureHawk512(
-  wirePubkey: Uint8Array,
-  nonce: Uint8Array,
-  preInstructions: TransactionInstruction[],
-  postInstructions: TransactionInstruction[],
-  signature: Uint8Array,
-  feePayer?: Address
-): Uint8Array {
-  checkInputs(
-    "hawk512", nonce, wirePubkey, HAWK_PUBKEY_LEN, signature, HAWK512.signatureLen
-  );
-  return checkedDigest(
-    "hawk512", HAWK512, sha256(wirePubkey), nonce, preInstructions,
-    postInstructions, feePayer,
-    (digest) => nobleHawk.verify(signature, digest, wirePubkey)
-  );
-}

@@ -14,7 +14,4 @@ mod eip191;
 mod falcon512;
 
 #[cfg(test)]
-mod hawk512;
-
-#[cfg(test)]
 mod secp256k1;

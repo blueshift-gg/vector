@@ -41,19 +41,14 @@
     "./falcon512": {
       "import": "./sdk/ts/dist/schemes/falcon512.js",
       "types": "./sdk/ts/dist/schemes/falcon512.d.ts"
-    },
-    "./hawk512": {
-      "import": "./sdk/ts/dist/schemes/hawk512.js",
-      "types": "./sdk/ts/dist/schemes/hawk512.d.ts"
     }
   },
   "scripts": {
     "build": "tsc",
-    "validator": "solana-test-validator --bpf-program vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV ./target/deploy/vector_ed25519.so --bpf-program G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu ./target/deploy/vector_eip191.so --bpf-program HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm ./target/deploy/vector_falcon512.so --bpf-program 9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd ./target/deploy/vector_secp256k1.so --bpf-program Ecm48RMiE4qvyw6m4M5DeutpRAN1AF4tis6ijc6Zq3H9 ./target/deploy/vector_hawk512.so --account SysvarRent111111111111111111111111111111111 ./fixtures/rent.json --mint EvFUfisEScFuZSqDXagC17m3bpP32B74dseMHtzQ5TNb --reset",
+    "validator": "solana-test-validator --bpf-program vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV ./target/deploy/vector_ed25519.so --bpf-program G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu ./target/deploy/vector_eip191.so --bpf-program HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm ./target/deploy/vector_falcon512.so --bpf-program 9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd ./target/deploy/vector_secp256k1.so --account SysvarRent111111111111111111111111111111111 ./fixtures/rent.json --mint EvFUfisEScFuZSqDXagC17m3bpP32B74dseMHtzQ5TNb --reset",
     "test": "bun vitest run"
   },
   "dependencies": {
-    "@blueshift-gg/hawk512": "0.0.0",
     "@noble/curves": "^1.8.0",
     "@noble/hashes": "^1.7.0",
     "@noble/post-quantum": "^0.6.1",

@@ -20,7 +20,7 @@
  *   ({@link verifyAdvanceSignatureEd25519} and friends), returning the
  *   digest (= next nonce) on success.
  * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
- *   `falcon512`, `hawk512`, `secp256k1`): its `Scheme`/program-ID const,
+ *   `falcon512`, `secp256k1`): its `Scheme`/program-ID const,
  *   identity derivation, an `initialize` builder, and a signer where one
  *   exists.
  *
@@ -31,12 +31,11 @@
  * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";  // per-scheme
  * ```
  *
- * The Falcon/Hawk wire-size constants are owned by `./scheme.js` and
- * re-exported flat from there. `./schemes/falcon512.js` and
- * `./schemes/hawk512.js` also re-export them for their standalone subpath
- * entrypoints; to keep the flat API unambiguous they are NOT glob-exported
- * here from those modules (only the symbols unique to each scheme module
- * are).
+ * The Falcon wire-size constants are owned by `./scheme.js` and re-exported
+ * flat from there. `./schemes/falcon512.js` also re-exports them for its
+ * standalone subpath entrypoint; to keep the flat API unambiguous they are
+ * NOT glob-exported here from that module (only the symbols unique to the
+ * scheme module are).
  */
 
 export * from "./scheme.js";
@@ -48,9 +47,9 @@ export * from "./schemes/ed25519.js";
 export * from "./schemes/eip191.js";
 export * from "./schemes/secp256k1.js";
 
-// Falcon/Hawk: re-export only the scheme-unique symbols. The wire-size
+// Falcon: re-export only the scheme-unique symbols. The wire-size
 // constants come from `./scheme.js` above (re-exporting them again via
-// these modules would make them ambiguous and silently drop them from the
+// this module would make them ambiguous and silently drop them from the
 // flat barrel).
 export {
   FALCON512,
@@ -62,14 +61,3 @@ export {
   signAdvanceInstructionFalcon512,
 } from "./schemes/falcon512.js";
 export type { Falcon512Keypair } from "./schemes/falcon512.js";
-export {
-  HAWK512,
-  HAWK_SECRET_KEY_LEN,
-  hawk512Identity,
-  hawk512Keygen,
-  createInitializeHawk512,
-  createHawk512StoreWire,
-  createHawk512Finalize,
-  signAdvanceInstructionHawk512,
-} from "./schemes/hawk512.js";
-export type { Hawk512Keypair } from "./schemes/hawk512.js";

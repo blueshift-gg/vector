@@ -35,11 +35,6 @@ export const FALCON_PREPARED_PUBKEY_LEN = 1024;
 /** sec1-compressed secp256k1 public key length. */
 export const SECP256K1_COMPRESSED_PUBKEY_LEN = 33;
 
-// Hawk-512 wire sizes — mirror `solana-hawk512` constants.
-export const HAWK_PUBKEY_LEN = 1024;
-export const HAWK_SIGNATURE_LEN = 555;
-export const HAWK_PREPARED_PUBKEY_LEN = 18464;
-
 // ── Schemes ──────────────────────────────────────────────────────────
 
 /**

@@ -20,8 +20,8 @@
 //!   ([`verify_advance_signature_ed25519`] and friends), returning the
 //!   digest (= next nonce) on success.
 //! - [`schemes`] — one module per program (`ed25519`, `eip191`, `falcon512`,
-//!   `hawk512`, `secp256k1`): its `Scheme`/program-ID const, identity
-//!   derivation, an `initialize` builder, and a signer where one exists.
+//!   `secp256k1`): its `Scheme`/program-ID const, identity derivation, an
+//!   `initialize` builder, and a signer where one exists.
 //!
 //! Everything is re-exported flat at the crate root, so either style works:
 //!
@@ -41,5 +41,5 @@ pub mod verify;
 pub use digest::*;
 pub use instructions::*;
 pub use scheme::*;
-pub use schemes::{ed25519::*, eip191::*, falcon512::*, hawk512::*, secp256k1::*};
+pub use schemes::{ed25519::*, eip191::*, falcon512::*, secp256k1::*};
 pub use verify::*;

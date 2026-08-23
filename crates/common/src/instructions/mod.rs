@@ -21,9 +21,7 @@ pub mod withdraw;
 pub enum VectorInstruction {
     /// Create the vector account at the canonical PDA, derive the initial
     /// nonce on-chain, and write the header + the scheme's identity prefix.
-    /// Single-step schemes complete in this one call; Hawk-512 routes the
-    /// same discriminator to its own multi-step handler (see
-    /// `programs/hawk512/src/scheme.rs`).
+    /// Every scheme completes registration in this one call.
     Initialize = 0,
     /// Verify the advance signature and install the digest as the next
     /// nonce. Does NOT execute any CPI — pair with `Passthrough` in the

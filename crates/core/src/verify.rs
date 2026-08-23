@@ -28,13 +28,11 @@ use k256::ecdsa::{
 use sha3::{Digest as Sha3Digest, Keccak256};
 use solana_address::Address;
 use solana_falcon512::{Falcon512Pubkey, Falcon512Signature};
-use solana_hawk512::{Hawk512Pubkey, Hawk512Signature};
 use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest_with_fee_payer;
 use crate::schemes::eip191::{eip191_envelope_hash, EIP191, EIP191_ETH_ADDRESS_LEN};
 use crate::schemes::falcon512::{falcon512_identity, FALCON512, FALCON512_WIRE_PUBKEY_LEN};
-use crate::schemes::hawk512::{hawk512_identity, HAWK512, HAWK512_WIRE_PUBKEY_LEN};
 use crate::schemes::{
     ed25519::{ED25519, ED25519_PUBKEY_LEN},
     secp256k1::{SECP256K1, SECP256K1_COMPRESSED_PUBKEY_LEN},
@@ -255,37 +253,3 @@ pub fn verify_advance_signature_falcon512(
     }
 }
 
-/// Verify a Hawk-512 `advance` signature offline, given the 1024-byte wire
-/// pubkey (the identity, `sha256(wire_pubkey)`, is derived from it).
-/// `signature` is the 555-byte wire form. Verification runs
-/// `solana-hawk512`'s host-callable verifier over the raw digest — the same
-/// code path the on-chain program executes. Returns the recomputed digest
-/// on success.
-pub fn verify_advance_signature_hawk512(
-    wire_pubkey: &[u8; HAWK512_WIRE_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; crate::HAWK512_SIGNATURE_LEN] = signature
-        .try_into()
-        .map_err(|_| VerifyError::MalformedSignature("hawk512 signature must be 555 bytes"))?;
-    let identity = hawk512_identity(wire_pubkey);
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &HAWK512,
-        nonce,
-        &identity,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    if Hawk512Signature::from_ref(sig_bytes).verify(&digest, Hawk512Pubkey::from_ref(wire_pubkey)) {
-        Ok(digest)
-    } else {
-        Err(VerifyError::SignatureInvalid)
-    }
-}

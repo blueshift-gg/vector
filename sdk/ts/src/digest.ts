@@ -63,7 +63,7 @@ function promoteToMessageFlags(
 /**
  * Shared digest: `SHA256(buffer[..sigStart] || nonce || identity ||
  * buffer[sigEnd..])`. `identity` is the scheme's client identity bytes (for
- * Falcon/Hawk, `sha256(wire_pubkey)`).
+ * Falcon, `sha256(wire_pubkey)`).
  */
 function vectorDigest(
   targetIx: TransactionInstruction,
@@ -82,7 +82,7 @@ function vectorDigest(
   // match what the runtime will write at execution time. The footer is part
   // of `post`, which is folded into the hash, so the off-chain digest only
   // matches when this index is correct (a no-op for single-ix advance, but
-  // non-zero when there are pre-instructions like Hawk's CU bump).
+  // non-zero when there are pre-instructions like a CU bump).
   writeU16LE(buffer, targetIndex, buffer.length - 2);
 
   const ixOffsetPos = 2 + 2 * targetIndex;
@@ -141,9 +141,9 @@ export function advanceVectorDigest(
  * transaction, so a pre-signed revocation must be broadcast as a transaction
  * containing ONLY the advance instruction. ed25519 / eip191 / secp256k1
  * inert advances fit the default compute budget (~13k / ~26k / ~72k CUs);
- * for Falcon-512 / Hawk-512, sign via the advance signer with a
- * compute-budget pre-instruction committed at sign time (Hawk's verify
- * exceeds the 200k default).
+ * for Falcon-512, sign via the advance signer with a compute-budget
+ * pre-instruction committed at sign time (its ~184k CU verify leaves no
+ * headroom under the 200k default).
  *
  * Mirrors `revocation_digest` in `crates/core/src/digest.rs`.
  */

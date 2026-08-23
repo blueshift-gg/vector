@@ -20,13 +20,8 @@ use crate::state::VectorAccount;
 /// This is strictly *create*: it makes no owner/state checks and never
 /// resizes. Re-invoking it on an existing account fails naturally — the
 /// system-program `CreateAccount` CPI errors on an account it no longer
-/// owns. Single-step schemes (Ed25519/EIP-191/Falcon-512/Secp256k1) register
-/// in this one call. Hawk-512's program routes its *first* call here and
-/// follows up with `store_wire` + `finalize` (in
-/// `programs/hawk512/src/scheme.rs`): the base chunk allocated here is
-/// `min(full, MAX_PERMITTED_DATA_INCREASE)` since the full account exceeds
-/// the single-CPI allocation cap — rent is funded for the final size so the
-/// later resize stays rent-exempt.
+/// owns. Every current scheme (Ed25519/EIP-191/Falcon-512/Secp256k1)
+/// registers in this one call.
 ///
 /// Instruction data (after the discriminator): `init_payload` — the wire
 /// pubkey/address, length `S::INIT_PAYLOAD_LEN`. No scheme byte (the program
@@ -55,7 +50,7 @@ pub fn process<S: SigningScheme>(
 
     // PDA seed is derived directly from the payload (avoiding computing the
     // identity twice). For schemes where payload == identity this matches the
-    // default rule; Falcon/Hawk override so the seed is `sha256(wire_pubkey)`.
+    // default rule; Falcon overrides so the seed is `sha256(wire_pubkey)`.
     let identity_seed = S::pda_seed_from_payload(init_payload);
 
     let (expected_pda, bump) =
@@ -84,13 +79,13 @@ pub fn process<S: SigningScheme>(
     let signers = [Signer::from(&seeds)];
 
     // A CPI `CreateAccount` can only allocate up to
-    // `MAX_PERMITTED_DATA_INCREASE` bytes; schemes whose identity exceeds
-    // that (Hawk-512) get a base chunk now and grow in `prepare`. The
-    // post-CPI realloc rule anchors the per-ix grow cap to the account's
-    // size at the start of the *current* ix — which here is 0 (brand-new
-    // PDA), so we can't fold the second grow into call 1 either. Rent is
-    // funded for the *final* size so the account stays rent-exempt across
-    // the later resize in `prepare`.
+    // `MAX_PERMITTED_DATA_INCREASE` bytes. Every current scheme fits well
+    // inside that (the largest, Falcon-512, is 1090 bytes), so the clamp is
+    // a no-op today — it is kept so a future scheme with an oversized
+    // identity degrades into "allocate a base chunk, grow later" rather
+    // than failing the CPI outright. Rent is always funded for the *final*
+    // size, which keeps such an account rent-exempt across any later
+    // resize.
     let full_len = VectorAccount::account_len::<S>();
     let alloc_len = full_len.min(MAX_PERMITTED_DATA_INCREASE);
     let lamports = Rent::get()?.try_minimum_balance(full_len)?;
@@ -105,9 +100,8 @@ pub fn process<S: SigningScheme>(
     .invoke_signed(&signers)?;
 
     // Single mutable borrow: write the 33-byte header, then have the scheme
-    // populate the identity bytes that fit in the initial allocation.
-    // Single-step schemes get exactly `IDENTITY_LEN`; Hawk-512 gets the base
-    // chunk and writes only its cheap `sha256(wire)` prefix here.
+    // populate the identity bytes that fit in the initial allocation —
+    // exactly `IDENTITY_LEN` for every current scheme.
     {
         let mut data = vector.try_borrow_mut()?;
         data[..32].copy_from_slice(&nonce);

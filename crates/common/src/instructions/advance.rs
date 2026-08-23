@@ -36,7 +36,7 @@ pub(crate) fn cpi_guard() -> Result<(), ProgramError> {
 /// Instruction data (after the discriminator stripped by [`crate::dispatch`]):
 ///
 /// ```text
-/// [0..sig_len]  advance_vector_signature  (scheme-defined: 64 / 65 / 555 / 666)
+/// [0..sig_len]  advance_vector_signature  (scheme-defined: 64 / 65 / 666)
 /// ```
 ///
 /// Accounts:
