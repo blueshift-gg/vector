@@ -13,7 +13,7 @@ use spl_token_interface::{
 };
 use vector_core::{
     advance_vector_digest, create_passthrough_instruction, find_vector_pda, Scheme, VectorAccount,
-    ED25519, EIP191, FALCON512, HAWK512, SECP256K1,
+    ED25519, EIP191, FALCON512, SECP256K1,
 };
 
 /// Initial nonce used for advance/close digests across the suite.
@@ -32,7 +32,6 @@ fn program_path(scheme: &Scheme) -> &'static str {
         id if id == ED25519.program_id => "../target/deploy/vector_ed25519",
         id if id == EIP191.program_id => "../target/deploy/vector_eip191",
         id if id == FALCON512.program_id => "../target/deploy/vector_falcon512",
-        id if id == HAWK512.program_id => "../target/deploy/vector_hawk512",
         id if id == SECP256K1.program_id => "../target/deploy/vector_secp256k1",
         _ => panic!("unknown scheme program id"),
     }

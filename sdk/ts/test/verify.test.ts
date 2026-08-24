@@ -16,13 +16,11 @@ import {
   ed25519Identity,
   eip191Identity,
   falcon512Keygen,
-  hawk512Keygen,
   revocationDigest,
   secp256k1Identity,
   signAdvanceInstructionEd25519,
   signAdvanceInstructionEip191,
   signAdvanceInstructionFalcon512,
-  signAdvanceInstructionHawk512,
   signAdvanceInstructionSecp256k1,
   signRevocationInstructionEd25519,
 } from "../src/index.js";
@@ -34,7 +32,6 @@ import {
   verifyAdvanceSignatureEd25519,
   verifyAdvanceSignatureEip191,
   verifyAdvanceSignatureFalcon512,
-  verifyAdvanceSignatureHawk512,
   verifyAdvanceSignatureSecp256k1,
 } from "../src/verify.js";
 
@@ -147,24 +144,6 @@ describe("sign → verify round trips", () => {
     badNonce[0] ^= 0x01;
     expect(() =>
       verifyAdvanceSignatureFalcon512(keypair.publicKey, badNonce, pre, post, signature)
-    ).toThrow(SignatureVerificationError);
-  });
-
-  test("hawk512 (555-byte wire signature, wire pubkey input)", () => {
-    const keypair = hawk512Keygen(new Uint8Array(32).fill(0x55));
-    const { pre, post } = fixedIxLists();
-
-    const advance = signAdvanceInstructionHawk512(keypair, NONCE, pre, post);
-    const signature = sigOf(advance);
-    const digest = verifyAdvanceSignatureHawk512(
-      keypair.publicKey, NONCE, pre, post, signature
-    );
-    expect(digest.length).toBe(32);
-
-    const badNonce = new Uint8Array(NONCE);
-    badNonce[0] ^= 0x01;
-    expect(() =>
-      verifyAdvanceSignatureHawk512(keypair.publicKey, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
   });
 });

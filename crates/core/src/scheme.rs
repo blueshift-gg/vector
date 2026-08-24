@@ -19,9 +19,9 @@ pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 
 /// Everything a client needs to address one Vector program. Each on-chain
 /// scheme is a separate program; this is the off-chain mirror of "which
-/// program + how big its signature/identity are". The five concrete
+/// program + how big its signature/identity are". The four concrete
 /// instances live in [`crate::schemes`] (`ED25519`, `EIP191`, `FALCON512`,
-/// `SECP256K1`, `HAWK512`).
+/// `SECP256K1`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scheme {
     /// On-chain program ID. Must match the program's `declare_id!`.
@@ -30,7 +30,7 @@ pub struct Scheme {
     pub signature_len: usize,
     /// Length of the client-side identity — the value hashed into the
     /// advance digest and used to derive the PDA. For most schemes this is
-    /// the pubkey/address itself; for Falcon/Hawk it's `sha256(wire)` (32).
+    /// the pubkey/address itself; for Falcon it's `sha256(wire)` (32).
     pub identity_len: usize,
     /// Bytes the on-chain account stores after the 33-byte header. Equals
     /// `identity_len` for schemes that store the pubkey verbatim; larger for

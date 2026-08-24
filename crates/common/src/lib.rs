@@ -1,18 +1,14 @@
 //! Shared on-chain logic for the per-scheme Vector programs.
 //!
-//! Every Vector program (Ed25519, EIP-191, Falcon-512, secp256k1-ECDSA,
-//! Hawk-512) is a thin shell: it picks one [`SigningScheme`] and routes a
-//! discriminator to the shared instruction handlers exposed here
-//! ([`initialize`], [`advance`], [`close`], [`withdraw`], [`passthrough`]).
-//! The handlers are the single source of truth; only signature verification
-//! (the program's `SigningScheme` impl) and the dispatch table vary per
-//! program.
+//! Every Vector program (Ed25519, EIP-191, Falcon-512, secp256k1-ECDSA) is
+//! a thin shell: it picks one [`SigningScheme`] and routes a discriminator
+//! to the shared instruction handlers exposed here ([`initialize`],
+//! [`advance`], [`close`], [`withdraw`], [`passthrough`]). The handlers are
+//! the single source of truth; only signature verification (the program's
+//! `SigningScheme` impl) varies per program.
 //!
-//! Single-step schemes use the canonical [`dispatch`] router verbatim.
-//! Hawk-512 writes its own dispatch so its discriminator `0` can route to
-//! one of three registration steps (`initialize` / `store_wire` / `finalize`)
-//! by ix shape + vector account state — that routing then lives only in
-//! Hawk, not in every program's `initialize`.
+//! Every scheme registers in a single `initialize` call and uses the
+//! canonical [`dispatch`] router verbatim.
 //!
 //! Because each scheme ships as its own program with its own program ID, the
 //! account layout carries no scheme discriminator:
@@ -45,14 +41,10 @@ pub use instructions::{
 use instructions::VectorInstruction;
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
-/// Canonical discriminator router for single-step schemes
+/// Canonical discriminator router, used verbatim by every scheme
 /// (Ed25519/EIP-191/Falcon-512/secp256k1): `0` Initialize, `1` Advance,
 /// `2` Close, `3` Withdraw, `4` Passthrough — where `Initialize` is a strict
 /// create.
-///
-/// Hawk-512 does NOT use this; it writes its own match so discriminator `0`
-/// can dispatch to one of three registration steps by ix shape + vector
-/// account state (see `programs/hawk512/src/scheme.rs`).
 #[inline(always)]
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,

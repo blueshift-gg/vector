@@ -11,7 +11,7 @@ export default defineConfig({
   test: {
     testTimeout: 30_000,
     hookTimeout: 60_000,
-    // Per-scheme test files (ed25519/eip191/secp256k1/falcon512/hawk512) are
+    // Per-scheme test files (ed25519/eip191/secp256k1/falcon512) are
     // independent — each owns its own PDA — so they run concurrently against
     // the single shared validator.
   },

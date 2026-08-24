@@ -4,22 +4,19 @@
 //! `sdk/ts/test/verify.test.ts`.
 
 use ed25519_dalek::SigningKey as Ed25519SigningKey;
-use hawk512::{self as hawk, xof::RngContext as HawkRngContext, Rng as HawkRng};
 use k256::ecdsa::SigningKey as Secp256k1SigningKey;
 use pqcrypto_falcon::falcon512 as pq_falcon;
 use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use vector_core::{
-    advance_vector_digest_with_fee_payer, ed25519_pubkey, falcon512_identity, hawk512_identity,
-    revocation_digest, secp256k1_compressed_pubkey, secp256k1_eip191_eth_address,
-    sign_advance_instruction_ed25519, sign_advance_instruction_secp256k1_ecdsa,
-    sign_advance_instruction_secp256k1_eip191, sign_revocation_instruction_ed25519,
-    verify_advance_signature_ed25519, verify_advance_signature_falcon512,
-    verify_advance_signature_hawk512, verify_advance_signature_secp256k1_ecdsa,
+    advance_vector_digest_with_fee_payer, ed25519_pubkey, falcon512_identity, revocation_digest,
+    secp256k1_compressed_pubkey, secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
+    sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
+    sign_revocation_instruction_ed25519, verify_advance_signature_ed25519,
+    verify_advance_signature_falcon512, verify_advance_signature_secp256k1_ecdsa,
     verify_advance_signature_secp256k1_eip191, VerifyError, ED25519, FALCON512,
-    FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN, HAWK512, HAWK512_WIRE_PUBKEY_LEN,
-    SYSTEM_PROGRAM_ID,
+    FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN, SYSTEM_PROGRAM_ID,
 };
 
 const NONCE: [u8; 32] = [0x01; 32];
@@ -172,46 +169,6 @@ fn falcon512_round_trip() {
     );
 }
 
-/// `hawk512::Rng` adapter over a continuous `SHAKE256(seed)` squeeze
-/// (mirrors the adapter in `tests/hawk512.rs`).
-struct SeededRng(HawkRngContext);
-
-impl HawkRng for SeededRng {
-    fn fill(&mut self, out: &mut [u8]) {
-        let v = self.0.random(out.len());
-        out.copy_from_slice(&v);
-    }
-}
-
-#[test]
-fn hawk512_round_trip() {
-    let mut rng = SeededRng(HawkRngContext::new(b"vector-core-verify"));
-    let (pk, sk) = hawk::keygen(&mut rng).expect("hawk keygen");
-    let wire: &[u8; HAWK512_WIRE_PUBKEY_LEN] = pk.as_bytes().try_into().unwrap();
-    let (pre, post) = fixed_ix_lists();
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &HAWK512,
-        &NONCE,
-        &hawk512_identity(wire),
-        &pre,
-        &post,
-        None,
-    );
-    let sig = hawk::sign(&digest, &sk, &mut rng).expect("hawk sign");
-
-    let verified =
-        verify_advance_signature_hawk512(wire, &NONCE, &pre, &post, None, sig.as_bytes())
-            .expect("round trip must verify");
-    assert_eq!(verified, digest);
-
-    let mut bad_nonce = NONCE;
-    bad_nonce[0] ^= 0x01;
-    assert_eq!(
-        verify_advance_signature_hawk512(wire, &bad_nonce, &pre, &post, None, sig.as_bytes()),
-        Err(VerifyError::SignatureInvalid),
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Tamper detection

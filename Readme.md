@@ -3,7 +3,7 @@ Vector is a Solana primitive for offchain transaction signing that can be used i
 
 It works by computing a SHA-256 digest of a transaction offchain, signing that digest with one of several supported schemes, and then reproducing the same digest onchain from the instructions sysvar at execution time. The on-chain program verifies the signature before allowing execution to proceed.
 
-This means a Vector account can be controlled by a standard Solana Ed25519 keypair, a plain secp256k1 ECDSA key, an Ethereum (EIP-191) secp256k1 address, or a post-quantum Falcon-512 or Hawk-512 key. Each scheme ships as its **own program** with its own program ID; all of them share the exact same protocol, instruction set, account layout, and execution model — only signature verification differs.
+This means a Vector account can be controlled by a standard Solana Ed25519 keypair, a plain secp256k1 ECDSA key, an Ethereum (EIP-191) secp256k1 address, or a post-quantum Falcon-512 key. Each scheme ships as its **own program** with its own program ID; all of them share the exact same protocol, instruction set, account layout, and execution model — only signature verification differs.
 
 ## Execution Model
 A Vector authorization flow proceeds as follows:
@@ -22,7 +22,7 @@ The fee payer or relayer is therefore not entrusted with authority over transact
 
 ## Multi-Scheme Support
 
-Vector ships one program per signing scheme. The instruction set, account layout, nonce progression, CPI passthrough, and security model are shared verbatim through the [`vector-common`](crates/common/) crate; each program is a thin shell that plugs in one `SigningScheme` impl and routes discriminators to the shared handlers (single-step schemes via `vector_common::dispatch::<Scheme>`). Adding a scheme is a new program crate (a `declare_id!`, a `SigningScheme` impl, and a one-line dispatch) — no enum, no runtime scheme dispatch, no shared scheme discriminator.
+Vector ships one program per signing scheme. The instruction set, account layout, nonce progression, CPI passthrough, and security model are shared verbatim through the [`vector-common`](crates/common/) crate; each program is a thin shell that plugs in one `SigningScheme` impl and routes discriminators to the shared handlers via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new program crate (a `declare_id!`, a `SigningScheme` impl, and a one-line dispatch) — no enum, no runtime scheme dispatch, no shared scheme discriminator.
 
 | Scheme | Program ID | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
 |--------|------------|----------|-----------|---------------------------|------------------|
@@ -30,11 +30,8 @@ Vector ships one program per signing scheme. The instruction set, account layout
 | Secp256k1  | `9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | SHA-256          |
 | EIP-191    | `G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | EIP-191 + SHA-256|
 | Falcon-512 | `HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm` | `sha256(wire_pubkey_897)`         | 666 bytes (zero-padded compressed) | 32 B hash + 1 B pad + 1024 B prepared pubkey | SHA-256 |
-| Hawk-512   | `Ecm48RMiE4qvyw6m4M5DeutpRAN1AF4tis6ijc6Zq3H9` | `sha256(wire_pubkey_1024)`        | 555 bytes            | 32 B hash + 7 B pad + 18464 B prepared pubkey | SHA-256 |
 
 Because the program ID identifies the scheme, there is no on-chain scheme discriminator: no `key_type` byte in the account, and no `key_type` in the PDA seeds. The previous BSM and Schnorr schemes have been removed.
-
-Hawk-512's prepared pubkey is ~18 KB — larger than the `MAX_PERMITTED_DATA_INCREASE` (10 KB) a CPI can allocate at once, and its 1024-byte wire pubkey cannot share a transaction with the `system_program` meta `CreateAccount` needs. It is registered by calling `Initialize` **three times** (commit the hash, store the wire pubkey, finalize/prepare — the follow-up calls are permissionless); every other scheme registers in a single `Initialize`. There is no separate instruction — see [Hawk-512](#hawk-512) and [Multi-Call Registration](#multi-call-registration-hawk-512).
 
 ### Ed25519
 The signer's 32-byte Ed25519 public key is stored directly in the account. The 64-byte `(r, s)` signature is verified directly over the SHA-256 digest. Verification uses [`brine-ed25519`](https://github.com/zfedoran/brine-ed25519) with its `fast-sha512` feature, which keeps Ed25519 advance under ~14k CUs.
@@ -66,11 +63,6 @@ To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a
 
 Falcon signatures are variable-length (compressed Huffman); the wire format zero-pads to 666 bytes so the digest carve-out is constant-sized.
 
-### Hawk-512
-Vector also supports the post-quantum [Hawk-512](https://hawk-sign.info/) lattice signature scheme via [`solana-hawk512`](https://github.com/blueshift-gg/solana-hawk512) (verify-only). Like Falcon, the client identity is `sha256(wire_pubkey)` (the wire pubkey is 1024 bytes); signatures are 555 bytes.
-
-Hawk's *prepared pubkey* — the FFT/NTT factor blob that lets `advance` skip per-call pubkey decode work — is **18 464 bytes**. A single CPI `CreateAccount` can allocate at most `MAX_PERMITTED_DATA_INCREASE` (10 240) bytes, so the full ~18.5 KB account cannot be created in one instruction. Registration is therefore done by calling `Initialize` three times — see [Multi-Call Registration](#multi-call-registration-hawk-512). Once prepared, `advance` verifies via the cheap prepared path (~365k CU for the verify; ~410k CU for the on-chain `prepare_into` in the finalize call). The 7-byte alignment pad lands the prepared blob on an 8-byte account offset, which Hawk's zero-copy borrow requires.
-
 ### Digest Construction
 All schemes share the same SHA-256 digest over the instructions sysvar buffer. The signature region is carved out of the buffer and replaced with the current nonce and the scheme's identity:
 
@@ -85,7 +77,7 @@ Every Vector program exposes the same five instructions, dispatched by a single 
 
 | Disc | Name        | Top-Level Callable? | Authorisation                                |
 |------|-------------|---------------------|----------------------------------------------|
-| `0`  | Initialize  | yes (three calls for Hawk-512) | payer funds creation; Hawk-512's follow-up calls are permissionless, bound by `sha256(payload) == committed hash` |
+| `0`  | Initialize  | yes | payer funds creation |
 | `1`  | Advance     | **only** top-level (CPI guarded) | offchain signature over the canonical digest |
 | `2`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
 | `3`  | Withdraw    | only via Passthrough reentry | inherited from the authorising Advance       |
@@ -170,7 +162,6 @@ identity: [u8; N]   // offset 33 — N = scheme identity length
 | EIP-191     | 53 B               | 20 B ETH address                                |
 | Secp256k1   | 66 B               | 33 B compressed pubkey                          |
 | Falcon-512  | 1090 B             | 32 B `sha256(wire)` + 1 B pad + 1024 B prepared |
-| Hawk-512    | 18536 B            | 32 B `sha256(wire)` + 7 B pad + 18464 B prepared |
 
 Because each scheme is its own program, the program ID is the scheme discriminator — there is no `key_type` byte and no `key_type` PDA seed. Cross-scheme collision is impossible: two schemes cannot share a PDA because the PDA is derived under a different program ID.
 
@@ -183,51 +174,11 @@ A Vector account is created via the `initialize` instruction, which allocates th
 | EIP-191     | 20-byte ETH address       | the address verbatim                        |
 | Falcon-512  | 897-byte wire pubkey      | `sha256(wire)[32] \|\| pad[1] \|\| prepared[1024]` |
 | Secp256k1   | 33-byte compressed pubkey | the compressed pubkey verbatim              |
-| Hawk-512    | 32-byte `sha256(wire)` (call 1); 1024-byte wire pubkey (call 2); empty (call 3) | `sha256(wire)[32] \|\| pad[7] \|\| prepared[18464]` |
 
-`initialize` allocates `min(33 + identity_len, MAX_PERMITTED_DATA_INCREASE)`
-bytes — the full account for every scheme except Hawk-512, whose 18.5 KB
-account exceeds the single-CPI allocation cap (it gets a 10 KB base chunk and
-is grown by the finalize call). Rent is always funded for the *final* size so
-the account stays rent-exempt across the resize.
+`initialize` allocates the full `33 + identity_len` bytes in a single
+`CreateAccount` CPI; every scheme registers in one call.
 
-For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte address must be non-zero. For Secp256k1, the compressed pubkey must start with `0x02` or `0x03`. For Falcon-512, the wire pubkey is validated and expanded into the 1024-byte prepared form at init time. For Hawk-512, the first call only stores `sha256(wire)`; the second stashes the wire pubkey (verified against that hash), and the third writes the prepared form.
-
-### Multi-Call Registration (Hawk-512)
-The shared instruction handlers (`initialize`, `advance`, `close`,
-`withdraw`, `passthrough`) are plain functions; each program routes its
-discriminators to them. Single-step schemes (Ed25519, EIP-191, Falcon-512,
-Secp256k1) route discriminator `0` straight to the shared `initialize`, a
-**strict create** — it makes no owner/state checks and a re-invocation
-simply fails (the system `CreateAccount` CPI errors on an existing account).
-They register in one call.
-
-The **Hawk-512 program alone** wraps `initialize` so discriminator `0`,
-disambiguated by instruction shape and account state, performs one of three
-permissionless steps — the routing therefore lives only in Hawk, not in
-every program's `initialize`:
-
-1. **Initialize** (3 account metas: payer + vector + system program; data =
-   the 32-byte `sha256(wire_pubkey)` commit) → derive the canonical PDA and
-   initial nonce, `CreateAccount` the ~10 KB base chunk (rent funded for the
-   *final* size), store the header + hash commit. Anyone can call, but the
-   PDA is bound to the hash — only the matching wire pubkey can complete
-   registration.
-2. **Store wire** (1 meta: vector; data = the 1024-byte wire pubkey) →
-   verify `sha256(payload)` against the committed hash (so a permissionless
-   caller can't bind a different key) and stash the wire in the account.
-3. **Finalize** (1 meta: vector; empty data) → `resize` to full size and run
-   Hawk's `prepare_into` on the stashed wire (~410k CU — the finalize
-   transaction ships with a `ComputeBudget` `setComputeUnitLimit(600_000)`
-   instruction). Idempotent.
-
-The three-call split is forced by the 1232-byte transaction ceiling: the
-1024-byte wire payload cannot coexist with the `system_program` meta that
-`CreateAccount` requires, nor with finalize's compute-budget headroom.
-`advance` only succeeds once finalized (a zeroed prepared blob fails
-verification). The store-wire and finalize calls carry no signature — they
-only derive data the key holder already committed to in the first call, so
-anyone may submit them.
+For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte address must be non-zero. For Secp256k1, the compressed pubkey must start with `0x02` or `0x03`. For Falcon-512, the wire pubkey is validated and expanded into the 1024-byte prepared form at init time.
 
 The initial nonce is derived entirely onchain using the `sol_get_sysvar` syscall to read the most recent slot hash and height from the `SlotHashes` sysvar: `sha256(identity_seed || latest_slot_entry)`. This time-based pRNG mechanism ensures that if an account is closed and the same identity is later re-initialized, the nonce will differ, as the slot hash changes in every slot. The conditions required to replay a prior signature chain would require the account to be: opened, used, closed, reopened, and replayed all within the same slot; a set of circumstances that is technically infeasible without cooperation of both the private key holder and a colluding validator.
 
@@ -242,11 +193,11 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 ### Rust (`vector-core`)
 
-The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes a `Scheme` descriptor (`program_id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `SECP256K1`, `HAWK512`:
+The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes a `Scheme` descriptor (`program_id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `SECP256K1`:
 
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", identity_seed]`).
-- `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_hawk512(payer, wire_pubkey)` — convenience wrappers.
-- `create_initialize_instruction(payer, &scheme, identity, init_payload)` — generic init-instruction builder. For Hawk-512, use the three-step builders `create_initialize_hawk512(payer, wire_pubkey)` / `create_hawk512_store_wire(wire_pubkey)` / `create_hawk512_finalize(wire_pubkey)` (one transaction each, in order).
+- `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` — convenience wrappers.
+- `create_initialize_instruction(payer, &scheme, identity, init_payload)` — generic init-instruction builder.
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
 - `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature.
 - `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it.
@@ -254,18 +205,18 @@ The `vector-core` crate provides off-chain helpers for constructing Vector trans
 - `sign_advance_instruction_ed25519(signing_key, nonce, pre, post)` — sign with Ed25519.
 - `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post)` — sign with EIP-191 (envelope, 65-byte sig).
 - `sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, pre, post)` — sign with plain secp256k1 ECDSA (64-byte sig).
-- `verify_advance_signature_ed25519(pubkey, nonce, pre, post, fee_payer, signature)` / `verify_advance_signature_secp256k1_ecdsa(...)` / `verify_advance_signature_secp256k1_eip191(...)` / `verify_advance_signature_falcon512(wire_pubkey, ...)` / `verify_advance_signature_hawk512(wire_pubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
-- `ed25519_pubkey` / `secp256k1_eip191_eth_address` / `secp256k1_compressed_pubkey` / `falcon512_identity(wire_pubkey)` / `hawk512_identity(wire_pubkey)` / `eth_address_from_pubkey` / `eip191_envelope_hash(digest)` — identity/envelope utilities.
+- `verify_advance_signature_ed25519(pubkey, nonce, pre, post, fee_payer, signature)` / `verify_advance_signature_secp256k1_ecdsa(...)` / `verify_advance_signature_secp256k1_eip191(...)` / `verify_advance_signature_falcon512(wire_pubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
+- `ed25519_pubkey` / `secp256k1_eip191_eth_address` / `secp256k1_compressed_pubkey` / `falcon512_identity(wire_pubkey)` / `eth_address_from_pubkey` / `eip191_envelope_hash(digest)` — identity/envelope utilities.
 
-Falcon-512 and Hawk-512 signing are intentionally left to the caller (`solana-falcon512`/`solana-hawk512` are verify-only) — pair with an external signer such as `pqcrypto-falcon` or `hawk512` and feed the wire-format signature into `create_advance_instruction`.
+Falcon-512 signing is intentionally left to the caller (`solana-falcon512` is verify-only) — pair with an external signer such as `pqcrypto-falcon` and feed the wire-format signature into `create_advance_instruction`.
 
 ### TypeScript (`@vector/sdk`)
 
-The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `SECP256K1`, `HAWK512`):
+The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `SECP256K1`):
 
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
 - `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 33-byte header.
-- `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` — convenience wrappers; Hawk-512's three-step registration uses `createInitializeHawk512(payer, wirePubkey)` / `createHawk512StoreWire(wirePubkey)` / `createHawk512Finalize(wirePubkey)`.
+- `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` — convenience wrappers.
 - `createInitializeInstruction(payer, scheme, identity, initPayload)` — generic init builder.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.
 - `createAdvanceInstruction(scheme, identity, signature)` — assemble from precomputed signature (signature only, no embedded payload).
@@ -275,11 +226,10 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `signAdvanceInstructionEip191(privateKey, nonce, pre, post, feePayer?)` — sign with EIP-191 secp256k1.
 - `signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer?)` — sign with plain secp256k1 ECDSA.
 - `signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer?)` — sign with Falcon-512 (post-quantum) via [`@noble/post-quantum/falcon.js`](https://github.com/paulmillr/noble-post-quantum); plus `falcon512Keygen`, `falcon512PublicKey`.
-- `signAdvanceInstructionHawk512(keypair, nonce, pre, post, feePayer?)` — sign with Hawk-512 (post-quantum) via [`@blueshift-gg/hawk512`](https://www.npmjs.com/package/@blueshift-gg/hawk512); plus `hawk512Keygen`.
-- `verifyAdvanceSignatureEd25519(pubkey, nonce, pre, post, signature, feePayer?)` / `verifyAdvanceSignatureSecp256k1(...)` / `verifyAdvanceSignatureEip191(...)` / `verifyAdvanceSignatureFalcon512(wirePubkey, ...)` / `verifyAdvanceSignatureHawk512(wirePubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
+- `verifyAdvanceSignatureEd25519(pubkey, nonce, pre, post, signature, feePayer?)` / `verifyAdvanceSignatureSecp256k1(...)` / `verifyAdvanceSignatureEip191(...)` / `verifyAdvanceSignatureFalcon512(wirePubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `falcon512Identity(wirePubkey)` / `secp256k1CompressedPubkey` / `ethAddressFromPrivateKey` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
-The TypeScript SDK implements signing for every scheme. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads; Hawk-512 signs via `@blueshift-gg/hawk512`'s 555-byte detached signature. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
+The TypeScript SDK implements signing for every scheme. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
 
 Each scheme is its own importable entrypoint (the npm feature-flag analogue) so a consumer only pulls the crypto it uses: `import { signAdvanceInstructionFalcon512 } from "vector-sdk/falcon512"` (Falcon + PQ lib only) vs `import { ... } from "vector-sdk"` (everything).
 
@@ -311,7 +261,7 @@ One identity = one vector account = one outstanding pre-signed transaction. Sign
 
 An `advance` with empty pre/post instructions is an inert transition: it verifies, installs the next nonce, and does nothing else. Signed at the outstanding nonce, it is a kill-switch — landing it orphans every signature derived from that nonce (see [Invalidation and Forward Exposure](#invalidation-and-forward-exposure)). Pre-sign the inert advance in the same session as the transactions it guards; broadcasting it later requires no further access to the key.
 
-Both SDKs ship this as sugar over the advance signers: `sign_revocation_instruction_ed25519(key, nonce)` / `_secp256k1_ecdsa` / `_secp256k1_eip191` (Rust), `signRevocationInstructionEd25519(key, nonce)` / `Secp256k1` / `Eip191` (TypeScript), plus `revocation_digest(scheme, nonce, identity)` / `revocationDigest(...)` to recompute what they commit to. Verifying one is just the ordinary advance verifier with empty pre/post. The digest commits to the broadcasting transaction's instructions sysvar, so the revocation must be broadcast as a transaction containing **only** the advance instruction — adding so much as a compute-budget ix afterwards invalidates the signature. The three covered schemes fit the default compute budget (~13k/26k/72k CUs); Falcon-512 and Hawk-512 have no zero-arg sugar by design — sign via the advance signer with a compute-budget pre-instruction committed at sign time, since Hawk's inert advance exceeds the 200k default.
+Both SDKs ship this as sugar over the advance signers: `sign_revocation_instruction_ed25519(key, nonce)` / `_secp256k1_ecdsa` / `_secp256k1_eip191` (Rust), `signRevocationInstructionEd25519(key, nonce)` / `Secp256k1` / `Eip191` (TypeScript), plus `revocation_digest(scheme, nonce, identity)` / `revocationDigest(...)` to recompute what they commit to. Verifying one is just the ordinary advance verifier with empty pre/post. The digest commits to the broadcasting transaction's instructions sysvar, so the revocation must be broadcast as a transaction containing **only** the advance instruction — adding so much as a compute-budget ix afterwards invalidates the signature. The three covered schemes fit the default compute budget (~13k/26k/72k CUs); Falcon-512 has no zero-arg sugar by design — sign via the advance signer with a compute-budget pre-instruction committed at sign time, since its ~184k CU inert advance leaves no headroom under the 200k default.
 
 ### Ordered pre-signing
 

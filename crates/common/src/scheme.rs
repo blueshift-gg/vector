@@ -24,9 +24,7 @@ pub trait SigningScheme {
     /// Usually equals `IDENTITY_LEN` (the pubkey is stored verbatim), but
     /// may differ for schemes that expand or compress on-chain: Falcon-512
     /// takes a 897-byte wire pubkey and expands it into the 1057-byte
-    /// stored identity; Hawk-512 takes a 32-byte hash commit (the full
-    /// 18.5 KB identity is filled by follow-up `store_wire` + `finalize`
-    /// ixs).
+    /// stored identity.
     const INIT_PAYLOAD_LEN: usize;
 
     /// Validate the init payload and write the on-chain identity bytes into
@@ -38,8 +36,8 @@ pub trait SigningScheme {
     /// Must be reproducible off-chain by the signer. Default: the whole
     /// identity — correct for schemes that store exactly the signer's pubkey
     /// (Ed25519, EIP-191, secp256k1-ECDSA). Schemes that store an
-    /// expanded/prepared form the client can't cheaply recompute (Falcon,
-    /// Hawk) override to return the stable client-derivable prefix, e.g.
+    /// expanded/prepared form the client can't cheaply recompute (Falcon)
+    /// override to return the stable client-derivable prefix, e.g.
     /// `sha256(wire_pubkey)`.
     fn digest_identity(identity: &[u8]) -> &[u8] {
         identity
