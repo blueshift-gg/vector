@@ -3,7 +3,7 @@
 
 use pinocchio::{entrypoint, nostd_panic_handler, AccountView, Address, ProgramResult};
 use solana_address::declare_id;
-use vector_common::dispatch;
+use vector_common::rotating::dispatch;
 
 mod scheme;
 use scheme::Winternitz;

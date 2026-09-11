@@ -24,6 +24,7 @@ extern crate alloc;
 mod buffer;
 mod helpers;
 mod instructions;
+pub mod rotating;
 mod scheme;
 mod state;
 

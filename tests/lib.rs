@@ -21,3 +21,6 @@ mod xmss;
 
 #[cfg(test)]
 mod winternitz;
+
+#[cfg(test)]
+mod rotation;

@@ -18,6 +18,7 @@ export const ADVANCE_DISCRIMINATOR = 1;
 export const CLOSE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
 export const PASSTHROUGH_DISCRIMINATOR = 4;
+export const ROTATE_DISCRIMINATOR = 5;
 
 /**
  * Fixed-size account header: `nonce[32] || bump[1]`. Each scheme is its own
@@ -50,7 +51,8 @@ export interface Scheme {
   /**
    * Client identity length — the bytes hashed into the advance digest and
    * used to derive the PDA. The pubkey/address itself for most schemes; for
-   * Falcon it's `sha256(wire_pubkey)` (32).
+   * Falcon it's `sha256(wire_pubkey)` (32). Winternitz/XMSS keep
+   * `sha256(initial_pubkey)` across rotations.
    */
   identityLen: number;
   /**
@@ -113,6 +115,9 @@ export function findVectorPda(
   scheme: Scheme,
   identity: Uint8Array
 ): [Address, number] {
+  if (identity.length !== scheme.identityLen) {
+    throw new Error(`Identity must be ${scheme.identityLen} bytes`);
+  }
   return findProgramAddressSync(
     [VECTOR_PDA_SEED, pdaSeedFromIdentity(identity)],
     scheme.programId

@@ -1,6 +1,6 @@
 /** DKKW25 generalized XMSS. Signing state belongs to the caller. */
 import { Address, TransactionInstruction } from "@solana/web3.js";
-import { Scheme } from "../scheme.js";
+import { Scheme, sha256 } from "../scheme.js";
 import { createInitializeInstruction } from "../instructions.js";
 
 // Mirror solana-winternitz's fixed height-8 instance.
@@ -10,17 +10,22 @@ export const XMSS_SIGNATURE_LEN = 1037;
 export const XMSS: Scheme = {
   programId: new Address("7qCyy3NJQDMctSDiM4DxNjNR6TyasouyyRTBREhcXdsE"),
   signatureLen: XMSS_SIGNATURE_LEN,
-  identityLen: XMSS_PUBKEY_LEN,
-  storedIdentityLen: XMSS_PUBKEY_LEN,
+  identityLen: 32,
+  storedIdentityLen: 32 + XMSS_PUBKEY_LEN,
 };
 
-/** Register the immutable public key; its SHA-256 hash is the PDA seed. */
+/** Derive the permanent account identity. Do not recompute it on rotation. */
+export function xmssIdentity(initialPublicKey: Uint8Array): Uint8Array {
+  if (initialPublicKey.length !== XMSS_PUBKEY_LEN) {
+    throw new Error(`XMSS public key must be ${XMSS_PUBKEY_LEN} bytes`);
+  }
+  return sha256(initialPublicKey);
+}
+
+/** Initialize a stable account with its first signing key. */
 export function createInitializeXmss(
   payer: Address,
   publicKey: Uint8Array
 ): TransactionInstruction {
-  if (publicKey.length !== XMSS_PUBKEY_LEN) {
-    throw new Error(`XMSS public key must be ${XMSS_PUBKEY_LEN} bytes`);
-  }
-  return createInitializeInstruction(payer, XMSS, publicKey, publicKey);
+  return createInitializeInstruction(payer, XMSS, xmssIdentity(publicKey), publicKey);
 }
