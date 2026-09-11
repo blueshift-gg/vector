@@ -3,7 +3,7 @@ Vector is a Solana primitive for offchain transaction signing that can be used i
 
 It works by computing a SHA-256 digest of a transaction offchain, signing that digest with one of several supported schemes, and then reproducing the same digest onchain from the instructions sysvar at execution time. The on-chain program verifies the signature before allowing execution to proceed.
 
-This means a Vector account can be controlled by a standard Solana Ed25519 keypair, a plain secp256k1 ECDSA key, an Ethereum (EIP-191) secp256k1 address, or a post-quantum Falcon-512 key. Each scheme ships as its **own program** with its own program ID; all of them share the exact same protocol, instruction set, account layout, and execution model — only signature verification differs.
+This means a Vector account can be controlled by a standard Solana Ed25519 keypair, a plain secp256k1 ECDSA key, an Ethereum (EIP-191) secp256k1 address, or a post-quantum Falcon-512, Winternitz or XMSS key. Each scheme ships as its **own program** with its own program ID; all of them share the same instruction set, account header, and execution model. Winternitz and XMSS additionally require persistent signing state.
 
 ## Execution Model
 A Vector authorization flow proceeds as follows:
@@ -22,7 +22,7 @@ The fee payer or relayer is therefore not entrusted with authority over transact
 
 ## Multi-Scheme Support
 
-Vector ships one program per signing scheme. The instruction set, account layout, nonce progression, CPI passthrough, and security model are shared verbatim through the [`vector-common`](crates/common/) crate; each program is a thin shell that plugs in one `SigningScheme` impl and routes discriminators to the shared handlers via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new program crate (a `declare_id!`, a `SigningScheme` impl, and a one-line dispatch) — no enum, no runtime scheme dispatch, no shared scheme discriminator.
+Vector ships one program per signing scheme. The instruction set, account header, nonce progression and CPI passthrough are implemented in the [`vector-common`](crates/common/) crate; each program is a thin shell that plugs in one `SigningScheme` impl and routes discriminators to the shared handlers via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new program crate (a `declare_id!`, a `SigningScheme` impl, and a one-line dispatch) — no enum, no runtime scheme dispatch, no shared scheme discriminator.
 
 | Scheme | Program ID | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
 |--------|------------|----------|-----------|---------------------------|------------------|
@@ -30,6 +30,8 @@ Vector ships one program per signing scheme. The instruction set, account layout
 | Secp256k1  | `9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | SHA-256          |
 | EIP-191    | `G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | EIP-191 + SHA-256|
 | Falcon-512 | `HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm` | `sha256(wire_pubkey_897)`         | 666 bytes (zero-padded compressed) | 32 B hash + 1 B pad + 1024 B prepared pubkey | SHA-256 |
+| Winternitz | `GvCGfvMTr8YZJZkV9KxaGF1Y2EzxUksur8iDwjVwJwGf` (local) | 41-byte public key | 849 bytes | 41 B public key | SHA-256 |
+| XMSS | `7qCyy3NJQDMctSDiM4DxNjNR6TyasouyyRTBREhcXdsE` (local) | 41-byte public key | 1,037 bytes | 41 B public key | SHA-256 |
 
 Because the program ID identifies the scheme, there is no on-chain scheme discriminator: no `key_type` byte in the account, and no `key_type` in the PDA seeds. The previous BSM and Schnorr schemes have been removed.
 
@@ -63,6 +65,24 @@ To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a
 
 Falcon signatures are variable-length (compressed Huffman); the wire format zero-pads to 666 bytes so the digest carve-out is constant-sized.
 
+### Winternitz
+
+`vector-winternitz` links the one-time instance of [`solana-winternitz`](https://github.com/blueshift-gg/solana-winternitz). The public key is 41 bytes, the signature is 849 bytes, and the Vector account is 74 bytes. Rust and TypeScript expose `WINTERNITZ` and `create_initialize_winternitz` / `createInitializeWinternitz`; TypeScript also exports `vector-sdk/winternitz`. Signing belongs to the caller's persistent signer.
+
+Each key permits one signing attempt. This is a verifier integration: the shared Vector handlers do not enforce key retirement or implement handover. Use the sole authorization to exit or transfer all controlled assets and authorities, then retire the key. A native SOL exit can use `Advance` followed by `Passthrough([Close])`; `Close` only sweeps the Vector account's lamports. A partial withdrawal leaves assets behind without a fresh signing key. Exact retries can reuse the saved signature, but a changed transaction needs a different key.
+
+The local dependency is the same adjacent checkout used by XMSS. Build with `cargo build-sbf --manifest-path programs/winternitz/Cargo.toml` and test with `cargo test -p vector-tests winternitz`. The listed Winternitz program ID is not deployed.
+
+### XMSS
+
+`vector-xmss` links [`solana-winternitz`](https://github.com/blueshift-gg/solana-winternitz): DKKW25 generalized XMSS with target-sum Winternitz encoding and Keccak-256, at height 8. Its 41-byte public key is stored verbatim and folded into the Vector digest; the PDA seed is `sha256(public_key)`. The account is 74 bytes. This is not RFC 8391 XMSS and does not accept its signatures.
+
+Signing belongs to the caller's persistent `solana-winternitz` signer. Each key permits 256 signing attempts, including failed salt sampling and abandoned authorizations. Exact retries of the recorded digest reuse its signature. The Vector nonce prevents transaction replay; it does not prevent an off-chain signer from reusing a leaf. The key is immutable: this integration has no rotation or recovery instruction, so retain signing capacity for any required withdrawal or authority transfer.
+
+Both clients expose `XMSS` and an initialization helper (`create_initialize_xmss` / `createInitializeXmss`). Compute the ordinary Vector digest, sign it with the persistent signer, and pass the signature bytes to `create_advance_instruction` / `createAdvanceInstruction`. TypeScript also exposes the descriptor through `vector-sdk/xmss`; it does not implement XMSS signing or offline verification.
+
+For local development, keep the current `solana-winternitz` checkout at `../solana-winternitz`; the workspace uses that path dependency. Build with `cargo build-sbf --manifest-path programs/xmss/Cargo.toml` and test with `cargo test -p vector-tests xmss`. The listed XMSS program ID is for this local integration and is not deployed.
+
 ### Digest Construction
 All schemes share the same SHA-256 digest over the instructions sysvar buffer. The signature region is carved out of the buffer and replaced with the current nonce and the scheme's identity:
 
@@ -70,7 +90,7 @@ All schemes share the same SHA-256 digest over the instructions sysvar buffer. T
 digest = SHA256(buffer[..sig_start] || nonce || identity || buffer[sig_end..])
 ```
 
-`identity` is the client-derivable identity: the stored pubkey/address for Ed25519/EIP-191/Secp256k1, and `sha256(wire_pubkey)` for Falcon-512 (the program's `digest_identity` hook selects it). The carve-out size is scheme-dependent: 64 / 65 / 666 / 64 bytes for Ed25519 / EIP-191 / Falcon-512 / Secp256k1. Everything else in the buffer — the discriminator, CPI payload, surrounding instructions, and sysvar framing — is committed to by the digest.
+`identity` is the client-derivable identity: the stored pubkey/address for Ed25519/EIP-191/Secp256k1/Winternitz/XMSS, and `sha256(wire_pubkey)` for Falcon-512 (the program's `digest_identity` hook selects it). The carve-out size is the signature length listed for each scheme above. Everything else in the buffer — the discriminator, CPI payload, surrounding instructions, and sysvar framing — is committed to by the digest.
 
 ## Instruction Set
 Every Vector program exposes the same five instructions, dispatched by a single discriminator byte. The set is identical across all schemes.
@@ -193,7 +213,7 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 ### Rust (`vector-core`)
 
-The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes a `Scheme` descriptor (`program_id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `SECP256K1`:
+The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes a `Scheme` descriptor (`program_id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", identity_seed]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` — convenience wrappers.
@@ -212,7 +232,7 @@ Falcon-512 signing is intentionally left to the caller (`solana-falcon512` is ve
 
 ### TypeScript (`@vector/sdk`)
 
-The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `SECP256K1`):
+The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `SECP256K1`, `WINTERNITZ`, `XMSS`):
 
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
 - `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 33-byte header.
@@ -229,7 +249,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `verifyAdvanceSignatureEd25519(pubkey, nonce, pre, post, signature, feePayer?)` / `verifyAdvanceSignatureSecp256k1(...)` / `verifyAdvanceSignatureEip191(...)` / `verifyAdvanceSignatureFalcon512(wirePubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `falcon512Identity(wirePubkey)` / `secp256k1CompressedPubkey` / `ethAddressFromPrivateKey` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
-The TypeScript SDK implements signing for every scheme. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
+The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1 and Falcon-512. Winternitz and XMSS signing are supplied by the caller. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
 
 Each scheme is its own importable entrypoint (the npm feature-flag analogue) so a consumer only pulls the crypto it uses: `import { signAdvanceInstructionFalcon512 } from "vector-sdk/falcon512"` (Falcon + PQ lib only) vs `import { ... } from "vector-sdk"` (everything).
 

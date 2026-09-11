@@ -6,6 +6,8 @@ members = [
     "programs/eip191",
     "programs/falcon512",
     "programs/secp256k1",
+    "programs/winternitz",
+    "programs/xmss",
     "crates/core",
     "tests",
 ]
@@ -21,6 +23,8 @@ default-members = [
     "programs/eip191",
     "programs/falcon512",
     "programs/secp256k1",
+    "programs/winternitz",
+    "programs/xmss",
     "crates/core",
 ]
 
@@ -39,6 +43,7 @@ solana-nostd-keccak = "0.2.0"
 pinocchio-system = "0.6.1"
 brine-ed25519 = { version = "0.7.0", features = ["fast-sha512"] }
 solana-falcon512 = "0.1.2"
+solana-winternitz = { path = "../solana-winternitz", default-features = false }
 solana-secp256k1 = "0.2.1"
 solana-secp256k1-ecdsa = { version = "0.2.0", default-features = false, features = ["sha256"] }
 [profile.release]

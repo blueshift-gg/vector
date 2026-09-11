@@ -1,0 +1,15 @@
+[package]
+name = "vector-winternitz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector — DKKW25 one-time Winternitz signing program"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+vector-common = { path = "../../crates/common" }
+pinocchio = { workspace = true }
+solana-address = { workspace = true }
+solana-winternitz = { workspace = true }

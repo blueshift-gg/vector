@@ -41,6 +41,14 @@
     "./falcon512": {
       "import": "./sdk/ts/dist/schemes/falcon512.js",
       "types": "./sdk/ts/dist/schemes/falcon512.d.ts"
+    },
+    "./winternitz": {
+      "import": "./sdk/ts/dist/schemes/winternitz.js",
+      "types": "./sdk/ts/dist/schemes/winternitz.d.ts"
+    },
+    "./xmss": {
+      "import": "./sdk/ts/dist/schemes/xmss.js",
+      "types": "./sdk/ts/dist/schemes/xmss.d.ts"
     }
   },
   "scripts": {

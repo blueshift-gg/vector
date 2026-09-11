@@ -20,7 +20,7 @@
  *   ({@link verifyAdvanceSignatureEd25519} and friends), returning the
  *   digest (= next nonce) on success.
  * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
- *   `falcon512`, `secp256k1`): its `Scheme`/program-ID const,
+ *   `falcon512`, `secp256k1`, `winternitz`, `xmss`): its `Scheme`/program-ID const,
  *   identity derivation, an `initialize` builder, and a signer where one
  *   exists.
  *
@@ -46,6 +46,8 @@ export * from "./verify.js";
 export * from "./schemes/ed25519.js";
 export * from "./schemes/eip191.js";
 export * from "./schemes/secp256k1.js";
+export * from "./schemes/winternitz.js";
+export * from "./schemes/xmss.js";
 
 // Falcon: re-export only the scheme-unique symbols. The wire-size
 // constants come from `./scheme.js` above (re-exporting them again via
