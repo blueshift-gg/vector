@@ -3,7 +3,7 @@ Vector is a Solana primitive for offchain transaction signing that can be used i
 
 It works by computing a SHA-256 digest of a transaction offchain, signing that digest with one of several supported schemes, and then reproducing the same digest onchain from the instructions sysvar at execution time. The on-chain program verifies the signature before allowing execution to proceed.
 
-This means a Vector account can be controlled by a standard Solana Ed25519 keypair, a plain secp256k1 ECDSA key, an Ethereum (EIP-191) secp256k1 address, or a post-quantum Falcon-512 key. Each scheme ships as its **own program** with its own program ID; all of them share the exact same protocol, instruction set, account layout, and execution model — only signature verification differs.
+This means a Vector account can be controlled by a standard Solana Ed25519 keypair, a plain secp256k1 ECDSA key, an Ethereum (EIP-191) secp256k1 address, or a post-quantum Falcon-512, Winternitz or XMSS key. Each scheme ships as its **own program** with its own program ID; all of them share the account header and authorization flow. Winternitz and XMSS additionally support key rotation and require persistent signing state.
 
 ## Execution Model
 A Vector authorization flow proceeds as follows:
@@ -22,7 +22,7 @@ The fee payer or relayer is therefore not entrusted with authority over transact
 
 ## Multi-Scheme Support
 
-Vector ships one program per signing scheme. The instruction set, account layout, nonce progression, CPI passthrough, and security model are shared verbatim through the [`vector-common`](crates/common/) crate; each program is a thin shell that plugs in one `SigningScheme` impl and routes discriminators to the shared handlers via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new program crate (a `declare_id!`, a `SigningScheme` impl, and a one-line dispatch) — no enum, no runtime scheme dispatch, no shared scheme discriminator.
+Vector ships one program per signing scheme. The instruction set, account header, nonce progression and CPI passthrough are implemented in the [`vector-common`](crates/common/) crate; each program is a thin shell that plugs in one `SigningScheme` impl and routes discriminators to the shared handlers via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new program crate (a `declare_id!`, a `SigningScheme` impl, and a one-line dispatch). Winternitz and XMSS use `vector_common::rotating::dispatch`, which adds a fixed account identity and key rotation around the shared handlers.
 
 | Scheme | Program ID | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
 |--------|------------|----------|-----------|---------------------------|------------------|
@@ -30,6 +30,8 @@ Vector ships one program per signing scheme. The instruction set, account layout
 | Secp256k1  | `9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | SHA-256          |
 | EIP-191    | `G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | EIP-191 + SHA-256|
 | Falcon-512 | `HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm` | `sha256(wire_pubkey_897)`         | 666 bytes (zero-padded compressed) | 32 B hash + 1 B pad + 1024 B prepared pubkey | SHA-256 |
+| Winternitz | `GvCGfvMTr8YZJZkV9KxaGF1Y2EzxUksur8iDwjVwJwGf` (local) | `sha256(initial_pubkey)` | 849 bytes | 32 B identity + 41 B current key | SHA-256 |
+| XMSS | `7qCyy3NJQDMctSDiM4DxNjNR6TyasouyyRTBREhcXdsE` (local) | `sha256(initial_pubkey)` | 1,037 bytes | 32 B identity + 41 B current key | SHA-256 |
 
 Because the program ID identifies the scheme, there is no on-chain scheme discriminator: no `key_type` byte in the account, and no `key_type` in the PDA seeds. The previous BSM and Schnorr schemes have been removed.
 
@@ -63,6 +65,37 @@ To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a
 
 Falcon signatures are variable-length (compressed Huffman); the wire format zero-pads to 666 bytes so the digest carve-out is constant-sized.
 
+### Winternitz and XMSS
+
+Both programs link [`solana-winternitz`](https://github.com/blueshift-gg/solana-winternitz): DKKW25 target-sum Winternitz and generalized XMSS with Keccak-256. The one-time instance has an 849-byte signature; the height-8 XMSS instance has a 1,037-byte signature and 256 leaves. Both public keys are 41 bytes. This XMSS variant is not compatible with RFC 8391.
+
+The account is 106 bytes:
+
+```text
+nonce[32] || bump[1] || identity[32] || current_public_key[41]
+```
+
+`identity = sha256(initial_public_key)` is permanent. It is the PDA seed and the identity folded into the Vector digest. Verification uses `current_public_key`, which can change without moving the account or its assets and authorities. This separation also appears in [Winterwallet's account layout](https://github.com/blueshift-gg/winterwallet/blob/672fc6789b1532ee680f24842d235e0be8737b61/program/src/state.rs).
+
+Both SDKs expose `WINTERNITZ` / `XMSS`, initialization helpers and `winternitz_identity` / `xmss_identity` (`winternitzIdentity` / `xmssIdentity` in TypeScript). Derive the identity from the first key and keep using it for every instruction and digest after rotation. Signing belongs to the caller's persistent signer; the Vector SDKs do not implement signing for these schemes.
+
+### Key rotation
+
+Generate and persist a fresh signer, then authorize its public key with the current signer:
+
+```text
+Advance(current-key signature)
+Passthrough([Rotate(next_public_key), ...actions])
+```
+
+`create_rotate_subinstruction` / `createRotateSubinstruction` builds the `Rotate` payload. The existing Vector digest commits to the replacement key and all actions. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Direct, unsigned rotation and replacing a key with itself are rejected. Rotation stays within the account's signing scheme.
+
+For Winternitz, every authorization must rotate to a fresh key or close the account. This is a signing requirement, not an on-chain history of used keys: callers must never reinstall a used key or sign two different authorizations with one key. XMSS can authorize multiple transactions under one tree; reserve a leaf for rotation before exhaustion. Failed salt sampling and abandoned authorizations consume signing attempts too.
+
+Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
+
+The workspace currently uses the adjacent `../solana-winternitz` checkout. Publish that crate and replace the path dependency before release. Build each program with `cargo build-sbf --manifest-path programs/xmss/Cargo.toml`, substituting `winternitz` for the one-time program. The listed program IDs are local and undeployed.
+
 ### Digest Construction
 All schemes share the same SHA-256 digest over the instructions sysvar buffer. The signature region is carved out of the buffer and replaced with the current nonce and the scheme's identity:
 
@@ -70,10 +103,10 @@ All schemes share the same SHA-256 digest over the instructions sysvar buffer. T
 digest = SHA256(buffer[..sig_start] || nonce || identity || buffer[sig_end..])
 ```
 
-`identity` is the client-derivable identity: the stored pubkey/address for Ed25519/EIP-191/Secp256k1, and `sha256(wire_pubkey)` for Falcon-512 (the program's `digest_identity` hook selects it). The carve-out size is scheme-dependent: 64 / 65 / 666 / 64 bytes for Ed25519 / EIP-191 / Falcon-512 / Secp256k1. Everything else in the buffer — the discriminator, CPI payload, surrounding instructions, and sysvar framing — is committed to by the digest.
+`identity` is the client-derivable identity: the stored pubkey/address for Ed25519/EIP-191/Secp256k1, `sha256(wire_pubkey)` for Falcon-512, and the permanent `sha256(initial_pubkey)` for Winternitz/XMSS (the program's `digest_identity` hook selects it). The carve-out size is the signature length listed for each scheme above. Everything else in the buffer — the discriminator, CPI payload, surrounding instructions, and sysvar framing — is committed to by the digest.
 
 ## Instruction Set
-Every Vector program exposes the same five instructions, dispatched by a single discriminator byte. The set is identical across all schemes.
+Every Vector program exposes instructions 0–4. Winternitz and XMSS also expose `Rotate` (5). Each instruction starts with its discriminator byte.
 
 | Disc | Name        | Top-Level Callable? | Authorisation                                |
 |------|-------------|---------------------|----------------------------------------------|
@@ -82,8 +115,9 @@ Every Vector program exposes the same five instructions, dispatched by a single 
 | `2`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
 | `3`  | Withdraw    | only via Passthrough reentry | inherited from the authorising Advance       |
 | `4`  | Passthrough | **only** top-level (CPI guarded) | a sibling Advance for the same vector PDA earlier in the same transaction |
+| `5`  | Rotate | only via Passthrough reentry | current-key authorization; Winternitz/XMSS only |
 
-`Advance` carries only the signature — its handler verifies it, installs the digest as the next nonce, and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler scans the instructions sysvar and refuses to run unless a prior `Advance` for the same vector PDA appears earlier in the transaction. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. This is the same pattern used by [WinterWallet](https://github.com/blueshift-gg/winterwallet).
+`Advance` carries only the signature — its handler verifies it, installs the digest as the next nonce, and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler scans the instructions sysvar and refuses to run unless a prior `Advance` for the same vector PDA appears earlier in the transaction. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
 
 ## Passthrough CPI
 Vector acts as a narrow CPI gate in front of ordinary Solana execution. Its role is limited to verifying that the current transaction exactly matches the transaction that was signed offchain against the current Vector state. Once `Advance`'s check succeeds, a sibling top-level `Passthrough` instruction in the same transaction replays its embedded sub-instructions, taking its trailing accounts along with the embedded instruction data and performing CPI actions for the owner. The passthrough handler authorises itself by scanning the instructions sysvar for a prior `Advance` against the same vector PDA — transaction atomicity guarantees that advance verified, or the whole transaction aborted.
@@ -151,10 +185,10 @@ A Vector account is a PDA at `["vector", identity_seed]` under the scheme's prog
 ```
 nonce:    [u8; 32]  // offset  0 — current state nonce
 bump:     u8        // offset 32 — PDA bump seed
-identity: [u8; N]   // offset 33 — N = scheme identity length
+identity: [u8; N]   // offset 33 — N = stored identity length
 ```
 
-`identity_seed` is the identity itself when it is `<= 32` bytes, otherwise `sha256(identity)` (Solana caps each PDA seed at 32 bytes).
+`identity_seed` is derived from the client identity: the identity itself when it is `<= 32` bytes, otherwise `sha256(identity)`. For Winternitz/XMSS it is the fixed 32-byte hash of the initial key, even after rotation.
 
 | Scheme      | Total Account Size | Identity Bytes (offset 33)                      |
 |-------------|--------------------|-------------------------------------------------|
@@ -162,11 +196,12 @@ identity: [u8; N]   // offset 33 — N = scheme identity length
 | EIP-191     | 53 B               | 20 B ETH address                                |
 | Secp256k1   | 66 B               | 33 B compressed pubkey                          |
 | Falcon-512  | 1090 B             | 32 B `sha256(wire)` + 1 B pad + 1024 B prepared |
+| Winternitz / XMSS | 106 B | 32 B permanent identity + 41 B current public key |
 
 Because each scheme is its own program, the program ID is the scheme discriminator — there is no `key_type` byte and no `key_type` PDA seed. Cross-scheme collision is impossible: two schemes cannot share a PDA because the PDA is derived under a different program ID.
 
 ## Initialization
-A Vector account is created via the `initialize` instruction, which allocates the `33 + identity_len` byte PDA under the scheme's program. Instruction data: `[disc, ...init_payload]` (no scheme byte — the program identifies the scheme), where `init_payload` is scheme-defined:
+A Vector account is created via the `initialize` instruction, which allocates the `33 + stored_identity_len` byte PDA under the scheme's program. Instruction data: `[disc, ...init_payload]` (no scheme byte — the program identifies the scheme), where `init_payload` is scheme-defined:
 
 | Scheme      | `init_payload`            | Stored Identity                              |
 |-------------|---------------------------|----------------------------------------------|
@@ -174,8 +209,9 @@ A Vector account is created via the `initialize` instruction, which allocates th
 | EIP-191     | 20-byte ETH address       | the address verbatim                        |
 | Falcon-512  | 897-byte wire pubkey      | `sha256(wire)[32] \|\| pad[1] \|\| prepared[1024]` |
 | Secp256k1   | 33-byte compressed pubkey | the compressed pubkey verbatim              |
+| Winternitz / XMSS | 41-byte public key | `sha256(initial_pubkey)[32]` followed by the current 41-byte key |
 
-`initialize` allocates the full `33 + identity_len` bytes in a single
+`initialize` allocates the full `33 + stored_identity_len` bytes in a single
 `CreateAccount` CPI; every scheme registers in one call.
 
 For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte address must be non-zero. For Secp256k1, the compressed pubkey must start with `0x02` or `0x03`. For Falcon-512, the wire pubkey is validated and expanded into the 1024-byte prepared form at init time.
@@ -193,8 +229,9 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 ### Rust (`vector-core`)
 
-The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes a `Scheme` descriptor (`program_id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `SECP256K1`:
+The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes a `Scheme` descriptor (`program_id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
+- `create_rotate_subinstruction(&scheme, &identity, new_public_key)` — authorize a Winternitz/XMSS key replacement through Passthrough.
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", identity_seed]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` — convenience wrappers.
 - `create_initialize_instruction(payer, &scheme, identity, init_payload)` — generic init-instruction builder.
@@ -212,8 +249,9 @@ Falcon-512 signing is intentionally left to the caller (`solana-falcon512` is ve
 
 ### TypeScript (`@vector/sdk`)
 
-The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `SECP256K1`):
+The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `SECP256K1`, `WINTERNITZ`, `XMSS`):
 
+- `createRotateSubinstruction(scheme, identity, newPublicKey)` — authorize a Winternitz/XMSS key replacement through Passthrough.
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
 - `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 33-byte header.
 - `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` — convenience wrappers.
@@ -229,7 +267,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `verifyAdvanceSignatureEd25519(pubkey, nonce, pre, post, signature, feePayer?)` / `verifyAdvanceSignatureSecp256k1(...)` / `verifyAdvanceSignatureEip191(...)` / `verifyAdvanceSignatureFalcon512(wirePubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `falcon512Identity(wirePubkey)` / `secp256k1CompressedPubkey` / `ethAddressFromPrivateKey` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
-The TypeScript SDK implements signing for every scheme. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
+The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1 and Falcon-512. Winternitz and XMSS signing are supplied by the caller. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
 
 Each scheme is its own importable entrypoint (the npm feature-flag analogue) so a consumer only pulls the crypto it uses: `import { signAdvanceInstructionFalcon512 } from "vector-sdk/falcon512"` (Falcon + PQ lib only) vs `import { ... } from "vector-sdk"` (everything).
 

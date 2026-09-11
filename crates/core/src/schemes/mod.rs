@@ -10,3 +10,5 @@ pub mod ed25519;
 pub mod eip191;
 pub mod falcon512;
 pub mod secp256k1;
+pub mod winternitz;
+pub mod xmss;
