@@ -104,7 +104,11 @@ pub fn create_passthrough_instruction(
     accounts.push(AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false));
     for ix in instructions {
         accounts.push(AccountMeta::new_readonly(ix.program_id, false));
-        accounts.extend(ix.accounts.iter().cloned());
+        accounts.extend(ix.accounts.iter().cloned().map(|mut meta| {
+            // The PDA receives its signer privilege during CPI.
+            meta.is_signer &= meta.pubkey != vector_pda;
+            meta
+        }));
     }
 
     let payload_len: usize = 1

@@ -126,11 +126,10 @@ export function createPassthroughInstruction(
   for (const ix of subInstructions) {
     keys.push({ pubkey: ix.programId, isSigner: false, isWritable: false });
     for (const meta of ix.keys) {
-      // Clear isSigner: PDA signing comes from invoke_signed during CPI,
-      // not from transaction-level signatures.
+      // Only the PDA receives its signer privilege during CPI.
       keys.push({
         pubkey: meta.pubkey,
-        isSigner: false,
+        isSigner: meta.isSigner && !meta.pubkey.equals(vectorPda),
         isWritable: meta.isWritable,
       });
     }
