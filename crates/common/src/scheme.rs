@@ -28,7 +28,8 @@ pub trait SigningScheme {
     const INIT_PAYLOAD_LEN: usize;
 
     /// Validate the init payload and write the on-chain identity bytes into
-    /// `identity_out` (exactly `IDENTITY_LEN` wide).
+    /// `identity_out` (up to `IDENTITY_LEN`, capped by the initial allocation).
+    /// Larger identities must support completing preparation after account growth.
     fn populate_identity(payload: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError>;
 
     /// The slice of the stored identity folded into the advance digest.

@@ -14,6 +14,9 @@ mod eip191;
 mod falcon512;
 
 #[cfg(test)]
+mod mldsa44;
+
+#[cfg(test)]
 mod secp256k1;
 
 #[cfg(test)]

@@ -33,6 +33,11 @@ export const FALCON_PUBKEY_LEN = 897;
 export const FALCON_SIGNATURE_LEN = 666;
 export const FALCON_PREPARED_PUBKEY_LEN = 1024;
 
+// ML-DSA-44 sizes — mirror `solana-ml-dsa` constants (FIPS 204 Table 2).
+export const MLDSA44_PUBKEY_LEN = 1312;
+export const MLDSA44_SIGNATURE_LEN = 2420;
+export const MLDSA44_PREPARED_KEY_LEN = 20544;
+
 /** sec1-compressed secp256k1 public key length. */
 export const SECP256K1_COMPRESSED_PUBKEY_LEN = 33;
 

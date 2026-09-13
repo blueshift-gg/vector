@@ -5,6 +5,7 @@ members = [
     "programs/ed25519",
     "programs/eip191",
     "programs/falcon512",
+    "programs/mldsa44",
     "programs/secp256k1",
     "programs/winternitz",
     "programs/xmss",
@@ -22,6 +23,7 @@ default-members = [
     "programs/ed25519",
     "programs/eip191",
     "programs/falcon512",
+    "programs/mldsa44",
     "programs/secp256k1",
     "programs/winternitz",
     "programs/xmss",
@@ -43,6 +45,7 @@ solana-nostd-keccak = "0.2.0"
 pinocchio-system = "0.6.1"
 brine-ed25519 = { version = "0.7.0", features = ["fast-sha512"] }
 solana-falcon512 = "0.1.2"
+solana-ml-dsa = { path = "../solana-ml-dsa" }
 solana-winternitz = { path = "../solana-winternitz", default-features = false }
 solana-secp256k1 = "0.2.1"
 solana-secp256k1-ecdsa = { version = "0.2.0", default-features = false, features = ["sha256"] }
@@ -55,6 +58,12 @@ codegen-units = 1
 # and don't benefit from runtime overflow checks — disabling here recovers
 # ~120k CUs on Falcon advance and ~30-40k on the other schemes.
 [profile.release.package.solana-falcon512]
+overflow-checks = false
+
+[profile.release.package.solana-ml-dsa]
+overflow-checks = false
+
+[profile.release.package.solana-shake]
 overflow-checks = false
 
 [profile.release.package.solana-secp256k1]
