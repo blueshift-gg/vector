@@ -966,6 +966,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrand"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+
+[[package]]
 name = "feature-probe"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -992,6 +998,18 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fips204"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9fb5a367b9846933e271a3c2a992930743f82ae5e8cb7faa780715a80fa0b15"
+dependencies = [
+ "rand_core 0.6.4",
+ "sha2 0.10.9",
+ "sha3",
+ "zeroize",
+]
 
 [[package]]
 name = "five8"
@@ -1314,6 +1332,12 @@ dependencies = [
  "num-bigint 0.4.6",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "lock_api"
@@ -1864,6 +1888,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
+]
+
+[[package]]
+name = "rustix"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys",
 ]
 
 [[package]]
@@ -2464,6 +2501,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-ml-dsa"
+version = "0.1.0"
+dependencies = [
+ "solana-shake",
+]
+
+[[package]]
 name = "solana-msg"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2776,6 +2820,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-shake"
+version = "0.1.0"
+source = "git+https://github.com/blueshift-gg/solana-shake?rev=684f8152dd8b75c8793ba495511b9b938b1b5aeb#684f8152dd8b75c8793ba495511b9b938b1b5aeb"
+
+[[package]]
 name = "solana-signature"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3036,6 +3085,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-winternitz"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "sha3",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3107,6 +3164,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.3.4",
+ "once_cell",
+ "rustix",
+ "windows-sys",
 ]
 
 [[package]]
@@ -3245,6 +3315,8 @@ dependencies = [
  "solana-falcon512",
  "solana-instruction",
  "solana-instructions-sysvar",
+ "solana-ml-dsa",
+ "solana-winternitz",
 ]
 
 [[package]]
@@ -3279,6 +3351,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vector-mldsa44"
+version = "0.1.0"
+dependencies = [
+ "pinocchio",
+ "solana-address 2.6.0",
+ "solana-ml-dsa",
+ "vector-common",
+]
+
+[[package]]
 name = "vector-secp256k1"
 version = "0.1.0"
 dependencies = [
@@ -3294,6 +3376,7 @@ name = "vector-tests"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "fips204",
  "k256",
  "mollusk-svm",
  "mollusk-svm-programs-token",
@@ -3304,11 +3387,34 @@ dependencies = [
  "solana-address 2.6.0",
  "solana-falcon512",
  "solana-instruction",
+ "solana-ml-dsa",
  "solana-program-error",
  "solana-program-option",
  "solana-program-pack",
+ "solana-winternitz",
  "spl-token-interface",
+ "tempfile",
  "vector-core",
+]
+
+[[package]]
+name = "vector-winternitz"
+version = "0.1.0"
+dependencies = [
+ "pinocchio",
+ "solana-address 2.6.0",
+ "solana-winternitz",
+ "vector-common",
+]
+
+[[package]]
+name = "vector-xmss"
+version = "0.1.0"
+dependencies = [
+ "pinocchio",
+ "solana-address 2.6.0",
+ "solana-winternitz",
+ "vector-common",
 ]
 
 [[package]]

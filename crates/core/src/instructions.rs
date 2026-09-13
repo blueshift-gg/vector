@@ -6,7 +6,8 @@ use solana_instruction::{AccountMeta, Instruction};
 
 use crate::scheme::{
     find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
-    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
+    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, ROTATE_DISCRIMINATOR, SYSTEM_PROGRAM_ID,
+    WITHDRAW_DISCRIMINATOR,
 };
 
 /// Build an `initialize` instruction. `init_payload`'s shape is
@@ -103,7 +104,11 @@ pub fn create_passthrough_instruction(
     accounts.push(AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false));
     for ix in instructions {
         accounts.push(AccountMeta::new_readonly(ix.program_id, false));
-        accounts.extend(ix.accounts.iter().cloned());
+        accounts.extend(ix.accounts.iter().cloned().map(|mut meta| {
+            // The PDA receives its signer privilege during CPI.
+            meta.is_signer &= meta.pubkey != vector_pda;
+            meta
+        }));
     }
 
     let payload_len: usize = 1
@@ -155,6 +160,30 @@ pub fn create_close_subinstruction(
             AccountMeta::new(*close_to, false),
         ],
         data: vec![CLOSE_DISCRIMINATOR],
+    }
+}
+
+/// Replace the current key through Passthrough (Winternitz and XMSS only).
+/// `identity` is the fixed SHA-256 hash of the initial public key, including
+/// after rotation. Persist the fresh signer before authorizing this instruction.
+pub fn create_rotate_subinstruction(
+    scheme: &Scheme,
+    identity: &[u8; 32],
+    new_public_key: &[u8],
+) -> Instruction {
+    assert_eq!(
+        new_public_key.len(),
+        scheme.stored_identity_len - scheme.identity_len,
+        "replacement key length mismatch",
+    );
+    let (vector_pda, _) = find_vector_pda(scheme, identity);
+    let mut data = Vec::with_capacity(1 + new_public_key.len());
+    data.push(ROTATE_DISCRIMINATOR);
+    data.extend_from_slice(new_public_key);
+    Instruction {
+        program_id: scheme.program_id,
+        accounts: vec![AccountMeta::new(vector_pda, false)],
+        data,
     }
 }
 

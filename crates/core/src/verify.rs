@@ -33,6 +33,7 @@ use solana_instruction::Instruction;
 use crate::digest::advance_vector_digest_with_fee_payer;
 use crate::schemes::eip191::{eip191_envelope_hash, EIP191, EIP191_ETH_ADDRESS_LEN};
 use crate::schemes::falcon512::{falcon512_identity, FALCON512, FALCON512_WIRE_PUBKEY_LEN};
+use crate::schemes::mldsa44::{MLDSA44, MLDSA44_PUBKEY_LEN, MLDSA44_SIGNATURE_LEN};
 use crate::schemes::{
     ed25519::{ED25519, ED25519_PUBKEY_LEN},
     secp256k1::{SECP256K1, SECP256K1_COMPRESSED_PUBKEY_LEN},
@@ -253,3 +254,36 @@ pub fn verify_advance_signature_falcon512(
     }
 }
 
+/// Verify an ML-DSA-44 `advance` signature offline. `public_key` is the
+/// standard 1312-byte key, `signature` the 2420-byte signature (the advance
+/// ix data after the 1-byte discriminator). Runs the same verifier the
+/// on-chain program uses (`solana-ml-dsa`), with an empty FIPS 204 context.
+/// Returns the recomputed digest — the account's next nonce — on success.
+pub fn verify_advance_signature_mldsa44(
+    public_key: &[u8; MLDSA44_PUBKEY_LEN],
+    nonce: &[u8; 32],
+    pre_instructions: &[Instruction],
+    post_instructions: &[Instruction],
+    fee_payer: Option<&Address>,
+    signature: &[u8],
+) -> Result<[u8; 32], VerifyError> {
+    let sig_bytes: &[u8; MLDSA44_SIGNATURE_LEN] = signature
+        .try_into()
+        .map_err(|_| VerifyError::MalformedSignature("ml-dsa-44 signature must be 2420 bytes"))?;
+
+    let digest = advance_vector_digest_with_fee_payer(
+        &MLDSA44,
+        nonce,
+        public_key,
+        pre_instructions,
+        post_instructions,
+        fee_payer,
+    );
+
+    use solana_ml_dsa::ml_dsa_44::{Signature, VerifyingKey};
+    let key = VerifyingKey::<false>::from_bytes(public_key);
+    match key.verify(&digest, Signature::ref_from_bytes(sig_bytes).unwrap()) {
+        Ok(()) => Ok(digest),
+        Err(_) => Err(VerifyError::SignatureInvalid),
+    }
+}

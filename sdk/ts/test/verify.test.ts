@@ -16,11 +16,19 @@ import {
   ed25519Identity,
   eip191Identity,
   falcon512Keygen,
+  mldsa44Keygen,
+  createRegisterMlDsa44Instructions,
+  MLDSA44,
+  MLDSA44_EXPAND_DISCRIMINATOR,
+  createPassthroughInstruction,
+  createWithdrawSubinstruction,
+  findVectorPda,
   revocationDigest,
   secp256k1Identity,
   signAdvanceInstructionEd25519,
   signAdvanceInstructionEip191,
   signAdvanceInstructionFalcon512,
+  signAdvanceInstructionMlDsa44,
   signAdvanceInstructionSecp256k1,
   signRevocationInstructionEd25519,
 } from "../src/index.js";
@@ -32,6 +40,7 @@ import {
   verifyAdvanceSignatureEd25519,
   verifyAdvanceSignatureEip191,
   verifyAdvanceSignatureFalcon512,
+  verifyAdvanceSignatureMlDsa44,
   verifyAdvanceSignatureSecp256k1,
 } from "../src/verify.js";
 
@@ -145,6 +154,57 @@ describe("sign → verify round trips", () => {
     expect(() =>
       verifyAdvanceSignatureFalcon512(keypair.publicKey, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
+  });
+
+  test("mldsa44 (standard key as identity, empty context)", () => {
+    const keypair = mldsa44Keygen(new Uint8Array(32).fill(0x44));
+    expect(keypair.publicKey.length).toBe(MLDSA44.identityLen);
+    const { pre, post } = fixedIxLists();
+
+    const advance = signAdvanceInstructionMlDsa44(keypair, NONCE, pre, post);
+    const signature = sigOf(advance);
+    expect(signature.length).toBe(MLDSA44.signatureLen);
+    const digest = verifyAdvanceSignatureMlDsa44(
+      keypair.publicKey, NONCE, pre, post, signature
+    );
+    expect(digest).toEqual(advanceVectorDigest(MLDSA44, NONCE, keypair.publicKey, pre, post));
+
+    const badNonce = new Uint8Array(NONCE);
+    badNonce[0] ^= 0x01;
+    expect(() =>
+      verifyAdvanceSignatureMlDsa44(keypair.publicKey, badNonce, pre, post, signature)
+    ).toThrow(SignatureVerificationError);
+    const tampered = new Uint8Array(signature);
+    tampered[100] ^= 0x01;
+    expect(() =>
+      verifyAdvanceSignatureMlDsa44(keypair.publicKey, NONCE, pre, post, tampered)
+    ).toThrow(SignatureVerificationError);
+
+    // Registration is initialize plus two expands on the same PDA.
+    const register = createRegisterMlDsa44Instructions(addr(0x33), keypair.publicKey);
+    expect(register.length).toBe(3);
+    expect(register[0].data.length).toBe(1 + MLDSA44.identityLen);
+    for (const expand of register.slice(1)) {
+      expect(Array.from(expand.data)).toEqual([MLDSA44_EXPAND_DISCRIMINATOR]);
+      expect(expand.keys.length).toBe(1);
+      expect(expand.keys[0].pubkey.equals(register[0].keys[1].pubkey)).toBe(true);
+      expect(expand.keys[0].isWritable).toBe(true);
+    }
+
+    // Shared with tests/mldsa44.rs: identity, PDA and signature carve-out.
+    const publicKey = new Uint8Array(1312).fill(0x44);
+    const [pda, bump] = findVectorPda(MLDSA44, publicKey);
+    expect(pda.toString()).toBe("FNjvHupTZp9ZRo53mmh9tV3vv3mADxU5rKo9ataMWUj2");
+    expect(bump).toBe(255);
+    const passthrough = createPassthroughInstruction(MLDSA44, publicKey, [
+      createWithdrawSubinstruction(MLDSA44, publicKey, addr(9), 1234n),
+    ]);
+    const pinned = advanceVectorDigest(
+      MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
+    );
+    expect(Buffer.from(pinned).toString("hex")).toBe(
+      "d6cb91bb616d7e3e4aabb371c3b52dd1bf23c759171ffa555c631856591d65e8"
+    );
   });
 });
 

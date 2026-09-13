@@ -14,6 +14,7 @@ pub const ADVANCE_DISCRIMINATOR: u8 = 1;
 pub const CLOSE_DISCRIMINATOR: u8 = 2;
 pub const WITHDRAW_DISCRIMINATOR: u8 = 3;
 pub const PASSTHROUGH_DISCRIMINATOR: u8 = 4;
+pub const ROTATE_DISCRIMINATOR: u8 = 5;
 
 pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 
@@ -29,8 +30,8 @@ pub struct Scheme {
     /// Wire signature length carried in `advance` instruction data.
     pub signature_len: usize,
     /// Length of the client-side identity — the value hashed into the
-    /// advance digest and used to derive the PDA. For most schemes this is
-    /// the pubkey/address itself; for Falcon it's `sha256(wire)` (32).
+    /// advance digest and used to derive the PDA. Winternitz/XMSS retain
+    /// `sha256(initial_pubkey)` across rotations; Falcon uses `sha256(wire)`.
     pub identity_len: usize,
     /// Bytes the on-chain account stores after the 33-byte header. Equals
     /// `identity_len` for schemes that store the pubkey verbatim; larger for
@@ -98,7 +99,7 @@ pub fn pda_seed_from_identity(identity: &[u8]) -> [u8; 32] {
 /// Seeds: `["vector", identity_seed]` (no scheme byte — the program ID is
 /// the discriminator).
 pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
-    debug_assert_eq!(identity.len(), scheme.identity_len);
+    assert_eq!(identity.len(), scheme.identity_len, "identity length mismatch");
     let seed_bytes = pda_seed_from_identity(identity);
     let seed_len = identity.len().min(32);
     Address::find_program_address(
