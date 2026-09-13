@@ -1,15 +1,15 @@
-//! DKKW25 generalized XMSS. Sign through `solana_winternitz::Signer`:
+//! DKKW25 generalized XMSS. Sign through `solana_winternitz::xmss::SigningKey`:
 //! each key permits 256 signing attempts, including failed salt sampling.
 
 use sha2::{Digest, Sha256};
 use solana_address::{address, Address};
 use solana_instruction::Instruction;
-use solana_winternitz::{xmss, PUBLIC_KEY_LENGTH};
+use solana_winternitz::{xmss, PUBLIC_KEY_LEN};
 
 use crate::{instructions::create_initialize_instruction, scheme::Scheme};
 
-pub const XMSS_PUBKEY_LEN: usize = PUBLIC_KEY_LENGTH;
-pub const XMSS_SIGNATURE_LEN: usize = xmss::SIGNATURE_LENGTH;
+pub const XMSS_PUBKEY_LEN: usize = PUBLIC_KEY_LEN;
+pub const XMSS_SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
 
 /// The initial key hash is the permanent identity; the current key follows it.
 pub const XMSS: Scheme = Scheme {

@@ -88,9 +88,9 @@ Advance(current-key signature)
 Passthrough([Rotate(next_public_key), ...actions])
 ```
 
-`create_rotate_subinstruction` / `createRotateSubinstruction` builds the `Rotate` payload. The existing Vector digest commits to the replacement key and all actions. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Direct, unsigned rotation and replacing a key with itself are rejected. Rotation stays within the account's signing scheme.
+`create_rotate_subinstruction` / `createRotateSubinstruction` builds the optional `Rotate` payload. Like `Withdraw` and `Close`, it requires the PDA's signature through Passthrough. The existing Vector digest commits to the replacement key and all actions. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Rotation stays within the account's signing scheme.
 
-For Winternitz, every authorization must rotate to a fresh key or close the account. This is a signing requirement, not an on-chain history of used keys: callers must never reinstall a used key or sign two different authorizations with one key. XMSS can authorize multiple transactions under one tree; reserve a leaf for rotation before exhaustion. Failed salt sampling and abandoned authorizations consume signing attempts too.
+Callers manage key freshness, persistent signing state and rotation timing. The program does not track spent keys or XMSS leaves, require rotation, or check that a replacement key differs. To retain control, Winternitz callers must include a fresh replacement key in their one authorization; XMSS callers must rotate before exhausting the tree. Never sign different authorizations with the same Winternitz key or XMSS leaf. Failed salt sampling and abandoned authorizations consume signing attempts too.
 
 Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
 

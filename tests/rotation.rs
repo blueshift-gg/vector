@@ -4,7 +4,10 @@ use mollusk_svm::result::types::TransactionProgramResult;
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
-use solana_winternitz::{winternitz, xmss, OneTime, Signer};
+use solana_winternitz::{
+    hazmat::{self, OneTime},
+    xmss, SigningKey,
+};
 use vector_core::{
     advance_vector_digest_with_fee_payer, create_advance_instruction,
     create_passthrough_instruction, create_rotate_subinstruction, create_withdraw_subinstruction,
@@ -15,22 +18,24 @@ use crate::common::{build_vector_account, expected_advanced_data, mollusk, NONCE
 
 #[test]
 fn winternitz_rotates_without_moving_the_account() {
-    round_trip::<winternitz::SecretKey>(&WINTERNITZ, |signature| signature.0.to_vec());
+    round_trip::<hazmat::winternitz::SecretKey>(&WINTERNITZ, |signature| {
+        signature.as_bytes().to_vec()
+    });
 }
 
 #[test]
 fn xmss_rotates_without_moving_the_account() {
-    round_trip::<xmss::SecretKey>(&XMSS, |signature| signature.0.to_vec());
+    round_trip::<hazmat::xmss::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
 }
 
 fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let directory = tempfile::tempdir().unwrap();
-    let mut first = Signer::<K>::create(directory.path().join("first.key")).unwrap();
-    let mut second = Signer::<K>::create(directory.path().join("second.key")).unwrap();
-    let third = Signer::<K>::create(directory.path().join("third.key")).unwrap();
-    let identity = pda_seed_from_identity(&first.public_key().0);
+    let mut first = SigningKey::<K>::create(directory.path().join("first.key")).unwrap();
+    let mut second = SigningKey::<K>::create(directory.path().join("second.key")).unwrap();
+    let third = SigningKey::<K>::create(directory.path().join("third.key")).unwrap();
+    let identity = pda_seed_from_identity(first.verifying_key().as_bytes());
     let (vector, bump) = find_vector_pda(scheme, &identity);
-    let stored = [identity.as_slice(), first.public_key().0.as_slice()].concat();
+    let stored = [identity.as_slice(), first.verifying_key().as_ref()].concat();
     let mollusk = mollusk(scheme);
     let rent = mollusk.sysvars.rent.minimum_balance(scheme.account_len());
     let receiver = Address::new_unique();
@@ -41,7 +46,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         ),
         (receiver, Account::new(1_000_000, 0, &Address::default())),
     ];
-    let rotate = create_rotate_subinstruction(scheme, &identity, &second.public_key().0);
+    let rotate = create_rotate_subinstruction(scheme, &identity, second.verifying_key().as_bytes());
     let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, 3_000_000);
     // Rotation first also exercises CPI signer seeds after the key changes.
     let passthrough =
@@ -66,7 +71,8 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         );
         assert_eq!(result.resulting_accounts, accounts);
     }
-    let changed_key = create_rotate_subinstruction(scheme, &identity, &third.public_key().0);
+    let changed_key =
+        create_rotate_subinstruction(scheme, &identity, third.verifying_key().as_bytes());
     let changed = create_passthrough_instruction(scheme, &identity, &[changed_key, withdraw]);
     let result = mollusk.process_transaction_instructions(&[advance.clone(), changed], &accounts);
     assert_eq!(
@@ -79,7 +85,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let result = mollusk.process_transaction_instructions(&transaction, &accounts);
     assert_eq!(result.program_result, TransactionProgramResult::Success);
     let rotated = result.resulting_accounts;
-    let stored_second = [identity.as_slice(), second.public_key().0.as_slice()].concat();
+    let stored_second = [identity.as_slice(), second.verifying_key().as_ref()].concat();
     let account = &rotated.iter().find(|(key, _)| *key == vector).unwrap().1;
     assert_eq!(
         account.data,
@@ -105,7 +111,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
 
     // The next key signs exactly once. A failed action must roll back both
     // the new key and nonce, allowing these exact bytes to be retried.
-    let rotate = create_rotate_subinstruction(scheme, &identity, &third.public_key().0);
+    let rotate = create_rotate_subinstruction(scheme, &identity, third.verifying_key().as_bytes());
     let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, 3_000_000);
     let passthrough = create_passthrough_instruction(scheme, &identity, &[rotate, withdraw]);
     let next_digest = advance_vector_digest_with_fee_payer(
@@ -144,7 +150,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .find(|(key, _)| *key == vector)
         .unwrap()
         .1;
-    let stored_third = [identity.as_slice(), third.public_key().0.as_slice()].concat();
+    let stored_third = [identity.as_slice(), third.verifying_key().as_ref()].concat();
     assert_eq!(
         account.data,
         expected_advanced_data(next_digest, scheme, bump, &stored_third)
@@ -160,7 +166,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .unwrap()
         .1
         .data[65..]
-        .copy_from_slice(&first.public_key().0);
+        .copy_from_slice(first.verifying_key().as_bytes());
     let rejected = mollusk.process_transaction_instructions(&next_transaction, &wrong_key);
     assert_eq!(
         rejected.program_result,
@@ -169,11 +175,10 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
 }
 
 #[test]
-fn rotate_rejects_malformed_and_unchanged_keys() {
+fn rotate_validates_payload_without_enforcing_key_freshness() {
     let directory = tempfile::tempdir().unwrap();
-    let mut signer =
-        Signer::<xmss::SecretKey>::create(directory.path().join("signer.key")).unwrap();
-    let public_key = signer.public_key().0;
+    let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
+    let public_key = signer.verifying_key().to_bytes();
     let identity = pda_seed_from_identity(&public_key);
     let (vector, bump) = find_vector_pda(&XMSS, &identity);
     let stored = [identity.as_slice(), public_key.as_slice()].concat();
@@ -202,12 +207,19 @@ fn rotate_rejects_malformed_and_unchanged_keys() {
             None,
         );
         let signature = signer.sign(&digest).unwrap();
-        let advance = create_advance_instruction(&XMSS, &identity, &signature.0);
+        let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
         let result = mollusk.process_transaction_instructions(&[advance, passthrough], &accounts);
-        assert_eq!(
-            result.program_result,
-            TransactionProgramResult::Failure(1, ProgramError::InvalidInstructionData)
-        );
-        assert_eq!(result.resulting_accounts, accounts);
+        if key == public_key {
+            assert_eq!(result.program_result, TransactionProgramResult::Success);
+            let mut expected = accounts.clone();
+            expected[0].1.data = expected_advanced_data(digest, &XMSS, bump, &stored);
+            assert_eq!(result.resulting_accounts, expected);
+        } else {
+            assert_eq!(
+                result.program_result,
+                TransactionProgramResult::Failure(1, ProgramError::InvalidInstructionData)
+            );
+            assert_eq!(result.resulting_accounts, accounts);
+        }
     }
 }

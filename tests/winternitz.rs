@@ -4,7 +4,7 @@ use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
-use solana_winternitz::{winternitz, Signer};
+use solana_winternitz::winternitz;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
     create_initialize_winternitz, create_passthrough_instruction, create_rotate_subinstruction,
@@ -84,9 +84,8 @@ fn initialize_and_client_encoding() {
 #[test]
 fn signature_binds_close_and_rejects_replay() {
     let directory = tempfile::tempdir().unwrap();
-    let mut signer =
-        Signer::<winternitz::SecretKey>::create(directory.path().join("signer.key")).unwrap();
-    let public_key = signer.public_key().0;
+    let mut signer = winternitz::SigningKey::create(directory.path().join("signer.key")).unwrap();
+    let public_key = signer.verifying_key().to_bytes();
     let identity = winternitz_identity(&public_key);
     let stored = [identity.as_slice(), public_key.as_slice()].concat();
     let mollusk = mollusk(&WINTERNITZ);
@@ -108,14 +107,14 @@ fn signature_binds_close_and_rejects_replay() {
         &[],
         std::slice::from_ref(&passthrough),
     );
-    let signature = signer.sign(&digest).unwrap().0;
+    let signature = signer.sign(&digest).unwrap().to_bytes();
     let advance = create_advance_instruction(&WINTERNITZ, &identity, &signature);
     let expected = expected_advanced_data(digest, &WINTERNITZ, bump, &stored);
 
     let other_close = create_close_subinstruction(&WINTERNITZ, &identity, &other);
     let changed_action = create_passthrough_instruction(&WINTERNITZ, &identity, &[other_close]);
     let mut tampered = signature;
-    tampered[winternitz::SIGNATURE_LENGTH - 1] ^= 1;
+    tampered[winternitz::SIGNATURE_LEN - 1] ^= 1;
     let mut wrong_key = account.clone();
     wrong_key.data[65] ^= 1;
     let mut advanced = account.clone();
@@ -136,7 +135,7 @@ fn signature_binds_close_and_rejects_replay() {
             ProgramError::MissingRequiredSignature,
         ),
         (
-            &signature[..winternitz::SIGNATURE_LENGTH - 1],
+            &signature[..winternitz::SIGNATURE_LEN - 1],
             account.clone(),
             passthrough.clone(),
             ProgramError::InvalidInstructionData,

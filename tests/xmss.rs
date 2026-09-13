@@ -4,7 +4,7 @@ use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
-use solana_winternitz::{xmss, Signer};
+use solana_winternitz::xmss;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_initialize_xmss,
     create_passthrough_instruction, create_rotate_subinstruction, create_withdraw_subinstruction,
@@ -93,9 +93,8 @@ fn initialize_checks_key_length_and_pda() {
 #[test]
 fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
     let directory = tempfile::tempdir().unwrap();
-    let mut signer =
-        Signer::<xmss::SecretKey>::create(directory.path().join("signer.key")).unwrap();
-    let public_key = signer.public_key().0;
+    let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
+    let public_key = signer.verifying_key().to_bytes();
     let identity = xmss_identity(&public_key);
     let stored = [identity.as_slice(), public_key.as_slice()].concat();
     let mollusk = mollusk(&XMSS);
@@ -109,7 +108,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
     );
     let digest = advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[]);
     let signature = signer.sign(&digest).unwrap();
-    let advance = create_advance_instruction(&XMSS, &identity, &signature.0);
+    let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
     let expected = expected_advanced_data(digest, &XMSS, bump, &stored);
     let result = mollusk.process_and_validate_instruction_chain(
         &[(
@@ -153,9 +152,9 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
         );
     }
 
-    let mut tampered = signature.0;
-    tampered[xmss::SIGNATURE_LENGTH - 1] ^= 1;
-    let mut out_of_range = signature.0;
+    let mut tampered = signature.to_bytes();
+    tampered[xmss::SIGNATURE_LEN - 1] ^= 1;
+    let mut out_of_range = signature.to_bytes();
     out_of_range[..4].copy_from_slice(&xmss::LEAVES.to_be_bytes());
     for (bytes, error) in [
         (tampered.as_slice(), ProgramError::MissingRequiredSignature),
@@ -164,7 +163,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
             ProgramError::MissingRequiredSignature,
         ),
         (
-            &signature.0[..xmss::SIGNATURE_LENGTH - 1],
+            &signature.as_bytes()[..xmss::SIGNATURE_LEN - 1],
             ProgramError::InvalidInstructionData,
         ),
     ] {
@@ -185,9 +184,8 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
 #[test]
 fn advance_binds_and_authorizes_withdrawal() {
     let directory = tempfile::tempdir().unwrap();
-    let mut signer =
-        Signer::<xmss::SecretKey>::create(directory.path().join("signer.key")).unwrap();
-    let public_key = signer.public_key().0;
+    let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
+    let public_key = signer.verifying_key().to_bytes();
     let identity = xmss_identity(&public_key);
     let stored = [identity.as_slice(), public_key.as_slice()].concat();
     // Abandoned authorizations spend leaves even when no transaction lands.
@@ -213,7 +211,7 @@ fn advance_binds_and_authorizes_withdrawal() {
     );
     let signature = signer.sign(&digest).unwrap();
     assert_eq!(signature.leaf(), 1);
-    let advance = create_advance_instruction(&XMSS, &identity, &signature.0);
+    let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
 
     // The signature must bind the downstream action, not just the nonce.
     let changed_withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 4_000_000);

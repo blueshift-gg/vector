@@ -1,15 +1,15 @@
-//! DKKW25 one-time Winternitz. Sign through `solana_winternitz::Signer`:
+//! DKKW25 one-time Winternitz. Sign through `solana_winternitz::winternitz::SigningKey`:
 //! each key permits one signing attempt, including failed salt sampling.
 
 use sha2::{Digest, Sha256};
 use solana_address::{address, Address};
 use solana_instruction::Instruction;
-use solana_winternitz::{winternitz, PUBLIC_KEY_LENGTH};
+use solana_winternitz::{winternitz, PUBLIC_KEY_LEN};
 
 use crate::{instructions::create_initialize_instruction, scheme::Scheme};
 
-pub const WINTERNITZ_PUBKEY_LEN: usize = PUBLIC_KEY_LENGTH;
-pub const WINTERNITZ_SIGNATURE_LEN: usize = winternitz::SIGNATURE_LENGTH;
+pub const WINTERNITZ_PUBKEY_LEN: usize = PUBLIC_KEY_LEN;
+pub const WINTERNITZ_SIGNATURE_LEN: usize = winternitz::SIGNATURE_LEN;
 
 /// The initial key hash is the permanent identity; the current key follows it.
 pub const WINTERNITZ: Scheme = Scheme {

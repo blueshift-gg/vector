@@ -1,6 +1,5 @@
 //! Key rotation with a fixed account identity: `sha256(initial_payload) || key`.
 
-use alloc::vec;
 use core::marker::PhantomData;
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use solana_nostd_sha256::hash;
@@ -40,6 +39,7 @@ impl<S: SigningScheme> SigningScheme for Rotating<S> {
 /// Rotate carries a new init payload and is authorized through Passthrough,
 /// like Withdraw: the current key signs the entire transaction, including
 /// the replacement key. Only the stored key changes; seeds and nonce remain.
+/// Rotation is optional; callers manage key freshness and signing capacity.
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -64,12 +64,5 @@ pub fn dispatch<S: SigningScheme>(
     if data.len() != VectorAccount::account_len::<Rotating<S>>() {
         return Err(ProgramError::InvalidAccountData);
     }
-    let current = &mut data[VectorAccount::HEADER_LEN + 32..];
-    let mut next = vec![0; S::IDENTITY_LEN];
-    S::populate_identity(payload, &mut next)?;
-    if current == next {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    current.copy_from_slice(&next);
-    Ok(())
+    S::populate_identity(payload, &mut data[VectorAccount::HEADER_LEN + 32..])
 }
