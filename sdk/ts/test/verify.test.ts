@@ -101,8 +101,15 @@ describe("sign → verify round trips", () => {
     const digest = verifyAdvanceSignatureSecp256k1(pubkey, NONCE, pre, post, wire);
     expect(digest.length).toBe(32);
 
-    // On-chain `solana-secp256k1-ecdsa` accepts both s normalizations, so
-    // the offline check must accept the malleated twin too.
+    // The signer emits the `s` whose recovery id is 0, the one the program
+    // tries first.
+    const recovered = secp256k1.Signature.fromBytes(wire, "compact")
+      .addRecoveryBit(0)
+      .recoverPublicKey(digest);
+    expect(recovered.toBytes(true)).toEqual(pubkey);
+
+    // The on-chain program accepts both s normalizations, so the offline
+    // check must accept the malleated twin too.
     expect(() =>
       verifyAdvanceSignatureSecp256k1(pubkey, NONCE, pre, post, malleateHighS(wire))
     ).not.toThrow();

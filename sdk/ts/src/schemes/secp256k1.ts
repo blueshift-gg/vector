@@ -78,7 +78,10 @@ export function signAdvanceInstructionSecp256k1(
   );
 
   const sig = secp256k1.sign(digest, privateKey);
-  const sigBytes = sig.toBytes("compact"); // r || s (64 bytes)
+  // Negating `s` gives the other valid signature and flips the recovery id.
+  // The program tries id 0 first, so emit that one.
+  const s = sig.recovery & 1 ? secp256k1.CURVE.n - sig.s : sig.s;
+  const sigBytes = new secp256k1.Signature(sig.r, s).toBytes("compact"); // r || s (64 bytes)
 
   return createAdvanceInstruction(SECP256K1, identity, sigBytes);
 }

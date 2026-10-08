@@ -1,7 +1,7 @@
 //! Plain secp256k1 ECDSA program: identity is the 33-byte sec1-compressed
 //! pubkey, verified via standard ECDSA (no envelope, no recovery byte).
 
-use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as Secp256k1SigningKey};
+use k256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey as Secp256k1SigningKey};
 use solana_address::{address, Address};
 use solana_instruction::Instruction;
 
@@ -57,9 +57,16 @@ pub fn sign_advance_instruction_secp256k1_ecdsa(
         pre_instructions,
         post_instructions,
     );
-    let (sig, _recid) = signing_key
+    let (sig, recid) = signing_key
         .sign_prehash(&digest)
         .expect("secp256k1 signing failed");
+    // Negating `s` gives the other valid signature and flips the recovery
+    // id. The program tries id 0 first, so emit that one.
+    let sig = if recid.is_y_odd() {
+        Signature::from_scalars(*sig.r(), -*sig.s().as_ref()).expect("r and s are nonzero")
+    } else {
+        sig
+    };
     let sig_bytes: [u8; 64] = sig.to_bytes().into();
     create_advance_instruction(&SECP256K1, &identity, &sig_bytes)
 }

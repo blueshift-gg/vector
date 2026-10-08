@@ -175,9 +175,8 @@ export function verifyAdvanceSignatureEd25519(
  * `compressedPubkey` is the 33-byte sec1 identity, `signature` the 64-byte
  * `r || s` wire form. Returns the recomputed digest on success.
  *
- * Verified with `lowS: false`: the on-chain `solana-secp256k1-ecdsa`
- * verifier accepts both `s` normalizations, so the offline check must too
- * or PASS/FAIL would diverge.
+ * Verified with `lowS: false`: the on-chain program accepts both `s`
+ * normalizations, so the offline check must too or PASS/FAIL would diverge.
  */
 export function verifyAdvanceSignatureSecp256k1(
   compressedPubkey: Uint8Array,

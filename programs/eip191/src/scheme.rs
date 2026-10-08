@@ -1,6 +1,6 @@
 use pinocchio::error::ProgramError;
 use solana_nostd_keccak::{hash, hashv};
-use vector_common::SigningScheme;
+use vector_common::{secp256k1_recover, SigningScheme};
 
 const ETH_ADDRESS_LEN: usize = 20;
 
@@ -47,40 +47,5 @@ impl SigningScheme for Secp256k1Eip191 {
         } else {
             Err(ProgramError::MissingRequiredSignature)
         }
-    }
-}
-
-/// Recover the 64-byte uncompressed secp256k1 public key (`x || y`) from a
-/// 32-byte message hash, 64-byte signature, and recovery id (0 or 1) via the
-/// `sol_secp256k1_recover` syscall (re-exported by pinocchio).
-fn secp256k1_recover(
-    hash: &[u8; 32],
-    recovery_id: u64,
-    signature: &[u8; 64],
-) -> Result<[u8; 64], ProgramError> {
-    #[allow(unused_mut)]
-    let mut result = core::mem::MaybeUninit::<[u8; 64]>::uninit();
-
-    #[cfg(target_os = "solana")]
-    {
-        let rc = unsafe {
-            pinocchio::syscalls::sol_secp256k1_recover(
-                hash.as_ptr(),
-                recovery_id,
-                signature.as_ptr(),
-                result.as_mut_ptr() as *mut u8,
-            )
-        };
-        if rc != 0 {
-            return Err(ProgramError::InvalidArgument);
-        }
-        // SAFETY: the syscall wrote all 64 bytes on success (rc == 0).
-        Ok(unsafe { result.assume_init() })
-    }
-
-    #[cfg(not(target_os = "solana"))]
-    {
-        let _ = (hash, recovery_id, signature, &result);
-        Err(ProgramError::InvalidArgument)
     }
 }

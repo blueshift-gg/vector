@@ -76,12 +76,10 @@ fn ed25519_round_trip() {
     assert_eq!(digest, expected, "returned digest is the next nonce");
 }
 
-/// Negate `s` — the high-S malleated twin of a (k256-produced) low-S sig.
-/// On-chain verifiers accept both `s` normalizations, so the offline
-/// verifiers must accept the twin too or PASS/FAIL diverges.
+/// Negate `s` — the malleated twin of a signature. On-chain verifiers accept
+/// both `s` normalizations, so the offline verifiers must accept the twin
+/// too or PASS/FAIL diverges.
 fn malleate_high_s(sig: &k256::ecdsa::Signature) -> k256::ecdsa::Signature {
-    use k256::elliptic_curve::scalar::IsHigh;
-    assert!(!bool::from(sig.s().is_high()), "k256 signs low-S");
     k256::ecdsa::Signature::from_scalars(*sig.r(), -*sig.s().as_ref()).unwrap()
 }
 

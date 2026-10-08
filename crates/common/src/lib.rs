@@ -27,6 +27,7 @@ mod instructions;
 mod scheme;
 mod state;
 
+pub use helpers::secp256k1_recover;
 pub use scheme::{IdentitySeed, SigningScheme};
 pub use state::{signer_seeds, AdvanceOutcome, VectorAccount};
 

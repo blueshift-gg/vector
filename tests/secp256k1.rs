@@ -56,6 +56,17 @@ fn initialize() {
 
 #[test]
 fn advance_empty() {
+    advance(false);
+}
+
+/// The other valid `s` for the same key and digest has recovery id `1`:
+/// the program accepts it on its second recovery.
+#[test]
+fn advance_negated_s() {
+    advance(true);
+}
+
+fn advance(negate_s: bool) {
     let mollusk = mollusk(&SECP256K1);
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
@@ -72,7 +83,12 @@ fn advance_empty() {
         &identity,
     );
 
-    let advance_ix = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &[], &[]);
+    let mut advance_ix = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &[], &[]);
+    if negate_s {
+        let sig = k256::ecdsa::Signature::from_slice(&advance_ix.data[1..65]).unwrap();
+        let twin = k256::ecdsa::Signature::from_scalars(*sig.r(), -*sig.s().as_ref()).unwrap();
+        advance_ix.data[1..65].copy_from_slice(&twin.to_bytes());
+    }
 
     let next_nonce = advance_vector_digest(&SECP256K1, &NONCE, &identity, &[], &[]);
     let expected_vector_data = expected_advanced_data(next_nonce, &SECP256K1, bump, &identity);
@@ -89,7 +105,10 @@ fn advance_empty() {
         )],
         &accounts,
     );
-    println!("secp256k1 advance: {} CUs", result.compute_units_consumed);
+    println!(
+        "secp256k1 advance (recovery id {}): {} CUs",
+        negate_s as u8, result.compute_units_consumed
+    );
 }
 
 #[test]

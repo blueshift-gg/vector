@@ -132,7 +132,7 @@ pub fn advance_vector_digest(
 /// transaction, so a pre-signed revocation must be broadcast as a
 /// transaction containing ONLY the advance instruction. ed25519 / eip191 /
 /// secp256k1 inert advances fit the default compute budget (~13k / ~26k /
-/// ~72k CUs); for Falcon-512, sign via the advance signer with a
+/// ~26k CUs); for Falcon-512, sign via the advance signer with a
 /// compute-budget pre-instruction committed at sign time (its ~184k CU
 /// verify leaves no headroom under the 200k default).
 pub fn revocation_digest(scheme: &Scheme, nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {

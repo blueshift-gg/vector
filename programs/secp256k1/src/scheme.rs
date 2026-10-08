@@ -1,13 +1,17 @@
 use pinocchio::error::ProgramError;
-use solana_secp256k1::{CompressedPoint, Secp256k1Point};
-use solana_secp256k1_ecdsa::{hash::Secp256k1EcdsaHash, Secp256k1EcdsaSignature};
-use vector_common::SigningScheme;
+use vector_common::{secp256k1_recover, SigningScheme};
 
-const COMPRESSED_PUBKEY_LEN: usize = CompressedPoint::SIZE;
+const COMPRESSED_PUBKEY_LEN: usize = 33;
 
 /// Plain secp256k1 ECDSA. Identity is the 33-byte sec1-compressed pubkey;
-/// signatures are 64 bytes `(r, s)` verified via standard ECDSA (no
-/// recovery).
+/// signatures are 64 bytes `(r, s)`.
+///
+/// Verified by public-key recovery: `(r, s)` is valid for `digest` under
+/// `Q` exactly when `Q` is one of the keys `sol_secp256k1_recover` returns
+/// for it, so recovering and comparing is standard ECDSA verification. The
+/// wire carries no recovery id; id `0` is tried first, then `1`. Negating
+/// `s` flips the id, so a signer that picks the `s` with id `0` pays for
+/// one recovery.
 pub struct Secp256k1Ecdsa;
 
 impl SigningScheme for Secp256k1Ecdsa {
@@ -28,28 +32,24 @@ impl SigningScheme for Secp256k1Ecdsa {
     }
 
     fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
-        let sig_bytes: [u8; 64] = signature
+        let sig: &[u8; 64] = signature
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let pubkey_bytes: [u8; COMPRESSED_PUBKEY_LEN] = identity
-            .try_into()
-            .map_err(|_| ProgramError::InvalidAccountData)?;
-
-        let sig = Secp256k1EcdsaSignature(sig_bytes);
-        let pubkey = CompressedPoint(pubkey_bytes);
-        sig.verify::<PreHashedDigest, CompressedPoint>(digest, pubkey)
-            .map_err(|_| ProgramError::MissingRequiredSignature)
-    }
-}
-
-/// Pass-through hasher: the message handed to `verify` is already the 32-byte
-/// SHA-256 digest the client signed, so no further hashing is needed.
-struct PreHashedDigest;
-
-impl Secp256k1EcdsaHash for PreHashedDigest {
-    #[inline(always)]
-    fn hash(message: &[u8]) -> [u8; 32] {
-        // Caller guarantees `message` is the 32-byte digest.
-        message.try_into().expect("digest must be 32 bytes")
+        if identity.len() != COMPRESSED_PUBKEY_LEN {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        // Ids 2 and 3 (`r` reduced past the group order) are skipped: such a
+        // signature occurs with probability about 2^-128.
+        for recovery_id in 0..2 {
+            // A recovery error means no key exists for this id, not that
+            // the other id has none.
+            if let Ok(point) = secp256k1_recover(digest, recovery_id, sig) {
+                // sec1 compression of `x || y`: `0x02 | (y & 1)`, then `x`.
+                if identity[0] == 0x02 | (point[63] & 1) && identity[1..] == point[..32] {
+                    return Ok(());
+                }
+            }
+        }
+        Err(ProgramError::MissingRequiredSignature)
     }
 }

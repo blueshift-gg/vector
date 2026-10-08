@@ -15,5 +15,3 @@ no-entrypoint = []
 vector-common = { path = "../../crates/common" }
 pinocchio = { workspace = true }
 solana-address = { workspace = true }
-solana-secp256k1 = { workspace = true }
-solana-secp256k1-ecdsa = { workspace = true }

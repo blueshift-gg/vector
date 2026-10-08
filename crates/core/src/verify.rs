@@ -111,9 +111,9 @@ pub fn verify_advance_signature_ed25519(
 /// `compressed_pubkey` is the 33-byte sec1 identity, `signature` the
 /// 64-byte `r || s` wire form. Returns the recomputed digest on success.
 ///
-/// High-S signatures are normalized before checking: the on-chain
-/// `solana-secp256k1-ecdsa` verifier accepts both `s` normalizations, so
-/// the offline check must too or PASS/FAIL would diverge.
+/// High-S signatures are normalized before checking: the on-chain program
+/// accepts both `s` normalizations, so the offline check must too or
+/// PASS/FAIL would diverge.
 pub fn verify_advance_signature_secp256k1_ecdsa(
     compressed_pubkey: &[u8; SECP256K1_COMPRESSED_PUBKEY_LEN],
     nonce: &[u8; 32],
