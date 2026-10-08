@@ -293,3 +293,47 @@ fn withdraw_to_the_fee_payer() {
         assert_eq!(result.program_result.is_ok(), succeeds);
     }
 }
+
+/// Anyone can send lamports to the PDA before it exists. Short of rent, the
+/// payer adds the difference; beyond it, the payer adds nothing. Either way
+/// the account is created, and only once.
+#[test]
+fn initialize_a_funded_address() {
+    let mollusk = mollusk(&ED25519);
+    let pubkey = ed25519_pubkey(&signing_key());
+    let (system_program, system_program_account) = keyed_account_for_system_program();
+    let payer = Address::new_unique();
+    let (vector, _bump) = find_vector_pda(&ED25519, &pubkey);
+    let rent = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let init_ix = create_initialize_ed25519(&payer, &pubkey);
+
+    for at_address in [1, rent + 1] {
+        let result = mollusk.process_and_validate_instruction(
+            &init_ix,
+            &[
+                (payer, Account::new(1_000_000_000, 0, &system_program)),
+                (vector, Account::new(at_address, 0, &system_program)),
+                (system_program, system_program_account.clone()),
+            ],
+            &[
+                Check::success(),
+                Check::account(&vector)
+                    .owner(&ED25519.program_id)
+                    .space(ED25519.account_len())
+                    .lamports(rent.max(at_address))
+                    .build(),
+            ],
+        );
+        println!(
+            "ed25519 initialize, {at_address} lamports at the address: {} CUs",
+            result.compute_units_consumed
+        );
+
+        let again = mollusk.process_instruction(&init_ix, &result.resulting_accounts);
+        assert_eq!(
+            again.program_result,
+            mollusk_svm::result::ProgramResult::Failure(ProgramError::AccountAlreadyInitialized)
+        );
+        assert_eq!(again.resulting_accounts, result.resulting_accounts);
+    }
+}
