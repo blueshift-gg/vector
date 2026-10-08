@@ -1,15 +1,12 @@
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-    account::MAX_PERMITTED_DATA_INCREASE,
     cpi::{Seed, Signer},
     error::ProgramError,
-    sysvars::{rent::Rent, slot_hashes, Sysvar},
+    sysvars::slot_hashes,
     AccountView, Address, ProgramResult,
 };
-use pinocchio_system::{
-    create_program_account_with_minimum_balance_signed, instructions::Transfer,
-};
+use pinocchio_system::create_program_account_with_minimum_balance_signed;
 use solana_nostd_sha256::hashv;
 
 use crate::scheme::SigningScheme;
@@ -80,36 +77,18 @@ pub fn process<S: SigningScheme>(
     ];
     let signers = [Signer::from(&seeds)];
 
-    // One instruction can only grow an account by
-    // `MAX_PERMITTED_DATA_INCREASE` bytes. Every current scheme fits well
-    // inside that (the largest, Falcon-512, is 1090 bytes), so the clamp is
-    // a no-op today — it is kept so a future scheme with an oversized
-    // identity degrades into "allocate a base chunk, grow later" rather
-    // than failing outright.
-    let full_len = VectorAccount::account_len::<S>();
-    let alloc_len = full_len.min(MAX_PERMITTED_DATA_INCREASE);
-
     // Anyone can send lamports to the PDA before it exists, and a plain
     // `CreateAccount` refuses an address that holds any. The helper funds
     // only the shortfall in that case, and fails on an account that already
     // has data.
     create_program_account_with_minimum_balance_signed(
-        vector, alloc_len, program_id, payer, None, &signers,
+        vector,
+        VectorAccount::account_len::<S>(),
+        program_id,
+        payer,
+        None,
+        &signers,
     )?;
-
-    // Rent is always funded for the *final* size, which keeps the account
-    // rent-exempt across any later resize.
-    let shortfall = Rent::get()?
-        .try_minimum_balance(full_len)?
-        .saturating_sub(vector.lamports());
-    if shortfall > 0 {
-        Transfer {
-            from: payer,
-            to: vector,
-            lamports: shortfall,
-        }
-        .invoke()?;
-    }
 
     // Single mutable borrow: write the 33-byte header, then have the scheme
     // populate the identity bytes that fit in the initial allocation —

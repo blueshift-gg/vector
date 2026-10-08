@@ -1,8 +1,6 @@
 //! Shared constants and helpers used by every program's test module.
 
-use agave_feature_set::FeatureSet;
 use mollusk_svm::{
-    program::ProgramCache,
     result::{types::TransactionResult, Check},
     Mollusk,
 };
@@ -43,36 +41,9 @@ fn program_path(scheme: &Scheme) -> &'static str {
 }
 
 /// Construct a freshly-loaded `Mollusk` instance pointed at the program ELF
-/// for `scheme`, running mainnet-beta's feature set: the features in
-/// `fixtures/mainnet-active-features.txt` and no others. Mollusk's default
-/// enables every feature, including ones no cluster has activated. The
-/// program cache is rebuilt because it fixes its syscalls and VM
-/// configuration from the feature set it is created with.
+/// for `scheme`.
 pub fn mollusk(scheme: &Scheme) -> Mollusk {
-    let mut features = FeatureSet::default();
-    for id in include_str!("fixtures/mainnet-active-features.txt")
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-    {
-        features.activate(&id.parse().expect("feature id"), 0);
-    }
-    let mut mollusk = Mollusk::default();
-    mollusk.feature_set = features.runtime_features();
-    mollusk.program_cache = ProgramCache::new(&mollusk.feature_set, &mollusk.compute_budget, false);
-    mollusk.add_program(&scheme.program_id, program_path(scheme));
-    mollusk
-}
-
-/// The fixture is in force: features mainnet-beta has not activated are off
-/// and recent ones it has are on.
-#[test]
-fn runs_the_mainnet_feature_set() {
-    let features = mollusk(&ED25519).feature_set;
-    assert!(!features.account_data_direct_mapping);
-    assert!(!features.direct_account_pointers_in_program_input);
-    assert!(!features.virtual_address_space_adjustments);
-    assert!(!features.enable_sha512_syscall);
-    assert!(features.syscall_parameter_address_restrictions);
+    Mollusk::new(&scheme.program_id, program_path(scheme))
 }
 
 /// Run `instructions` as one transaction and check its result. The
