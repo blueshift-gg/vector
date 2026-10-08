@@ -78,7 +78,8 @@ fn runs_the_mainnet_feature_set() {
 /// Run `instructions` as one transaction and check its result. The
 /// instructions sysvar then holds all of them with message-level flags, as
 /// on a cluster; Mollusk's instruction chains give each instruction a sysvar
-/// of its own. The fee payer is an account of none of the instructions.
+/// of its own. The fee payer is an account of none of the instructions and
+/// is left out of the resulting accounts.
 pub fn process_transaction(
     mollusk: &Mollusk,
     instructions: &[&Instruction],
@@ -89,12 +90,14 @@ pub fn process_transaction(
     let payer = Address::new_unique();
     let mut accounts = accounts.to_vec();
     accounts.push((payer, Account::new(10_000_000_000, 0, &Address::default())));
-    mollusk.process_and_validate_transaction_instructions(
+    let mut result = mollusk.process_and_validate_transaction_instructions(
         &instructions,
         &accounts,
         checks,
         Some(&payer),
-    )
+    );
+    result.resulting_accounts.retain(|(key, _)| *key != payer);
+    result
 }
 
 /// Build a fully-populated vector account. `stored_identity` is the on-chain
