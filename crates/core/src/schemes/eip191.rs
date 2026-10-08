@@ -7,7 +7,7 @@ use sha3::{Digest as Sha3Digest, Keccak256};
 use solana_address::{address, Address};
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest;
+use crate::digest::advance_vector_digest_with_fee_payer;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
@@ -68,20 +68,24 @@ pub fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
 /// advance ix alone. Any CPI passthrough must be built separately via
 /// [`crate::instructions::create_passthrough_instruction`] and included
 /// among `pre_instructions` or `post_instructions` so the digest commits
-/// to its bytes.
+/// to its bytes. Pass the transaction's `fee_payer` whenever it is also an
+/// account of one of those instructions: the runtime then records it as a
+/// writable signer there, and the signature must commit to that.
 pub fn sign_advance_instruction_secp256k1_eip191(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
+    fee_payer: Option<&Address>,
 ) -> Instruction {
     let identity = secp256k1_eip191_eth_address(signing_key);
-    let digest = advance_vector_digest(
+    let digest = advance_vector_digest_with_fee_payer(
         &EIP191,
         nonce,
         &identity,
         pre_instructions,
         post_instructions,
+        fee_payer,
     );
     let eth_digest = eip191_envelope_hash(&digest);
     let (sig, recid) = signing_key
@@ -105,5 +109,5 @@ pub fn sign_revocation_instruction_secp256k1_eip191(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],
 ) -> Instruction {
-    sign_advance_instruction_secp256k1_eip191(signing_key, nonce, &[], &[])
+    sign_advance_instruction_secp256k1_eip191(signing_key, nonce, &[], &[], None)
 }

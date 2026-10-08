@@ -1,6 +1,11 @@
 //! Shared constants and helpers used by every program's test module.
 
-use mollusk_svm::{result::Check, Mollusk};
+use agave_feature_set::FeatureSet;
+use mollusk_svm::{
+    program::ProgramCache,
+    result::{types::TransactionResult, Check},
+    Mollusk,
+};
 use mollusk_svm_programs_token::token::{self, keyed_account};
 use solana_account::Account;
 use solana_address::Address;
@@ -38,9 +43,58 @@ fn program_path(scheme: &Scheme) -> &'static str {
 }
 
 /// Construct a freshly-loaded `Mollusk` instance pointed at the program ELF
-/// for `scheme`.
+/// for `scheme`, running mainnet-beta's feature set: the features in
+/// `fixtures/mainnet-active-features.txt` and no others. Mollusk's default
+/// enables every feature, including ones no cluster has activated. The
+/// program cache is rebuilt because it fixes its syscalls and VM
+/// configuration from the feature set it is created with.
 pub fn mollusk(scheme: &Scheme) -> Mollusk {
-    Mollusk::new(&scheme.program_id, program_path(scheme))
+    let mut features = FeatureSet::default();
+    for id in include_str!("fixtures/mainnet-active-features.txt")
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+    {
+        features.activate(&id.parse().expect("feature id"), 0);
+    }
+    let mut mollusk = Mollusk::default();
+    mollusk.feature_set = features.runtime_features();
+    mollusk.program_cache = ProgramCache::new(&mollusk.feature_set, &mollusk.compute_budget, false);
+    mollusk.add_program(&scheme.program_id, program_path(scheme));
+    mollusk
+}
+
+/// The fixture is in force: features mainnet-beta has not activated are off
+/// and recent ones it has are on.
+#[test]
+fn runs_the_mainnet_feature_set() {
+    let features = mollusk(&ED25519).feature_set;
+    assert!(!features.account_data_direct_mapping);
+    assert!(!features.direct_account_pointers_in_program_input);
+    assert!(!features.virtual_address_space_adjustments);
+    assert!(!features.enable_sha512_syscall);
+    assert!(features.syscall_parameter_address_restrictions);
+}
+
+/// Run `instructions` as one transaction and check its result. The
+/// instructions sysvar then holds all of them with message-level flags, as
+/// on a cluster; Mollusk's instruction chains give each instruction a sysvar
+/// of its own. The fee payer is an account of none of the instructions.
+pub fn process_transaction(
+    mollusk: &Mollusk,
+    instructions: &[&Instruction],
+    accounts: &[(Address, Account)],
+    checks: &[Check],
+) -> TransactionResult {
+    let instructions: Vec<Instruction> = instructions.iter().map(|&ix| ix.clone()).collect();
+    let payer = Address::new_unique();
+    let mut accounts = accounts.to_vec();
+    accounts.push((payer, Account::new(10_000_000_000, 0, &Address::default())));
+    mollusk.process_and_validate_transaction_instructions(
+        &instructions,
+        &accounts,
+        checks,
+        Some(&payer),
+    )
 }
 
 /// Build a fully-populated vector account. `stored_identity` is the on-chain
@@ -206,26 +260,15 @@ pub fn run_round_trip_spl<F>(
     )
     .unwrap();
 
-    let result = mollusk.process_and_validate_instruction_chain(
-        &[
-            (
-                &advance_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector).data(&expected_vector_data).build(),
-                ],
-            ),
-            (&passthrough_ix, &[Check::success()]),
-            (&mint_to_ix, &[Check::success()]),
-            (
-                &eoa_to_pda_ix,
-                &[
-                    Check::success(),
-                    Check::account(&mint).data(&expected_mint_data).build(),
-                ],
-            ),
-        ],
+    let result = process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix, &mint_to_ix, &eoa_to_pda_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector).data(&expected_vector_data).build(),
+            Check::account(&mint).data(&expected_mint_data).build(),
+        ],
     );
     println!(
         "{} spl-round-trip: {} CUs",
