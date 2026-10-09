@@ -2501,6 +2501,7 @@ dependencies = [
 [[package]]
 name = "solana-ml-dsa"
 version = "0.1.0"
+source = "git+https://github.com/blueshift-gg/solana-ml-dsa?rev=e61fac4920bd7ca21464ab4ed04afa2259227e0d#e61fac4920bd7ca21464ab4ed04afa2259227e0d"
 dependencies = [
  "solana-shake",
 ]
@@ -2837,6 +2838,7 @@ dependencies = [
 [[package]]
 name = "solana-shake"
 version = "0.1.0"
+source = "git+https://github.com/blueshift-gg/solana-shake?rev=684f8152dd8b75c8793ba495511b9b938b1b5aeb#684f8152dd8b75c8793ba495511b9b938b1b5aeb"
 
 [[package]]
 name = "solana-signature"
@@ -3185,6 +3187,7 @@ dependencies = [
 [[package]]
 name = "solana-winternitz"
 version = "0.1.0"
+source = "git+https://github.com/blueshift-gg/solana-winternitz?rev=d6c381a46929d2f8973619f38b66d79058c39b5a#d6c381a46929d2f8973619f38b66d79058c39b5a"
 dependencies = [
  "getrandom 0.3.4",
  "sha3",
@@ -3298,7 +3301,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys",

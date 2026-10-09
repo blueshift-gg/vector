@@ -72,7 +72,7 @@ Vector verifies [ML-DSA-44 (FIPS 204)](https://csrc.nist.gov/pubs/fips/204/final
 
 The program prepares the key on chain once, following Falcon's approach. The 21,892-byte account holds `nonce[32] || bump[1] || public_key[1312] || pad[3] || prepared_key[20544]`. Registration is `Initialize` followed by two permissionless `Expand` instructions; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
 
-Registration takes about 1.1M CU and a subsequent `Advance` about 264K CU in local SBPF tests. Registration and the 2,420-byte signature require [V1 transactions](https://solana.com/upgrades/larger-transaction-sizes); callers supply the transaction limits. The SDK builds instructions and does not submit transactions. The workspace uses `../solana-ml-dsa`; publish the crate with its required `solana-shake` revision and replace development dependencies before release. The program ID is local and undeployed.
+Registration takes about 1.1M CU and a subsequent `Advance` about 264K CU in local SBPF tests. Registration and the 2,420-byte signature require [V1 transactions](https://solana.com/upgrades/larger-transaction-sizes); callers supply the transaction limits. The SDK builds instructions and does not submit transactions. The workspace pins `solana-ml-dsa` to a git revision; publish the crate with its required `solana-shake` revision and depend on the release before deploying. The program ID is local and undeployed.
 
 ### Winternitz and XMSS
 
@@ -103,7 +103,7 @@ Callers manage key freshness, persistent signing state and rotation timing. The 
 
 Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
 
-The workspace currently uses the adjacent `../solana-winternitz` checkout. Publish that crate and replace the path dependency before release. Build each program with `cargo build-sbf --manifest-path programs/xmss/Cargo.toml`, substituting `winternitz` for the one-time program. The listed program IDs are local and undeployed.
+The workspace pins `solana-winternitz` to a git revision. Publish that crate and depend on the release before deploying. Build each program with `cargo build-sbf --manifest-path programs/xmss/Cargo.toml`, substituting `winternitz` for the one-time program. The listed program IDs are local and undeployed.
 
 ### Digest Construction
 All schemes share the same SHA-256 digest over the instructions sysvar buffer. The signature region is carved out of the buffer and replaced with the current nonce and the scheme's identity:

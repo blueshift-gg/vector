@@ -45,8 +45,8 @@ solana-nostd-keccak = "0.2.0"
 pinocchio-system = "0.6.1"
 brine-ed25519 = { version = "0.7.0", features = ["fast-sha512"] }
 solana-falcon512 = "0.1.2"
-solana-ml-dsa = { path = "../solana-ml-dsa" }
-solana-winternitz = { path = "../solana-winternitz", default-features = false }
+solana-ml-dsa = { git = "https://github.com/blueshift-gg/solana-ml-dsa", rev = "e61fac4920bd7ca21464ab4ed04afa2259227e0d" }
+solana-winternitz = { git = "https://github.com/blueshift-gg/solana-winternitz", rev = "d6c381a46929d2f8973619f38b66d79058c39b5a", default-features = false }
 solana-secp256k1 = "0.2.1"
 solana-secp256k1-ecdsa = { version = "0.2.0", default-features = false, features = ["sha256"] }
 [profile.release]
