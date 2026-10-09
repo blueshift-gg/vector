@@ -91,17 +91,10 @@ pub fn advance_vector_digest_with_fee_payer(
     vector_digest(advance_index, sig_len, nonce, identity, &all_owned)
 }
 
-/// [`advance_vector_digest_with_fee_payer`] **without** message-level flag
-/// promotion: account flags are hashed exactly as supplied (the sysvar index
-/// footer is still patched to the advance's index).
-///
-/// On a real cluster the live sysvar always carries message-level flags, so
-/// prefer [`advance_vector_digest_with_fee_payer`] unless either (a) the
-/// supplied flags are already message-consistent, or (b) you are targeting a
-/// harness that serializes instruction flags verbatim into the sysvar (e.g.
-/// mollusk). When every account's flags agree across the transaction's
-/// instructions and the fee payer appears in none of them, the two functions
-/// return the same digest.
+/// [`advance_vector_digest_with_fee_payer`] for a fee payer that is not among
+/// the committed instructions' accounts, where it has no effect on the
+/// digest. Mirrors `advanceVectorDigest` without `feePayer` in
+/// `sdk/ts/src/digest.ts`.
 pub fn advance_vector_digest(
     scheme: &Scheme,
     nonce: &[u8; 32],
@@ -109,18 +102,14 @@ pub fn advance_vector_digest(
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
 ) -> [u8; 32] {
-    let sig_len = scheme.signature_len;
-    let placeholder = vec![0u8; sig_len];
-    let advance_ix = create_advance_instruction(scheme, identity, &placeholder);
-
-    let mut all_owned: Vec<Instruction> =
-        Vec::with_capacity(pre_instructions.len() + 1 + post_instructions.len());
-    all_owned.extend(pre_instructions.iter().cloned());
-    let advance_index = all_owned.len();
-    all_owned.push(advance_ix);
-    all_owned.extend(post_instructions.iter().cloned());
-
-    vector_digest(advance_index, sig_len, nonce, identity, &all_owned)
+    advance_vector_digest_with_fee_payer(
+        scheme,
+        nonce,
+        identity,
+        pre_instructions,
+        post_instructions,
+        None,
+    )
 }
 
 /// The digest a pre-signed revocation commits to: [`advance_vector_digest`]

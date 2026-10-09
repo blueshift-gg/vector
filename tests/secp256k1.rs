@@ -11,8 +11,8 @@ use vector_core::{
 };
 
 use crate::common::{
-    build_vector_account, expected_advanced_data, mollusk, run_round_trip_spl, NONCE,
-    SECP256K1_PRIVKEY,
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,
+    NONCE, SECP256K1_PRIVKEY,
 };
 
 fn signing_key() -> Secp256k1SigningKey {
@@ -72,7 +72,7 @@ fn advance_empty() {
         &identity,
     );
 
-    let advance_ix = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &[], &[]);
+    let advance_ix = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &[], &[], None);
 
     let next_nonce = advance_vector_digest(&SECP256K1, &NONCE, &identity, &[], &[]);
     let expected_vector_data = expected_advanced_data(next_nonce, &SECP256K1, bump, &identity);
@@ -97,7 +97,7 @@ fn advance_round_trips_spl_mint_authority() {
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
     run_round_trip_spl(&SECP256K1, &identity, &identity, |nonce, pre, post| {
-        sign_advance_instruction_secp256k1_ecdsa(&key, nonce, pre, post)
+        sign_advance_instruction_secp256k1_ecdsa(&key, nonce, pre, post, None)
     });
 }
 
@@ -127,25 +127,22 @@ fn close_via_advance() {
         &NONCE,
         &[],
         std::slice::from_ref(&passthrough_ix),
+        None,
     );
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (&advance_ix, &[Check::success()]),
-            (
-                &passthrough_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector).lamports(0).build(),
-                    Check::account(&eoa)
-                        .lamports(eoa_starting_lamports + vector_lamports)
-                        .build(),
-                ],
-            ),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector).lamports(0).build(),
+            Check::account(&eoa)
+                .lamports(eoa_starting_lamports + vector_lamports)
+                .build(),
+        ],
     );
 }
 
@@ -179,26 +176,23 @@ fn withdraw_via_advance() {
         &NONCE,
         &[],
         std::slice::from_ref(&passthrough_ix),
+        None,
     );
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (&advance_ix, &[Check::success()]),
-            (
-                &passthrough_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector)
-                        .lamports(starting_vector_lamports - withdraw_amount)
-                        .build(),
-                    Check::account(&eoa)
-                        .lamports(eoa_starting_lamports + withdraw_amount)
-                        .build(),
-                ],
-            ),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector)
+                .lamports(starting_vector_lamports - withdraw_amount)
+                .build(),
+            Check::account(&eoa)
+                .lamports(eoa_starting_lamports + withdraw_amount)
+                .build(),
+        ],
     );
 }

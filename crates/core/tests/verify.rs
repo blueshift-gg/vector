@@ -60,7 +60,7 @@ fn ed25519_round_trip() {
     let pubkey = ed25519_pubkey(&key);
     let (pre, post) = fixed_ix_lists();
 
-    let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post);
+    let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post, None);
     let digest = verify_advance_signature_ed25519(
         &pubkey,
         &NONCE,
@@ -91,7 +91,7 @@ fn secp256k1_round_trip_and_high_s_twin() {
     let pubkey = secp256k1_compressed_pubkey(&key);
     let (pre, post) = fixed_ix_lists();
 
-    let advance = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &pre, &post);
+    let advance = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &pre, &post, None);
     let wire = signature_of(&advance);
     verify_advance_signature_secp256k1_ecdsa(&pubkey, &NONCE, &pre, &post, None, wire)
         .expect("round trip must verify");
@@ -107,7 +107,7 @@ fn eip191_round_trip_high_s_twin_and_legacy_v() {
     let eth_address = secp256k1_eip191_eth_address(&key);
     let (pre, post) = fixed_ix_lists();
 
-    let advance = sign_advance_instruction_secp256k1_eip191(&key, &NONCE, &pre, &post);
+    let advance = sign_advance_instruction_secp256k1_eip191(&key, &NONCE, &pre, &post, None);
     let wire = signature_of(&advance);
     verify_advance_signature_secp256k1_eip191(&eth_address, &NONCE, &pre, &post, None, wire)
         .expect("round trip must verify");
@@ -179,7 +179,7 @@ fn tampering_any_committed_byte_fails_verification() {
     let key = Ed25519SigningKey::from_bytes(&[0x42; 32]);
     let pubkey = ed25519_pubkey(&key);
     let (pre, post) = fixed_ix_lists();
-    let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post);
+    let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post, None);
     let sig = signature_of(&advance);
     let verify =
         |pubkey: &[u8; 32], nonce: &[u8; 32], pre: &[Instruction], post: &[Instruction]| {
@@ -228,7 +228,7 @@ fn digest_matches_the_cross_language_pin() {
     assert_eq!(hex, PINNED_DIGEST_HEX);
 
     // And the pinned digest is exactly what a signer commits to.
-    let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post);
+    let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post, None);
     let verified = verify_advance_signature_ed25519(
         &pubkey,
         &NONCE,

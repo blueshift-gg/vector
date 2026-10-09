@@ -13,7 +13,8 @@ use vector_core::{
 };
 
 use crate::common::{
-    build_vector_account, expected_advanced_data, mollusk, run_round_trip_spl, NONCE,
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,
+    NONCE,
 };
 
 const SIGNER_PRIVKEY: [u8; 32] = [
@@ -75,7 +76,7 @@ fn advance_empty() {
         &pubkey,
     );
 
-    let advance_ix = sign_advance_instruction_ed25519(&key, &NONCE, &[], &[]);
+    let advance_ix = sign_advance_instruction_ed25519(&key, &NONCE, &[], &[], None);
 
     let next_nonce = advance_vector_digest(&ED25519, &NONCE, &pubkey, &[], &[]);
     let expected_vector_data = expected_advanced_data(next_nonce, &ED25519, bump, &pubkey);
@@ -100,7 +101,7 @@ fn advance_round_trips_spl_mint_authority() {
     let key = signing_key();
     let pubkey = ed25519_pubkey(&key);
     run_round_trip_spl(&ED25519, &pubkey, &pubkey, |nonce, pre, post| {
-        sign_advance_instruction_ed25519(&key, nonce, pre, post)
+        sign_advance_instruction_ed25519(&key, nonce, pre, post, None)
     });
 }
 
@@ -122,8 +123,13 @@ fn revocation_orphans_presigned_advance() {
     // passthrough — the shape a custodian would hold in reserve.
     let withdraw_sub = create_withdraw_subinstruction(&ED25519, &pubkey, &eoa, 3_000_000);
     let passthrough_ix = create_passthrough_instruction(&ED25519, &pubkey, &[withdraw_sub]);
-    let presigned_ix =
-        sign_advance_instruction_ed25519(&key, &NONCE, &[], std::slice::from_ref(&passthrough_ix));
+    let presigned_ix = sign_advance_instruction_ed25519(
+        &key,
+        &NONCE,
+        &[],
+        std::slice::from_ref(&passthrough_ix),
+        None,
+    );
 
     // Kill-switch: an inert advance signed at the same nonce, broadcast as
     // a transaction containing only the advance instruction.
@@ -145,15 +151,11 @@ fn revocation_orphans_presigned_advance() {
 
     // The original pre-signed advance — broadcast in its committed shape —
     // is orphaned: its digest recomputes against the bumped nonce.
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (
-                &presigned_ix,
-                &[Check::err(ProgramError::MissingRequiredSignature)],
-            ),
-            (&passthrough_ix, &[]),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&presigned_ix, &passthrough_ix],
         &[(vector, revoked_vector.clone()), (eoa, eoa_account)],
+        &[Check::err(ProgramError::MissingRequiredSignature)],
     );
 
     // Replaying the revocation fails the same way: it too was signed at
@@ -187,26 +189,27 @@ fn close_via_advance() {
     // digest commits to the passthrough's bytes via post_instructions.
     let close_sub = create_close_subinstruction(&ED25519, &pubkey, &eoa);
     let passthrough_ix = create_passthrough_instruction(&ED25519, &pubkey, &[close_sub]);
-    let advance_ix =
-        sign_advance_instruction_ed25519(&key, &NONCE, &[], std::slice::from_ref(&passthrough_ix));
+    let advance_ix = sign_advance_instruction_ed25519(
+        &key,
+        &NONCE,
+        &[],
+        std::slice::from_ref(&passthrough_ix),
+        None,
+    );
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (&advance_ix, &[Check::success()]),
-            (
-                &passthrough_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector).lamports(0).build(),
-                    Check::account(&eoa)
-                        .lamports(eoa_starting_lamports + vector_lamports)
-                        .build(),
-                ],
-            ),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector).lamports(0).build(),
+            Check::account(&eoa)
+                .lamports(eoa_starting_lamports + vector_lamports)
+                .build(),
+        ],
     );
 }
 
@@ -232,27 +235,105 @@ fn withdraw_via_advance() {
 
     let withdraw_sub = create_withdraw_subinstruction(&ED25519, &pubkey, &eoa, withdraw_amount);
     let passthrough_ix = create_passthrough_instruction(&ED25519, &pubkey, &[withdraw_sub]);
-    let advance_ix =
-        sign_advance_instruction_ed25519(&key, &NONCE, &[], std::slice::from_ref(&passthrough_ix));
+    let advance_ix = sign_advance_instruction_ed25519(
+        &key,
+        &NONCE,
+        &[],
+        std::slice::from_ref(&passthrough_ix),
+        None,
+    );
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (&advance_ix, &[Check::success()]),
-            (
-                &passthrough_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector)
-                        .lamports(starting_vector_lamports - withdraw_amount)
-                        .build(),
-                    Check::account(&eoa)
-                        .lamports(eoa_starting_lamports + withdraw_amount)
-                        .build(),
-                ],
-            ),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector)
+                .lamports(starting_vector_lamports - withdraw_amount)
+                .build(),
+            Check::account(&eoa)
+                .lamports(eoa_starting_lamports + withdraw_amount)
+                .build(),
+        ],
     );
+}
+
+/// A fee payer that is also an account of a signed instruction is a writable
+/// signer there in the instructions sysvar, so the signature has to be made
+/// for that fee payer.
+#[test]
+fn withdraw_to_the_fee_payer() {
+    let mollusk = mollusk(&ED25519);
+    let key = signing_key();
+    let pubkey = ed25519_pubkey(&key);
+    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let (vector, bump) = find_vector_pda(&ED25519, &pubkey);
+    let payer = Address::new_unique();
+    let accounts = [
+        (payer, Account::new(10_000_000_000, 0, &Address::default())),
+        (
+            vector,
+            build_vector_account(NONCE, &ED25519, bump, rent_min + 5_000_000, &pubkey),
+        ),
+    ];
+
+    let withdraw = create_withdraw_subinstruction(&ED25519, &pubkey, &payer, 3_000_000);
+    let passthrough = create_passthrough_instruction(&ED25519, &pubkey, &[withdraw]);
+    let post = std::slice::from_ref(&passthrough);
+    for (fee_payer, succeeds) in [(Some(&payer), true), (None, false)] {
+        let advance = sign_advance_instruction_ed25519(&key, &NONCE, &[], post, fee_payer);
+        let result = mollusk.process_transaction_instructions(
+            &[advance, passthrough.clone()],
+            &accounts,
+            Some(&payer),
+        );
+        assert_eq!(result.program_result.is_ok(), succeeds);
+    }
+}
+
+/// Anyone can send lamports to the PDA before it exists. Short of rent, the
+/// payer adds the difference; beyond it, the payer adds nothing. Either way
+/// the account is created, and only once.
+#[test]
+fn initialize_a_funded_address() {
+    let mollusk = mollusk(&ED25519);
+    let pubkey = ed25519_pubkey(&signing_key());
+    let (system_program, system_program_account) = keyed_account_for_system_program();
+    let payer = Address::new_unique();
+    let (vector, _bump) = find_vector_pda(&ED25519, &pubkey);
+    let rent = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let init_ix = create_initialize_ed25519(&payer, &pubkey);
+
+    for at_address in [1, rent + 1] {
+        let result = mollusk.process_and_validate_instruction(
+            &init_ix,
+            &[
+                (payer, Account::new(1_000_000_000, 0, &system_program)),
+                (vector, Account::new(at_address, 0, &system_program)),
+                (system_program, system_program_account.clone()),
+            ],
+            &[
+                Check::success(),
+                Check::account(&vector)
+                    .owner(&ED25519.program_id)
+                    .space(ED25519.account_len())
+                    .lamports(rent.max(at_address))
+                    .build(),
+            ],
+        );
+        println!(
+            "ed25519 initialize, {at_address} lamports at the address: {} CUs",
+            result.compute_units_consumed
+        );
+
+        let again = mollusk.process_instruction(&init_ix, &result.resulting_accounts);
+        assert_eq!(
+            again.program_result,
+            mollusk_svm::result::ProgramResult::Failure(ProgramError::AccountAlreadyInitialized)
+        );
+        assert_eq!(again.resulting_accounts, result.resulting_accounts);
+    }
 }

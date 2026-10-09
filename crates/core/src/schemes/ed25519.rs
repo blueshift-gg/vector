@@ -5,7 +5,7 @@ use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
 use solana_address::{address, Address};
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest;
+use crate::digest::advance_vector_digest_with_fee_payer;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
@@ -36,20 +36,24 @@ pub fn create_initialize_ed25519(
 /// alone. Any CPI passthrough must be built separately via
 /// [`crate::instructions::create_passthrough_instruction`] and included
 /// among `pre_instructions` or `post_instructions` so the digest commits
-/// to its bytes.
+/// to its bytes. Pass the transaction's `fee_payer` whenever it is also an
+/// account of one of those instructions: the runtime then records it as a
+/// writable signer there, and the signature must commit to that.
 pub fn sign_advance_instruction_ed25519(
     signing_key: &SigningKey,
     nonce: &[u8; 32],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
+    fee_payer: Option<&Address>,
 ) -> Instruction {
     let identity = ed25519_pubkey(signing_key);
-    let digest = advance_vector_digest(
+    let digest = advance_vector_digest_with_fee_payer(
         &ED25519,
         nonce,
         &identity,
         pre_instructions,
         post_instructions,
+        fee_payer,
     );
     let signature: [u8; 64] = signing_key.sign(&digest).to_bytes();
     create_advance_instruction(&ED25519, &identity, &signature)
@@ -66,5 +70,5 @@ pub fn sign_revocation_instruction_ed25519(
     signing_key: &SigningKey,
     nonce: &[u8; 32],
 ) -> Instruction {
-    sign_advance_instruction_ed25519(signing_key, nonce, &[], &[])
+    sign_advance_instruction_ed25519(signing_key, nonce, &[], &[], None)
 }
