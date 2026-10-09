@@ -330,3 +330,99 @@ fn passthrough_needs_its_own_account_to_have_signed() {
         TransactionProgramResult::Failure(0, ProgramError::NotEnoughAccountKeys)
     );
 }
+
+/// `Advance` and `Passthrough` read the transaction's instruction list, so
+/// neither may run inside another instruction. Alice signs a transaction
+/// whose `Passthrough` calls back into the program for Bob's account.
+#[test]
+fn advance_and_passthrough_cannot_be_called_from_inside_a_passthrough() {
+    let world = World::new();
+    let alice = ed25519_pubkey(&world.alice);
+    let bob = secp256k1_compressed_pubkey(&world.bob);
+    let (transaction, ..) = world.alice_and_bob();
+    for inner in [
+        transaction[0].clone(),
+        world.withdraw(&SECP256K1, &bob, 2_000_000_000),
+    ] {
+        let outer = create_passthrough_instruction(&ED25519, &alice, &[inner]);
+        let advance = sign_advance_instruction_ed25519(
+            &world.alice,
+            &NONCE,
+            &[],
+            std::slice::from_ref(&outer),
+            None,
+        );
+        assert_eq!(
+            world.run(&[advance, outer]),
+            TransactionProgramResult::Failure(1, ProgramError::IncorrectAuthority)
+        );
+    }
+}
+
+/// A `Passthrough` only counts an `Advance` that has already run.
+#[test]
+fn passthrough_before_its_advance_is_rejected() {
+    let world = World::new();
+    let alice = ed25519_pubkey(&world.alice);
+    let withdraw = world.withdraw(&ED25519, &alice, 1_000_000_000);
+    let advance = sign_advance_instruction_ed25519(
+        &world.alice,
+        &NONCE,
+        std::slice::from_ref(&withdraw),
+        &[],
+        None,
+    );
+    assert_eq!(
+        world.run(&[withdraw, advance]),
+        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+    );
+}
+
+/// Random damage, several changes at a time: nothing but the signed
+/// transaction itself is accepted.
+#[test]
+fn random_changes_are_rejected() {
+    let world = World::new();
+    let (transaction, ..) = world.alice_and_bob();
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut random = |below: usize| {
+        // xorshift64
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % below as u64) as usize
+    };
+    for round in 0..2_000 {
+        let mut changed = transaction.clone();
+        for _ in 0..=random(3) {
+            let i = random(changed.len());
+            let ix = &mut changed[i];
+            match random(6) {
+                0 if !ix.data.is_empty() => {
+                    let at = random(ix.data.len());
+                    ix.data[at] = random(256) as u8;
+                }
+                1 => ix.data.truncate(random(ix.data.len() + 1)),
+                2 => ix.data.extend((0..random(80)).map(|_| 0)),
+                3 if ix.accounts.len() > 1 => {
+                    let (a, b) = (random(ix.accounts.len()), random(ix.accounts.len()));
+                    ix.accounts.swap(a, b);
+                }
+                4 if !ix.accounts.is_empty() => {
+                    // Borrow an account from elsewhere in the transaction.
+                    let (from, to) = (random(transaction.len()), random(ix.accounts.len()));
+                    let pool = &transaction[from].accounts;
+                    ix.accounts[to] = pool[random(pool.len())].clone();
+                }
+                5 if changed.len() > 1 => {
+                    let other = random(changed.len());
+                    changed.swap(i, other);
+                }
+                _ => {}
+            }
+        }
+        if changed != transaction {
+            world.assert_rejected(&changed, &format!("round {round}"));
+        }
+    }
+}
