@@ -1,6 +1,9 @@
 //! Shared constants and helpers used by every program's test module.
 
-use mollusk_svm::{result::Check, Mollusk};
+use mollusk_svm::{
+    result::{types::TransactionResult, Check},
+    Mollusk,
+};
 use mollusk_svm_programs_token::token::{self, keyed_account};
 use solana_account::Account;
 use solana_address::Address;
@@ -44,6 +47,31 @@ fn program_path(scheme: &Scheme) -> &'static str {
 /// for `scheme`.
 pub fn mollusk(scheme: &Scheme) -> Mollusk {
     Mollusk::new(&scheme.program_id, program_path(scheme))
+}
+
+/// Run `instructions` as one transaction and check its result. The
+/// instructions sysvar then holds all of them with message-level flags, as
+/// on a cluster; Mollusk's instruction chains give each instruction a sysvar
+/// of its own. The fee payer is an account of none of the instructions and
+/// is left out of the resulting accounts.
+pub fn process_transaction(
+    mollusk: &Mollusk,
+    instructions: &[&Instruction],
+    accounts: &[(Address, Account)],
+    checks: &[Check],
+) -> TransactionResult {
+    let instructions: Vec<Instruction> = instructions.iter().map(|&ix| ix.clone()).collect();
+    let payer = Address::new_unique();
+    let mut accounts = accounts.to_vec();
+    accounts.push((payer, Account::new(10_000_000_000, 0, &Address::default())));
+    let mut result = mollusk.process_and_validate_transaction_instructions(
+        &instructions,
+        &accounts,
+        checks,
+        Some(&payer),
+    );
+    result.resulting_accounts.retain(|(key, _)| *key != payer);
+    result
 }
 
 /// Build a fully-populated vector account. `stored_identity` is the on-chain
@@ -209,26 +237,15 @@ pub fn run_round_trip_spl<F>(
     )
     .unwrap();
 
-    let result = mollusk.process_and_validate_instruction_chain(
-        &[
-            (
-                &advance_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector).data(&expected_vector_data).build(),
-                ],
-            ),
-            (&passthrough_ix, &[Check::success()]),
-            (&mint_to_ix, &[Check::success()]),
-            (
-                &eoa_to_pda_ix,
-                &[
-                    Check::success(),
-                    Check::account(&mint).data(&expected_mint_data).build(),
-                ],
-            ),
-        ],
+    let result = process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix, &mint_to_ix, &eoa_to_pda_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector).data(&expected_vector_data).build(),
+            Check::account(&mint).data(&expected_mint_data).build(),
+        ],
     );
     println!(
         "{} spl-round-trip: {} CUs",

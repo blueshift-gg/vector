@@ -11,7 +11,9 @@ use vector_core::{
     find_vector_pda, xmss_identity, XMSS,
 };
 
-use crate::common::{build_vector_account, expected_advanced_data, mollusk, NONCE};
+use crate::common::{
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, NONCE,
+};
 
 #[test]
 fn initialize_checks_key_length_and_pda() {
@@ -216,39 +218,26 @@ fn advance_binds_and_authorizes_withdrawal() {
     // The signature must bind the downstream action, not just the nonce.
     let changed_withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 4_000_000);
     let changed = create_passthrough_instruction(&XMSS, &identity, &[changed_withdraw]);
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (
-                &advance,
-                &[
-                    Check::err(ProgramError::MissingRequiredSignature),
-                    Check::account(&vector).data(&account.data).build(),
-                ],
-            ),
-            (&changed, &[]),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance, &changed],
         &accounts,
+        &[
+            Check::err(ProgramError::MissingRequiredSignature),
+            Check::account(&vector).data(&account.data).build(),
+        ],
     );
 
     let expected = expected_advanced_data(digest, &XMSS, bump, &stored);
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (
-                &advance,
-                &[
-                    Check::success(),
-                    Check::account(&vector).data(&expected).build(),
-                ],
-            ),
-            (
-                &passthrough,
-                &[
-                    Check::success(),
-                    Check::account(&vector).lamports(rent + 2_000_000).build(),
-                    Check::account(&receiver).lamports(4_000_000).build(),
-                ],
-            ),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance, &passthrough],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector).data(&expected).build(),
+            Check::account(&vector).lamports(rent + 2_000_000).build(),
+            Check::account(&receiver).lamports(4_000_000).build(),
+        ],
     );
 }

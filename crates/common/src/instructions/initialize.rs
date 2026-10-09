@@ -7,7 +7,9 @@ use pinocchio::{
     sysvars::{rent::Rent, slot_hashes, Sysvar},
     AccountView, Address, ProgramResult,
 };
-use pinocchio_system::instructions::CreateAccount;
+use pinocchio_system::{
+    create_program_account_with_minimum_balance_signed, instructions::Transfer,
+};
 use solana_nostd_sha256::hashv;
 
 use crate::scheme::SigningScheme;
@@ -17,10 +19,11 @@ use crate::state::VectorAccount;
 /// from the init payload, derive the initial nonce on-chain, and write the
 /// header + the scheme's identity prefix.
 ///
-/// This is strictly *create*: it makes no owner/state checks and never
-/// resizes. Re-invoking it on an existing account fails naturally — the
-/// system-program `CreateAccount` CPI errors on an account it no longer
-/// owns. Schemes with larger identities finish preparation in later instructions.
+/// This is strictly *create*. An address that already holds lamports but no
+/// data is created all the same, so nobody can block a registration by
+/// funding the PDA first. Re-invoking it on an existing account fails with
+/// `AccountAlreadyInitialized`. Schemes with larger identities finish
+/// preparation in later instructions.
 ///
 /// Instruction data (after the discriminator): `init_payload` — the wire
 /// pubkey/address, length `S::INIT_PAYLOAD_LEN`. No scheme byte (the program
@@ -29,8 +32,8 @@ use crate::state::VectorAccount;
 /// Accounts:
 /// 0. `[signer, writable]` payer
 /// 1. `[writable]`         vector PDA
-/// 2. `[]`                 system_program (required for the `CreateAccount`
-///    CPI — pinocchio's `invoke_signed` resolves the System program out of
+/// 2. `[]`                 system_program (required for the System Program
+///    CPIs — pinocchio's `invoke_signed` resolves the System program out of
 ///    the parent's `account_infos`, so the runtime needs it loaded via this
 ///    ix's metas; built-in programs are NOT auto-loaded for CPI dispatch).
 pub fn process<S: SigningScheme>(
@@ -77,21 +80,33 @@ pub fn process<S: SigningScheme>(
     ];
     let signers = [Signer::from(&seeds)];
 
-    // A CPI `CreateAccount` can only allocate up to
+    // One instruction can only grow an account by
     // `MAX_PERMITTED_DATA_INCREASE` bytes. ML-DSA grows its prepared key
-    // in later instructions; fund rent for the final size now.
+    // in later instructions.
     let full_len = VectorAccount::account_len::<S>();
     let alloc_len = full_len.min(MAX_PERMITTED_DATA_INCREASE);
-    let lamports = Rent::get()?.try_minimum_balance(full_len)?;
 
-    CreateAccount {
-        from: payer,
-        to: vector,
-        lamports,
-        space: alloc_len as u64,
-        owner: program_id,
+    // Anyone can send lamports to the PDA before it exists, and a plain
+    // `CreateAccount` refuses an address that holds any. The helper funds
+    // only the shortfall in that case, and fails on an account that already
+    // has data.
+    create_program_account_with_minimum_balance_signed(
+        vector, alloc_len, program_id, payer, None, &signers,
+    )?;
+
+    // Rent is always funded for the *final* size, which keeps the account
+    // rent-exempt across any later resize.
+    let shortfall = Rent::get()?
+        .try_minimum_balance(full_len)?
+        .saturating_sub(vector.lamports());
+    if shortfall > 0 {
+        Transfer {
+            from: payer,
+            to: vector,
+            lamports: shortfall,
+        }
+        .invoke()?;
     }
-    .invoke_signed(&signers)?;
 
     // Single mutable borrow: write the 33-byte header, then have the scheme
     // populate the identity bytes that fit in the initial allocation.

@@ -254,10 +254,10 @@ The `vector-core` crate provides off-chain helpers for constructing Vector trans
 - `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature.
 - `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it.
 - `advance_vector_digest(&scheme, nonce, identity, pre, post)` / `advance_vector_digest_with_fee_payer(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify.
-- `sign_advance_instruction_ed25519(signing_key, nonce, pre, post)` — sign with Ed25519.
-- `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post)` — sign with EIP-191 (envelope, 65-byte sig).
-- `sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, pre, post)` — sign with plain secp256k1 ECDSA (64-byte sig).
-- `verify_advance_signature_ed25519(pubkey, nonce, pre, post, fee_payer, signature)` / `verify_advance_signature_secp256k1_ecdsa(...)` / `verify_advance_signature_secp256k1_eip191(...)` / `verify_advance_signature_falcon512(wire_pubkey, ...)` / `verify_advance_signature_mldsa44(public_key, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
+- `sign_advance_instruction_ed25519(signing_key, nonce, pre, post, fee_payer)` — sign with Ed25519.
+- `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post, fee_payer)` — sign with EIP-191 (envelope, 65-byte sig).
+- `sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, pre, post, fee_payer)` — sign with plain secp256k1 ECDSA (64-byte sig).
+- `verify_advance_signature_ed25519(pubkey, nonce, pre, post, fee_payer, signature)` / `verify_advance_signature_secp256k1_ecdsa(...)` / `verify_advance_signature_secp256k1_eip191(...)` / `verify_advance_signature_falcon512(wire_pubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
 - `ed25519_pubkey` / `secp256k1_eip191_eth_address` / `secp256k1_compressed_pubkey` / `falcon512_identity(wire_pubkey)` / `eth_address_from_pubkey` / `eip191_envelope_hash(digest)` — identity/envelope utilities.
 
 Falcon-512 and ML-DSA-44 signing are intentionally left to the caller (`solana-falcon512` and `solana-ml-dsa` are verify-only) — pair with an external signer such as `pqcrypto-falcon` or `fips204` (empty context) and feed the wire-format signature into `create_advance_instruction`.

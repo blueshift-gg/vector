@@ -23,7 +23,8 @@ use vector_core::{
 };
 
 use crate::common::{
-    build_vector_account, expected_advanced_data, mollusk, run_round_trip_spl, NONCE,
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,
+    NONCE,
 };
 
 /// The per-transaction compute cap registration has to fit.
@@ -89,9 +90,11 @@ fn register_in_one_transaction() {
     );
     assert_eq!(rejected.resulting_accounts, accounts);
 
-    let result = mollusk.process_transaction_instructions(
-        &[init_ix, expand_ix.clone(), expand_ix.clone()],
+    let result = process_transaction(
+        &mollusk,
+        &[&init_ix, &expand_ix.clone(), &expand_ix.clone()],
         &accounts,
+        &[],
     );
     assert_eq!(result.program_result, TransactionProgramResult::Success);
     assert!(result.compute_units_consumed <= TRANSACTION_CU_LIMIT);

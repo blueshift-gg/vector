@@ -5,15 +5,17 @@ edition.workspace = true
 license.workspace = true
 description = "Mollusk integration tests for the per-scheme Vector programs"
 publish = false
+# The Agave 4.3 crates the test runtime is built from.
+rust-version = "1.97.1"
 
 [lib]
 path = "lib.rs"
 
 [dependencies]
 vector-core = { path = "../crates/core" }
-mollusk-svm = "0.12.0"
-mollusk-svm-programs-token = "0.12.0"
-solana-account = "3.2.0"
+mollusk-svm = "0.16.0"
+mollusk-svm-programs-token = "0.16.0"
+solana-account = "4.3.1"
 solana-address = { workspace = true, features = ["curve25519"] }
 solana-instruction = { workspace = true }
 solana-program-error = "3.0"

@@ -11,7 +11,9 @@ use vector_core::{
     find_vector_pda, winternitz_identity, WINTERNITZ,
 };
 
-use crate::common::{build_vector_account, expected_advanced_data, mollusk, NONCE};
+use crate::common::{
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, NONCE,
+};
 
 #[test]
 fn initialize_and_client_encoding() {
@@ -154,48 +156,35 @@ fn signature_binds_close_and_rejects_replay() {
         ),
     ] {
         let invalid = create_advance_instruction(&WINTERNITZ, &identity, bytes);
-        mollusk.process_and_validate_instruction_chain(
-            &[
-                (
-                    &invalid,
-                    &[
-                        Check::err(error),
-                        Check::account(&vector).data(&state.data).build(),
-                    ],
-                ),
-                (&action, &[]),
-            ],
+        process_transaction(
+            &mollusk,
+            &[&invalid, &action],
             &[
                 (vector, state.clone()),
                 (receiver, Account::new(1_000_000, 0, &Address::default())),
                 (other, Account::new(1_000_000, 0, &Address::default())),
             ],
+            &[
+                Check::err(error),
+                Check::account(&vector).data(&state.data).build(),
+            ],
         );
     }
 
-    let result = mollusk.process_and_validate_instruction_chain(
-        &[
-            (
-                &advance,
-                &[
-                    Check::success(),
-                    Check::account(&vector).data(&expected).build(),
-                ],
-            ),
-            (
-                &passthrough,
-                &[
-                    Check::success(),
-                    Check::account(&vector).lamports(0).build(),
-                    Check::account(&receiver)
-                        .lamports(1_000_000 + lamports)
-                        .build(),
-                ],
-            ),
-        ],
+    let result = process_transaction(
+        &mollusk,
+        &[&advance, &passthrough],
         &[
             (vector, account),
             (receiver, Account::new(1_000_000, 0, &Address::default())),
+        ],
+        &[
+            Check::success(),
+            Check::account(&vector).data(&expected).build(),
+            Check::account(&vector).lamports(0).build(),
+            Check::account(&receiver)
+                .lamports(1_000_000 + lamports)
+                .build(),
         ],
     );
     println!(

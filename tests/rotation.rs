@@ -14,7 +14,9 @@ use vector_core::{
     find_vector_pda, pda_seed_from_identity, Scheme, WINTERNITZ, XMSS,
 };
 
-use crate::common::{build_vector_account, expected_advanced_data, mollusk, NONCE};
+use crate::common::{
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, NONCE,
+};
 
 #[test]
 fn winternitz_rotates_without_moving_the_account() {
@@ -63,8 +65,14 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let advance = create_advance_instruction(scheme, &identity, &signature);
 
     for unauthorized in [&rotate, &passthrough] {
-        let result =
-            mollusk.process_transaction_instructions(std::slice::from_ref(unauthorized), &accounts);
+        let result = process_transaction(
+            &mollusk,
+            &std::slice::from_ref(unauthorized)
+                .iter()
+                .collect::<Vec<_>>(),
+            &accounts,
+            &[],
+        );
         assert_eq!(
             result.program_result,
             TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
@@ -74,7 +82,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let changed_key =
         create_rotate_subinstruction(scheme, &identity, third.verifying_key().as_bytes());
     let changed = create_passthrough_instruction(scheme, &identity, &[changed_key, withdraw]);
-    let result = mollusk.process_transaction_instructions(&[advance.clone(), changed], &accounts);
+    let result = process_transaction(&mollusk, &[&advance.clone(), &changed], &accounts, &[]);
     assert_eq!(
         result.program_result,
         TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
@@ -82,7 +90,12 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     assert_eq!(result.resulting_accounts, accounts);
 
     let transaction = [advance, passthrough];
-    let result = mollusk.process_transaction_instructions(&transaction, &accounts);
+    let result = process_transaction(
+        &mollusk,
+        &transaction.iter().collect::<Vec<_>>(),
+        &accounts,
+        &[],
+    );
     assert_eq!(result.program_result, TransactionProgramResult::Success);
     let rotated = result.resulting_accounts;
     let stored_second = [identity.as_slice(), second.verifying_key().as_ref()].concat();
@@ -102,7 +115,12 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         4_000_000
     );
 
-    let replay = mollusk.process_transaction_instructions(&transaction, &rotated);
+    let replay = process_transaction(
+        &mollusk,
+        &transaction.iter().collect::<Vec<_>>(),
+        &rotated,
+        &[],
+    );
     assert_eq!(
         replay.program_result,
         TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
@@ -127,7 +145,12 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         create_advance_instruction(scheme, &identity, &next_signature),
         passthrough,
     ];
-    let failed = mollusk.process_transaction_instructions(&next_transaction, &rotated);
+    let failed = process_transaction(
+        &mollusk,
+        &next_transaction.iter().collect::<Vec<_>>(),
+        &rotated,
+        &[],
+    );
     assert_eq!(
         failed.program_result,
         TransactionProgramResult::Failure(1, ProgramError::InsufficientFunds)
@@ -142,7 +165,12 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .unwrap()
         .1
         .lamports += 2_000_000;
-    let retry = mollusk.process_transaction_instructions(&next_transaction, &funded);
+    let retry = process_transaction(
+        &mollusk,
+        &next_transaction.iter().collect::<Vec<_>>(),
+        &funded,
+        &[],
+    );
     assert_eq!(retry.program_result, TransactionProgramResult::Success);
     let account = &retry
         .resulting_accounts
@@ -167,7 +195,12 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .1
         .data[65..]
         .copy_from_slice(first.verifying_key().as_bytes());
-    let rejected = mollusk.process_transaction_instructions(&next_transaction, &wrong_key);
+    let rejected = process_transaction(
+        &mollusk,
+        &next_transaction.iter().collect::<Vec<_>>(),
+        &wrong_key,
+        &[],
+    );
     assert_eq!(
         rejected.program_result,
         TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
@@ -208,7 +241,7 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
         );
         let signature = signer.sign(&digest).unwrap();
         let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
-        let result = mollusk.process_transaction_instructions(&[advance, passthrough], &accounts);
+        let result = process_transaction(&mollusk, &[&advance, &passthrough], &accounts, &[]);
         if key == public_key {
             assert_eq!(result.program_result, TransactionProgramResult::Success);
             let mut expected = accounts.clone();

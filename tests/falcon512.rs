@@ -19,7 +19,8 @@ use vector_core::{
 };
 
 use crate::common::{
-    build_vector_account, expected_advanced_data, mollusk, run_round_trip_spl, NONCE,
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,
+    NONCE,
 };
 
 /// Sign via PQClean and zero-pad the variable-length detached signature to
@@ -186,21 +187,17 @@ fn close_via_advance() {
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (&advance_ix, &[Check::success()]),
-            (
-                &passthrough_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector).lamports(0).build(),
-                    Check::account(&eoa)
-                        .lamports(eoa_starting_lamports + vector_lamports)
-                        .build(),
-                ],
-            ),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector).lamports(0).build(),
+            Check::account(&eoa)
+                .lamports(eoa_starting_lamports + vector_lamports)
+                .build(),
+        ],
     );
 }
 
@@ -245,22 +242,18 @@ fn withdraw_via_advance() {
 
     let accounts = vec![(vector, vector_account), (eoa, eoa_account)];
 
-    mollusk.process_and_validate_instruction_chain(
-        &[
-            (&advance_ix, &[Check::success()]),
-            (
-                &passthrough_ix,
-                &[
-                    Check::success(),
-                    Check::account(&vector)
-                        .lamports(starting_vector_lamports - withdraw_amount)
-                        .build(),
-                    Check::account(&eoa)
-                        .lamports(eoa_starting_lamports + withdraw_amount)
-                        .build(),
-                ],
-            ),
-        ],
+    process_transaction(
+        &mollusk,
+        &[&advance_ix, &passthrough_ix],
         &accounts,
+        &[
+            Check::success(),
+            Check::account(&vector)
+                .lamports(starting_vector_lamports - withdraw_amount)
+                .build(),
+            Check::account(&eoa)
+                .lamports(eoa_starting_lamports + withdraw_amount)
+                .build(),
+        ],
     );
 }
