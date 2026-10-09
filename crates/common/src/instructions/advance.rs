@@ -1,4 +1,4 @@
-use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+use pinocchio::{error::ProgramError, AccountView, Address};
 
 use crate::{scheme::SigningScheme, state::VectorAccount};
 
@@ -27,41 +27,33 @@ pub(crate) fn cpi_guard() -> Result<(), ProgramError> {
     }
 }
 
-/// Verify the `advance_vector_signature` over the canonical
-/// `advance_vector_digest` and install the digest as the next nonce.
-/// CPI passthrough lives in the sibling [`crate::passthrough`] handler
-/// (disc `4`); a tx that just wants to bump the nonce can call `advance`
-/// alone.
+/// The message every signer of the executing `Advance` approves.
 ///
-/// Instruction data (after the discriminator stripped by [`crate::dispatch`]):
-///
-/// ```text
-/// [0..sig_len]  advance_vector_signature  (scheme-defined: 64 / 65 / 666)
-/// ```
-///
-/// Accounts:
-/// 0. `[writable]` vector PDA
-/// 1. `[]`         instructions sysvar
-pub fn process<S: SigningScheme>(
-    program_id: &Address,
-    accounts: &mut [AccountView],
-    data: &[u8],
-) -> ProgramResult {
+/// `Advance` data is `[discriminator, scheme_1..scheme_n, sig_1..sig_n]` for
+/// accounts `[vector_1..vector_n, instructions_sysvar]`. The message is the
+/// whole instructions sysvar with `sig_1..sig_n` cut out, so it covers every
+/// instruction in the transaction, this one's accounts and scheme bytes
+/// included. That is what authorises a sibling `passthrough`.
+pub fn message(
+    instructions_sysvar: &AccountView,
+    signers: usize,
+) -> Result<[u8; 32], ProgramError> {
     cpi_guard()?;
+    crate::buffer::message(instructions_sysvar, 1 + signers)
+}
 
-    let [vector, instructions_sysvar] = accounts else {
-        return Err(ProgramError::NotEnoughAccountKeys);
-    };
-
-    // `advance_nonce` verifies the sig over a digest that commits to the
-    // ENTIRE instructions sysvar buffer (minus the sig bytes), so any
-    // sibling `passthrough` ix's data + accounts in the same tx are
-    // committed to as part of pre/post. That's what authorises a
-    // standalone `passthrough` to run with `vector_pda`'s signer seeds.
-    let outcome =
-        VectorAccount::advance_nonce::<S>(vector, &*instructions_sysvar, program_id, data)?;
-    if !outcome.payload.is_empty() {
-        return Err(ProgramError::InvalidInstructionData);
-    }
-    Ok(())
+/// Verify one signer of an `Advance`: take scheme `S`'s signature off the
+/// front of `signatures`, check it against `vector`, install the next nonce,
+/// and return the signatures that follow.
+pub fn process<'a, S: SigningScheme>(
+    program_id: &Address,
+    vector: &mut AccountView,
+    message: &[u8; 32],
+    signatures: &'a [u8],
+) -> Result<&'a [u8], ProgramError> {
+    let (signature, rest) = signatures
+        .split_at_checked(S::SIGNATURE_LEN)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    VectorAccount::advance_nonce::<S>(vector, program_id, message, signature)?;
+    Ok(rest)
 }

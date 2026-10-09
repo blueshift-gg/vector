@@ -5,6 +5,8 @@
 //! one of the instructions shared through [`vector_common`], or one of the
 //! two that only some schemes have: `Rotate` (`5`, Winternitz and XMSS) and
 //! `Expand` (`6`, ML-DSA-44).
+//!
+//! `Advance` (`1`) takes one scheme byte per signer: see [`advance`].
 #![no_std]
 
 use pinocchio::{
@@ -12,7 +14,10 @@ use pinocchio::{
     AccountView, Address, ProgramResult, Resize,
 };
 use solana_address::declare_id;
-use vector_common::{dispatch, rotating, SigningScheme, VectorAccount};
+use vector_common::{
+    advance_message, dispatch, rotating, rotating::Rotating, SigningScheme, VectorAccount,
+    ADVANCE_DISCRIMINATOR,
+};
 
 pub mod schemes;
 use schemes::{
@@ -33,6 +38,9 @@ fn process_instruction(
     accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    if let [ADVANCE_DISCRIMINATOR, data @ ..] = instruction_data {
+        return advance(program_id, accounts, data);
+    }
     let [discriminator, scheme, data @ ..] = instruction_data else {
         return Err(ProgramError::InvalidInstructionData);
     };
@@ -54,6 +62,58 @@ fn process_instruction(
         Xmss::ID => rotating::dispatch::<Xmss>(program_id, accounts, discriminator, data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
+}
+
+/// Verify one signature per account and install each account's next nonce.
+/// Every signer signs the same message: the whole transaction with the
+/// signatures cut out. `Advance` runs no CPI — pair it with `Passthrough`.
+///
+/// Instruction data, after the discriminator:
+///
+/// ```text
+/// scheme_1 .. scheme_n   one byte per signer
+/// sig_1 .. sig_n         each of its scheme's length
+/// ```
+///
+/// Accounts:
+/// 0..n. `[writable]` vector PDAs, one per signer
+/// n.    `[]`         instructions sysvar
+fn advance(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+    let [vectors @ .., instructions_sysvar] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+    if vectors.is_empty() {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+    let (schemes, mut signatures) = data
+        .split_at_checked(vectors.len())
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let message = advance_message(instructions_sysvar, schemes.len())?;
+
+    use vector_common::advance as verify;
+    for (vector, scheme) in vectors.iter_mut().zip(schemes) {
+        signatures = match *scheme {
+            Ed25519::ID => verify::<Ed25519>(program_id, vector, &message, signatures),
+            Secp256k1Eip191::ID => {
+                verify::<Secp256k1Eip191>(program_id, vector, &message, signatures)
+            }
+            Secp256k1Ecdsa::ID => {
+                verify::<Secp256k1Ecdsa>(program_id, vector, &message, signatures)
+            }
+            Falcon512::ID => verify::<Falcon512>(program_id, vector, &message, signatures),
+            MlDsa44::ID => verify::<MlDsa44>(program_id, vector, &message, signatures),
+            Winternitz::ID => {
+                verify::<Rotating<Winternitz>>(program_id, vector, &message, signatures)
+            }
+            Xmss::ID => verify::<Rotating<Xmss>>(program_id, vector, &message, signatures),
+            _ => Err(ProgramError::InvalidInstructionData),
+        }?;
+    }
+    // The cut-out tail must be signatures and nothing else.
+    if !signatures.is_empty() {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+    Ok(())
 }
 
 /// Grow an ML-DSA-44 account by one runtime step and fill the prepared rows

@@ -6,7 +6,8 @@ use solana_nostd_sha256::hash;
 
 use crate::{IdentitySeed, SigningScheme, VectorAccount};
 
-struct Rotating<S>(PhantomData<S>);
+/// `S` with a key that can be replaced: what `Advance` verifies against.
+pub struct Rotating<S>(PhantomData<S>);
 
 impl<S: SigningScheme> SigningScheme for Rotating<S> {
     const ID: u8 = S::ID;

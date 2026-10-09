@@ -31,24 +31,25 @@ mod scheme;
 mod state;
 
 pub use scheme::{IdentitySeed, SigningScheme};
-pub use state::{signer_seeds, AdvanceOutcome, VectorAccount};
+pub use state::{signer_seeds, VectorAccount};
 
 /// Shared instruction handlers. Each is a plain function a program routes to
 /// from its own discriminator match; `close` is scheme-independent, the rest
 /// are generic over the program's [`SigningScheme`].
 pub use instructions::{
-    advance::process as advance, close::process as close, initialize::process as initialize,
-    passthrough::process as passthrough, withdraw::process as withdraw,
+    advance::message as advance_message, advance::process as advance, close::process as close,
+    initialize::process as initialize, passthrough::process as passthrough,
+    passthrough::ADVANCE_DISCRIMINATOR, withdraw::process as withdraw,
 };
 
 use instructions::VectorInstruction;
 use pinocchio::{AccountView, Address, ProgramResult};
 
-/// Canonical discriminator router, used verbatim by every scheme: `0`
-/// Initialize, `1` Advance, `2` Close, `3` Withdraw, `4` Passthrough — where
-/// `Initialize` is a strict create. The program has already read the
-/// discriminator and the scheme byte that follows it, and chosen `S` from
-/// the latter; `data` is what comes after both.
+/// Router for the instructions that act on one account of one scheme: `0`
+/// Initialize, `2` Close, `3` Withdraw, `4` Passthrough — where `Initialize`
+/// is a strict create. The program has already read the discriminator and
+/// the scheme byte that follows it, and chosen `S` from the latter; `data` is
+/// what comes after both. `1` Advance is the program's to route.
 #[inline(always)]
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,
@@ -58,7 +59,6 @@ pub fn dispatch<S: SigningScheme>(
 ) -> ProgramResult {
     match VectorInstruction::try_from(&discriminator)? {
         VectorInstruction::Initialize => initialize::<S>(program_id, accounts, data),
-        VectorInstruction::Advance => advance::<S>(program_id, accounts, data),
         VectorInstruction::Close => close(program_id, accounts, data),
         VectorInstruction::Withdraw => withdraw::<S>(program_id, accounts, data),
         VectorInstruction::Passthrough => passthrough::<S>(program_id, accounts, data),

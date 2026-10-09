@@ -1,25 +1,7 @@
 use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address};
 use solana_nostd_sha256::hashv;
 
-use crate::buffer::VectorBuffer;
 use crate::scheme::{IdentitySeed, SigningScheme};
-
-pub const DIGEST_LEN: usize = 32;
-
-/// What [`VectorAccount::advance_nonce`] hands back after verifying the
-/// signature and bumping the nonce. All fields are derived from the
-/// vector PDA the call ran against; the borrows are released before the
-/// struct is returned so the PDA can appear in downstream CPI.
-pub struct AdvanceOutcome<'a> {
-    /// Vector PDA address as raw bytes (for sibling-ix lookups).
-    pub pda_address: [u8; 32],
-    /// Header snapshot with the *new* (post-advance) nonce installed.
-    pub state: VectorAccount,
-    /// PDA seed derived from the stored identity (for `invoke_signed`).
-    pub identity_seed: IdentitySeed,
-    /// Trailing instruction-data bytes after the signature.
-    pub payload: &'a [u8],
-}
 
 /// On-chain vector state — fixed-size header.
 ///
@@ -85,63 +67,25 @@ impl VectorAccount {
         })
     }
 
-    /// Verify the signature over `SHA256(buffer.pre || nonce || identity ||
-    /// buffer.post)` and return the digest. The digest doubles as the next
-    /// nonce.
-    fn verify<S: SigningScheme>(
-        &self,
-        identity: &[u8],
-        buffer: &VectorBuffer,
-        signature: &[u8],
-    ) -> Result<[u8; DIGEST_LEN], ProgramError> {
-        let digest = hashv(&[
-            buffer.pre,
-            &self.nonce,
-            S::digest_identity(identity),
-            buffer.post,
-        ]);
-        S::verify(identity, &digest, signature)?;
-        Ok(digest)
-    }
-
-    /// Parse the signature off `instruction_data`, verify it against the
-    /// instructions-sysvar buffer, write the digest as the next nonce, and
-    /// return everything a downstream handler might need
-    /// ([`AdvanceOutcome`]). All borrows are released before returning so
-    /// the PDA can appear in downstream CPI.
-    pub fn advance_nonce<'a, S: SigningScheme>(
+    /// Verify `signature` over `SHA256(message || nonce || identity)` and
+    /// install that digest as the next nonce. `message` is what all signers
+    /// of the transaction share ([`crate::buffer::message`]); the nonce and
+    /// identity make the digest this account's alone.
+    pub fn advance_nonce<S: SigningScheme>(
         account: &mut AccountView,
-        instructions_sysvar: &AccountView,
         program_id: &Address,
-        instruction_data: &'a [u8],
-    ) -> Result<AdvanceOutcome<'a>, ProgramError> {
-        let pda_address = account.address().to_bytes();
-        let mut state = Self::load::<S>(account, program_id)?;
-
-        let (signature, payload) = instruction_data
-            .split_at_checked(S::SIGNATURE_LEN)
-            .ok_or(ProgramError::InvalidInstructionData)?;
-
-        let buffer = VectorBuffer::from_instructions_sysvar(instructions_sysvar, signature.len())?;
-
-        let (new_nonce, identity_seed) = {
-            let data = account.try_borrow()?;
-            if data.len() < Self::HEADER_LEN + S::IDENTITY_LEN {
-                return Err(ProgramError::AccountDataTooSmall);
-            }
-            let identity = &data[Self::HEADER_LEN..Self::HEADER_LEN + S::IDENTITY_LEN];
-            let digest = state.verify::<S>(identity, &buffer, signature)?;
-            (digest, S::pda_seed_from_identity(identity))
-        };
-
-        state.nonce = new_nonce;
-        account.try_borrow_mut()?[..32].copy_from_slice(&state.nonce);
-        Ok(AdvanceOutcome {
-            pda_address,
-            state,
-            identity_seed,
-            payload,
-        })
+        message: &[u8; 32],
+        signature: &[u8],
+    ) -> Result<(), ProgramError> {
+        let state = Self::load::<S>(account, program_id)?;
+        let mut data = account.try_borrow_mut()?;
+        let identity = data
+            .get(Self::HEADER_LEN..Self::HEADER_LEN + S::IDENTITY_LEN)
+            .ok_or(ProgramError::AccountDataTooSmall)?;
+        let digest = hashv(&[message, &state.nonce, S::digest_identity(identity)]);
+        S::verify(identity, &digest, signature)?;
+        data[..32].copy_from_slice(&digest);
+        Ok(())
     }
 }
 

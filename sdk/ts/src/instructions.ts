@@ -73,21 +73,35 @@ export function createAdvanceInstruction(
   identity: Uint8Array,
   advanceVectorSignature: Uint8Array
 ): TransactionInstruction {
-  const [vectorPda] = findVectorPda(scheme, identity);
+  return createMultiAdvanceInstruction([
+    { scheme, identity, signature: advanceVectorSignature },
+  ]);
+}
 
-  const sigLen = advanceVectorSignature.length;
-  const data = new Uint8Array(2 + sigLen);
-  data[0] = ADVANCE_DISCRIMINATOR;
-  data[1] = scheme.id;
-  data.set(advanceVectorSignature, 2);
-
+/**
+ * Build an `advance` instruction for several signers. Every signer signs
+ * its own `signerDigest` of the one `advanceMessage`.
+ *
+ * Accounts: `[vector_pda(writable)..., instructions_sysvar]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, scheme..., signature...]`.
+ */
+export function createMultiAdvanceInstruction(
+  signers: { scheme: Scheme; identity: Uint8Array; signature: Uint8Array }[]
+): TransactionInstruction {
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
-      { pubkey: vectorPda, isSigner: false, isWritable: true },
+      ...signers.map(({ scheme, identity }) => ({
+        pubkey: findVectorPda(scheme, identity)[0],
+        isSigner: false,
+        isWritable: true,
+      })),
       { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
     ],
-    data: Buffer.from(data),
+    data: Buffer.concat([
+      Uint8Array.of(ADVANCE_DISCRIMINATOR, ...signers.map((s) => s.scheme.id)),
+      ...signers.map((s) => s.signature),
+    ]),
   });
 }
 

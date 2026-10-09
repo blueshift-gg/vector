@@ -30,3 +30,6 @@ mod rotation;
 
 #[cfg(test)]
 mod schemes;
+
+#[cfg(test)]
+mod multi;

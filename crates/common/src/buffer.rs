@@ -1,97 +1,54 @@
 use pinocchio::{error::ProgramError, sysvars::instructions::INSTRUCTIONS_ID, AccountView};
+use solana_nostd_sha256::hashv;
 
 use crate::helpers::read_u16_at;
 
-/// The discriminator and the scheme byte, before the signature.
-const PREFIX_LEN: usize = 2;
-
-/// The pre/post slices of the instructions sysvar bracketing the executing
-/// instruction's signature region. `pre || sig || post` reconstructs the
-/// entire sysvar; carving out `sig` is what lets the signature embed itself
-/// in the buffer it signs.
-pub struct VectorBuffer<'a> {
-    pub pre: &'a [u8],
-    pub post: &'a [u8],
-}
-
-impl<'a> VectorBuffer<'a> {
-    /// Construct a `VectorBuffer` from the instructions sysvar, carving out
-    /// `sig_len` bytes (scheme-dependent) after the discriminator and the
-    /// scheme byte.
-    pub fn from_instructions_sysvar(
-        account: &'a AccountView,
-        sig_len: usize,
-    ) -> Result<Self, ProgramError> {
-        if account.address() != &INSTRUCTIONS_ID {
-            return Err(ProgramError::UnsupportedSysvar);
-        }
-
-        // Leak the borrow so the slice can live for `'a`. The sysvar is
-        // read-only.
-        core::mem::forget(account.try_borrow()?);
-
-        // SAFETY: the leaked borrow keeps the data immutable for `'a`.
-        let data: &'a [u8] =
-            unsafe { core::slice::from_raw_parts(account.data_ptr(), account.data_len()) };
-
-        // Sysvar layout:
-        //   [0..2]                          num_instructions (u16 LE)
-        //   [2..2 + 2 * num_instructions]   u16 LE offset per instruction
-        //   ...instruction regions...
-        //   [len - 2..len]                  current instruction index (u16 LE)
-        if data.len() < 6 {
-            return Err(ProgramError::InvalidAccountData);
-        }
-
-        let num_instructions = read_u16_at(data, 0)? as usize;
-        let current_index = read_u16_at(data, data.len() - 2)? as usize;
-        if current_index >= num_instructions {
-            return Err(ProgramError::InvalidAccountData);
-        }
-
-        let ix_offset_pos = current_index
-            .checked_mul(2)
-            .and_then(|n| n.checked_add(2))
-            .ok_or(ProgramError::InvalidAccountData)?;
-        let ix_offset = read_u16_at(data, ix_offset_pos)? as usize;
-
-        // Instruction region layout:
-        //   [0..2]                       num_accounts (u16 LE)
-        //   [2..2 + 33 * num_accounts]   metas (1 flag byte + 32 addr each)
-        //   [+ 32]                       program id
-        //   [+ 2]                        data_len (u16 LE)
-        //   [...]                        instruction data (disc, scheme, signature)
-        let num_accounts = read_u16_at(data, ix_offset)? as usize;
-
-        let metas_len = num_accounts
-            .checked_mul(33)
-            .ok_or(ProgramError::InvalidAccountData)?;
-        let disc_pos = ix_offset
-            .checked_add(2)
-            .and_then(|n| n.checked_add(metas_len))
-            .and_then(|n| n.checked_add(32))
-            .and_then(|n| n.checked_add(2))
-            .ok_or(ProgramError::InvalidAccountData)?;
-
-        let sig_start = disc_pos
-            .checked_add(PREFIX_LEN)
-            .ok_or(ProgramError::InvalidAccountData)?;
-        let sig_end = sig_start
-            .checked_add(sig_len)
-            .ok_or(ProgramError::InvalidAccountData)?;
-
-        // Bounds-check the signature region and the trailing index footer.
-        if sig_end
-            .checked_add(2)
-            .ok_or(ProgramError::InvalidAccountData)?
-            > data.len()
-        {
-            return Err(ProgramError::InvalidAccountData);
-        }
-
-        Ok(VectorBuffer {
-            pre: &data[..sig_start],
-            post: &data[sig_end..],
-        })
+/// What every signer of the executing instruction approves: the SHA-256 of
+/// the instructions sysvar with the signatures cut out.
+///
+/// The signatures are the tail of the executing instruction's data, after
+/// its first `prefix_len` bytes. Nothing else is cut, so the message covers
+/// every other byte of every instruction in the transaction.
+pub fn message(sysvar: &AccountView, prefix_len: usize) -> Result<[u8; 32], ProgramError> {
+    if sysvar.address() != &INSTRUCTIONS_ID {
+        return Err(ProgramError::UnsupportedSysvar);
     }
+    let data = sysvar.try_borrow()?;
+
+    // Sysvar layout:
+    //   [0..2]                          num_instructions (u16 LE)
+    //   [2..2 + 2 * num_instructions]   u16 LE offset per instruction
+    //   ...instruction regions...
+    //   [len - 2..len]                  current instruction index (u16 LE)
+    if data.len() < 6 {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let num_instructions = read_u16_at(&data, 0)? as usize;
+    let current_index = read_u16_at(&data, data.len() - 2)? as usize;
+    if current_index >= num_instructions {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let ix_offset = read_u16_at(&data, 2 + 2 * current_index)? as usize;
+
+    // Instruction region layout:
+    //   [0..2]                       num_accounts (u16 LE)
+    //   [2..2 + 33 * num_accounts]   metas (1 flag byte + 32 addr each)
+    //   [+ 32]                       program id
+    //   [+ 2]                        data_len (u16 LE)
+    //   [...]                        instruction data
+    // Every value is a u16, so none of this overflows.
+    let num_accounts = read_u16_at(&data, ix_offset)? as usize;
+    let data_len_pos = ix_offset + 2 + 33 * num_accounts + 32;
+    let data_len = read_u16_at(&data, data_len_pos)? as usize;
+    let data_start = data_len_pos + 2;
+    let data_end = data_start + data_len;
+
+    // The cut stays inside the instruction data, before the index footer.
+    if prefix_len > data_len || data_end + 2 > data.len() {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(hashv(&[
+        &data[..data_start + prefix_len],
+        &data[data_end..],
+    ]))
 }

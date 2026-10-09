@@ -64,7 +64,7 @@ Wire pubkeys are 897 bytes. The client identity — the PDA seed and the value f
 
 To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a 1024-byte form with the forward NTT and modular inverse pre-baked) in the account's identity region. The stored identity is `sha256(wire_pubkey)[32] || pad[1] || prepared_pubkey[1024]`; the one-byte pad lands the prepared form on a 2-byte account offset so the verifier can borrow it zero-copy (a 1024-byte stack copy would overflow the BPF frame). The prepared form is computed once at `initialize` (~63k CUs); subsequent `advance` calls only pay the signature-verify cost (~184k CUs). The 32-byte hash prefix is what `advance` folds into the digest, since the client can't reproduce the prepared form and the program can't cheaply rebuild the wire pubkey.
 
-Falcon signatures are variable-length (compressed Huffman); the wire format zero-pads to 666 bytes so the digest carve-out is constant-sized.
+Falcon signatures are variable-length (compressed Huffman); the wire format zero-pads to 666 bytes so the signature length is constant.
 
 ### ML-DSA-44
 
@@ -106,13 +106,28 @@ Rotation and actions are atomic. If any instruction fails, the nonce and key cha
 The workspace pins `solana-winternitz` to a git revision. Publish that crate and depend on the release before deploying. Build the program with `cargo build-sbf --manifest-path programs/vector/Cargo.toml`. It is undeployed.
 
 ### Digest Construction
-All schemes share the same SHA-256 digest over the instructions sysvar buffer. The signature region is carved out of the buffer and replaced with the current nonce and the scheme's identity:
+Every signer of an `Advance` approves the same message: the instructions sysvar buffer with the signatures cut out. The signatures are the tail of the `Advance` instruction's data, so that tail is the only thing missing:
 
 ```
-digest = SHA256(buffer[..sig_start] || nonce || identity || buffer[sig_end..])
+message = SHA256(buffer[..signatures_start] || buffer[advance_data_end..])
+digest  = SHA256(message || nonce || identity)
 ```
 
-`identity` is the client-derivable identity: the stored pubkey/address for Ed25519/EIP-191/Secp256k1, `sha256(wire_pubkey)` for Falcon-512, the 1,312-byte public key for ML-DSA-44, and the permanent `sha256(initial_pubkey)` for Winternitz/XMSS (the program's `digest_identity` hook selects it). The carve-out size is the signature length listed for each scheme above. Everything else in the buffer — the discriminator, CPI payload, surrounding instructions, and sysvar framing — is committed to by the digest.
+Each signer signs its own `digest`: the shared message, then its account's current nonce and its identity.
+
+`identity` is the client-derivable identity: the stored pubkey/address for Ed25519/EIP-191/Secp256k1, `sha256(wire_pubkey)` for Falcon-512, the 1,312-byte public key for ML-DSA-44, and the permanent `sha256(initial_pubkey)` for Winternitz/XMSS (the program's `digest_identity` hook selects it). Everything else in the buffer — the discriminator, the scheme bytes, the accounts, CPI payload, surrounding instructions, and sysvar framing — is committed to by the message.
+
+### Several Signers
+One `Advance` takes any number of signers, of any schemes:
+
+```
+accounts: [vector_1, ..., vector_n, instructions_sysvar]
+data:     [1, scheme_1, ..., scheme_n, sig_1 || ... || sig_n]
+```
+
+The program verifies one signature per account and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature.
+
+A one-time key (Winternitz, XMSS) should sign last: its signature only lands if every other signer's does, and it must not be used for a second message.
 
 ## Instruction Set
 Every Vector program exposes instructions 0–4. Winternitz and XMSS also expose `Rotate` (5); ML-DSA-44 also exposes `Expand` (6). Each instruction starts with its discriminator byte.
@@ -154,10 +169,10 @@ This sets Vector apart from other onchain signing primitives which typically req
 Vector advances state by reusing the same SHA-256 digest that was just verified as the next nonce:
 
 ```
-next_nonce = SHA256(pre || current_nonce || identity || post)
+next_nonce = SHA256(message || current_nonce || identity)
 ```
 
-where `pre` and `post` together cover the entire instructions sysvar buffer minus the signature region. Because `current_nonce` is itself an input to the hash, every nonce transition is a deterministic function of both the prior state and the exact transaction being authorized — there is no separate mixing pass and no second hash.
+where `message` covers the entire instructions sysvar buffer minus the signatures. Because `current_nonce` is itself an input to the hash, every nonce transition is a deterministic function of both the prior state and the exact transaction being authorized — there is no separate mixing pass and no second hash.
 
 The signature itself is not used as the state transition input, as ECDSA signatures contain a malleable per-signature ephemeral scalar. Tying the progression to the digest of the current nonce and the current authorized buffer ensures that state advancement is determined by the actual transaction being authorized.
 
@@ -292,7 +307,7 @@ The signed digest doubles as the next on-chain nonce, so a successful advance al
 
 ## Operational Patterns
 
-Everything below is native protocol behaviour — no extra programs, accounts, or formats. The building blocks are the digest (`SHA256(pre || nonce || identity || post)`), digest-as-next-nonce progression, and the fact that one vector account holds exactly one outstanding nonce.
+Everything below is native protocol behaviour — no extra programs, accounts, or formats. The building blocks are the digest (`SHA256(message || nonce || identity)`), digest-as-next-nonce progression, and the fact that one vector account holds exactly one outstanding nonce.
 
 ### Offline verification
 

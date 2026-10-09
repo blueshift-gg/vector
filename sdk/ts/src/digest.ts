@@ -9,7 +9,7 @@ import { Address, TransactionInstruction } from "@solana/web3.js";
 
 import { Scheme, readU16LE, writeU16LE } from "./scheme.js";
 import {
-  createAdvanceInstruction,
+  createMultiAdvanceInstruction,
   constructInstructionsData,
 } from "./instructions.js";
 
@@ -60,54 +60,75 @@ function promoteToMessageFlags(
   );
 }
 
+/** One signer of an `advance`: its scheme and identity. */
+export type AdvanceSigner = { scheme: Scheme; identity: Uint8Array };
+
 /**
- * Shared digest: `SHA256(buffer[..sigStart] || nonce || identity ||
- * buffer[sigEnd..])`. `identity` is the scheme's client identity bytes (for
- * Falcon, `sha256(wire_pubkey)`).
+ * The message every signer of one `advance` approves: the SHA-256 of the
+ * instructions sysvar with the signatures cut off the end of the advance's
+ * data. The advance is inserted at `preInstructions.length`; a sibling
+ * `passthrough` is just another pre/post instruction, and the message
+ * covers all of it.
+ *
+ * Mirrors `advance_message` in `crates/core/src/digest.rs`.
  */
-function vectorDigest(
-  targetIx: TransactionInstruction,
-  targetIndex: number,
-  sigLen: number,
-  nonce: Uint8Array,
-  identity: Uint8Array,
+export function advanceMessage(
+  signers: AdvanceSigner[],
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
   feePayer?: Address
 ): Uint8Array {
-  const allIxs = [...preInstructions, targetIx, ...postInstructions];
-  const promoted = promoteToMessageFlags(allIxs, feePayer);
-  const buffer = constructInstructionsData(promoted);
-  // Patch the sysvar's `current_instruction_index` footer (last 2 bytes) to
-  // match what the runtime will write at execution time. The footer is part
-  // of `post`, which is folded into the hash, so the off-chain digest only
-  // matches when this index is correct (a no-op for single-ix advance, but
-  // non-zero when there are pre-instructions like a CU bump).
-  writeU16LE(buffer, targetIndex, buffer.length - 2);
+  const advanceIx = createMultiAdvanceInstruction(
+    signers.map((signer) => ({
+      ...signer,
+      signature: new Uint8Array(signer.scheme.signatureLen),
+    }))
+  );
+  const advanceIndex = preInstructions.length;
+  const buffer = constructInstructionsData(
+    promoteToMessageFlags(
+      [...preInstructions, advanceIx, ...postInstructions],
+      feePayer
+    )
+  );
+  // The runtime sets the footer to the executing instruction's index.
+  writeU16LE(buffer, advanceIndex, buffer.length - 2);
 
-  const ixOffsetPos = 2 + 2 * targetIndex;
-  const ixOffset = readU16LE(buffer, ixOffsetPos);
-
-  const numAccounts = readU16LE(buffer, ixOffset);
-  const sigStart = ixOffset + 2 + 33 * numAccounts + 32 + 2 + 2;
-  const sigEnd = sigStart + sigLen;
+  // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
+  // u16 data_len + data. The signatures follow the discriminator and one
+  // scheme byte per signer, and run to the end of the data.
+  const offset = readU16LE(buffer, 2 + 2 * advanceIndex);
+  const dataStart = offset + 2 + 33 * advanceIx.keys.length + 32 + 2;
+  const signaturesStart = dataStart + 1 + signers.length;
+  const dataEnd = dataStart + advanceIx.data.length;
 
   const h = createHash("sha256");
-  h.update(buffer.subarray(0, sigStart));
-  h.update(nonce);
-  h.update(identity);
-  h.update(buffer.subarray(sigEnd));
+  h.update(buffer.subarray(0, signaturesStart));
+  h.update(buffer.subarray(dataEnd));
   return new Uint8Array(h.digest());
 }
 
 /**
- * Compute the canonical `advance_vector_digest` the client must sign over.
- * Callers thread the full ix layout via `pre`/`post`; the advance ix is
- * inserted at `pre.length`. Any sibling `passthrough` ix authorising CPIs
- * under the vector PDA's signer seeds is just another pre/post ix — its
- * bytes get committed to by the digest like any other tx ix, which is
- * what authenticates the passthrough end-to-end.
+ * What one signer signs: `SHA256(message || nonce || identity)`, with
+ * `message` from {@link advanceMessage}. It is also the account's next
+ * nonce. `identity` is the scheme's client identity bytes (for Falcon,
+ * `sha256(wire_pubkey)`).
+ *
+ * Mirrors `signer_digest` in `crates/core/src/digest.rs`.
  */
+export function signerDigest(
+  message: Uint8Array,
+  nonce: Uint8Array,
+  identity: Uint8Array
+): Uint8Array {
+  const h = createHash("sha256");
+  h.update(message);
+  h.update(nonce);
+  h.update(identity);
+  return new Uint8Array(h.digest());
+}
+
+/** {@link signerDigest} for an advance with one signer. */
 export function advanceVectorDigest(
   scheme: Scheme,
   nonce: Uint8Array,
@@ -116,19 +137,13 @@ export function advanceVectorDigest(
   postInstructions: TransactionInstruction[],
   feePayer?: Address
 ): Uint8Array {
-  const sigLen = scheme.signatureLen;
-  const placeholder = new Uint8Array(sigLen);
-  const advanceIx = createAdvanceInstruction(scheme, identity, placeholder);
-  return vectorDigest(
-    advanceIx,
-    preInstructions.length,
-    sigLen,
-    nonce,
-    identity,
+  const message = advanceMessage(
+    [{ scheme, identity }],
     preInstructions,
     postInstructions,
     feePayer
   );
+  return signerDigest(message, nonce, identity);
 }
 
 /**

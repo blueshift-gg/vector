@@ -15,15 +15,14 @@ use crate::{
     state::{signer_seeds, VectorAccount},
 };
 
-/// Discriminator the sysvar scan looks for. Kept in sync with
-/// [`VectorInstruction::Advance`](super::VectorInstruction).
-const ADVANCE_DISCRIMINATOR: u8 = 1;
+/// `Advance`: the program routes to it, and the sysvar scan looks for it.
+pub const ADVANCE_DISCRIMINATOR: u8 = 1;
 
 /// Authorize a batch of CPIs against the vector PDA's signer seeds, gated
 /// by a sibling `advance` ix earlier in the same transaction.
 ///
 /// The authorization model: `advance`'s signature commits (via the digest)
-/// to the *entire* instructions sysvar buffer minus its own sig bytes —
+/// to the *entire* instructions sysvar buffer minus the signatures —
 /// which transitively commits to this `passthrough` ix's data and account
 /// layout. So if `advance` ran successfully earlier in the tx (atomicity
 /// ensures it did, or the tx aborted), the caller signed off on this
@@ -101,8 +100,8 @@ pub fn process<S: SigningScheme>(
 /// * program_id matches `program_id` (i.e. it is one of *this* program's
 ///   ixs, so its sig was checked against this program's verify code), and
 /// * discriminator byte is [`ADVANCE_DISCRIMINATOR`], and
-/// * first meta address equals `vector_address` (binding it to the same
-///   vector PDA we are signing for here).
+/// * accounts include `vector_address`. `Advance` verifies a signature for
+///   every account it is given, so being listed means having signed.
 ///
 /// Returns `Ok(())` on hit, `ProgramError::MissingRequiredSignature` if no
 /// matching prior advance is found.
@@ -158,21 +157,14 @@ fn verify_prior_advance(
         if &data[prog_pos..prog_pos + 32] != program_id.as_ref() {
             continue;
         }
-        if data[disc_pos] != ADVANCE_DISCRIMINATOR {
+        // An instruction without data has no discriminator to read.
+        if read_u16_at(data, data_len_pos)? == 0 || data[disc_pos] != ADVANCE_DISCRIMINATOR {
             continue;
         }
-        if num_accts < 1 {
-            continue;
-        }
-        // First meta = vector_pda. Each meta is `flag(1) || addr(32)`.
-        let first_addr_pos = off
-            .checked_add(2)
-            .and_then(|n| n.checked_add(1))
-            .ok_or(ProgramError::InvalidAccountData)?;
-        if first_addr_pos + 32 > data.len() {
-            continue;
-        }
-        if &data[first_addr_pos..first_addr_pos + 32] == vector_address {
+        // Each meta is `flag(1) || addr(32)`.
+        let (metas, _) = data[off + 2..prog_pos].as_chunks::<33>();
+        let listed = metas.iter().any(|meta| &meta[1..] == vector_address);
+        if listed {
             return Ok(());
         }
     }
