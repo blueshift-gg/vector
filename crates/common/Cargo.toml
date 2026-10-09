@@ -18,3 +18,6 @@ pinocchio-system = { workspace = true, features = ["account-resize"] }
 # here rather than in each program crate.
 solana-address = { workspace = true, features = ["curve25519"] }
 solana-nostd-sha256 = { workspace = true }
+
+[lints]
+workspace = true

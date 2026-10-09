@@ -42,7 +42,7 @@ fn sign(digest: &[u8; 32], sk: &ml_dsa_44::PrivateKey) -> [u8; MLDSA44_SIGNATURE
 fn stored_identity(public_key: &[u8; MLDSA44_PUBKEY_LEN]) -> Vec<u8> {
     use solana_ml_dsa::ml_dsa_44::VerifyingKey;
     let mut out = public_key.to_vec();
-    out.extend_from_slice(&[0; 3]);
+    out.extend_from_slice(&[0; 2]);
     out.extend_from_slice(
         VerifyingKey::<false>::from_bytes(public_key)
             .prepare()
@@ -53,7 +53,7 @@ fn stored_identity(public_key: &[u8; MLDSA44_PUBKEY_LEN]) -> Vec<u8> {
 
 #[test]
 fn register_in_one_transaction() {
-    let mut mollusk = mollusk(&MLDSA44);
+    let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = TRANSACTION_CU_LIMIT;
 
     let (pk, sk) = keypair();
@@ -83,12 +83,15 @@ fn register_in_one_transaction() {
     assert_eq!(foreign.resulting_accounts, accounts);
     let mut malformed = expand_ix.clone();
     malformed.data.push(0);
-    let rejected = mollusk.process_instruction(&malformed, &accounts);
+    let mut header = vec![0; 34];
+    header[32] = MLDSA44.id;
+    let mut owned = Account::new(1_000_000_000, 0, &vector_core::PROGRAM_ID);
+    owned.data = header;
+    let rejected = mollusk.process_instruction(&malformed, &[(vector, owned)]);
     assert_eq!(
         rejected.program_result,
         mollusk_svm::result::ProgramResult::Failure(ProgramError::InvalidInstructionData)
     );
-    assert_eq!(rejected.resulting_accounts, accounts);
 
     let result = process_transaction(
         &mollusk,
@@ -108,8 +111,8 @@ fn register_in_one_transaction() {
     // header whose nonce the program derived on chain.
     let registered = accounts.iter().find(|(k, _)| *k == vector).unwrap().clone();
     let data = &registered.1.data;
-    assert_eq!(data[32], bump);
-    assert_eq!(&data[33..], &stored_identity(&pk)[..]);
+    assert_eq!(data[32..34], [MLDSA44.id, bump]);
+    assert_eq!(&data[34..], &stored_identity(&pk)[..]);
 
     // A third expand is refused.
     let full = mollusk.process_instruction(&expand_ix, std::slice::from_ref(&registered));
@@ -132,7 +135,7 @@ fn register_in_one_transaction() {
 
 #[test]
 fn advance_before_expand_fails() {
-    let mut mollusk = mollusk(&MLDSA44);
+    let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = TRANSACTION_CU_LIMIT;
     let (pk, sk) = keypair();
     let (vector, bump) = find_vector_pda(&MLDSA44, &pk);
@@ -154,7 +157,7 @@ fn advance_before_expand_fails() {
 
 #[test]
 fn advance_empty() {
-    let mut mollusk = mollusk(&MLDSA44);
+    let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = 400_000;
 
     let (pk, sk) = keypair();
@@ -222,7 +225,7 @@ fn client_encoding_matches_typescript() {
     let (pda, bump) = find_vector_pda(&MLDSA44, &pk);
     assert_eq!(
         pda.to_string(),
-        "FNjvHupTZp9ZRo53mmh9tV3vv3mADxU5rKo9ataMWUj2"
+        "BFQ39c9TJoj2JeVUNse2GEtpa2za4VR8TPq3mVNaCQGo"
     );
     assert_eq!(bump, 255);
     let post = create_passthrough_instruction(
@@ -236,9 +239,8 @@ fn client_encoding_matches_typescript() {
     assert_eq!(
         digest,
         [
-            0xd6, 0xcb, 0x91, 0xbb, 0x61, 0x6d, 0x7e, 0x3e, 0x4a, 0xab, 0xb3, 0x71, 0xc3, 0xb5,
-            0x2d, 0xd1, 0xbf, 0x23, 0xc7, 0x59, 0x17, 0x1f, 0xfa, 0x55, 0x5c, 0x63, 0x18, 0x56,
-            0x59, 0x1d, 0x65, 0xe8
+            176, 11, 122, 180, 7, 63, 95, 242, 180, 184, 93, 60, 188, 168, 196, 186, 0, 131, 58,
+            141, 202, 192, 156, 37, 215, 185, 75, 45, 189, 49, 237, 177
         ]
     );
 }

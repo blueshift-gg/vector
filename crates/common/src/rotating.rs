@@ -6,9 +6,11 @@ use solana_nostd_sha256::hash;
 
 use crate::{IdentitySeed, SigningScheme, VectorAccount};
 
-struct Rotating<S>(PhantomData<S>);
+/// `S` with a key that can be replaced: what `Advance` verifies against.
+pub struct Rotating<S>(PhantomData<S>);
 
 impl<S: SigningScheme> SigningScheme for Rotating<S> {
+    const ID: u8 = S::ID;
     const SIGNATURE_LEN: usize = S::SIGNATURE_LEN;
     const IDENTITY_LEN: usize = 32 + S::IDENTITY_LEN;
     const INIT_PAYLOAD_LEN: usize = S::INIT_PAYLOAD_LEN;
@@ -16,10 +18,6 @@ impl<S: SigningScheme> SigningScheme for Rotating<S> {
     fn populate_identity(payload: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
         identity[..32].copy_from_slice(&hash(payload));
         S::populate_identity(payload, &mut identity[32..])
-    }
-
-    fn digest_identity(identity: &[u8]) -> &[u8] {
-        &identity[..32]
     }
 
     fn pda_seed_from_identity(identity: &[u8]) -> IdentitySeed {
@@ -43,19 +41,17 @@ impl<S: SigningScheme> SigningScheme for Rotating<S> {
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,
     accounts: &mut [AccountView],
-    instruction_data: &[u8],
+    discriminator: u8,
+    payload: &[u8],
 ) -> ProgramResult {
-    let Some((&5, payload)) = instruction_data.split_first() else {
-        return crate::dispatch::<Rotating<S>>(program_id, accounts, instruction_data);
-    };
+    if discriminator != 5 {
+        return crate::dispatch::<Rotating<S>>(program_id, accounts, discriminator, payload);
+    }
     let [vector] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     if !vector.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
-    }
-    if !vector.owned_by(program_id) {
-        return Err(ProgramError::InvalidAccountOwner);
     }
     if payload.len() != S::INIT_PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);

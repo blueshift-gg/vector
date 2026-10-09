@@ -8,7 +8,7 @@ use solana_winternitz::winternitz;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
     create_initialize_winternitz, create_passthrough_instruction, create_rotate_subinstruction,
-    find_vector_pda, winternitz_identity, WINTERNITZ,
+    find_vector_pda, winternitz_identity, PROGRAM_ID, WINTERNITZ,
 };
 
 use crate::common::{
@@ -17,16 +17,16 @@ use crate::common::{
 
 #[test]
 fn initialize_and_client_encoding() {
-    let mollusk = mollusk(&WINTERNITZ);
+    let mollusk = mollusk();
     let public_key = core::array::from_fn(|i| i as u8);
     let identity = winternitz_identity(&public_key);
     let (vector, bump) = find_vector_pda(&WINTERNITZ, &identity);
     // Shared with sdk/ts/test/winternitz.test.ts.
     assert_eq!(
         vector.to_string(),
-        "8DgkUyaVWAvj24nWMEdFec11GfzhZ5CpoAFwdojVmt9R"
+        "4jz8wWkhoSx61KwwaycijTBceNkZ7GCiv9QHiZkvjB3n"
     );
-    assert_eq!(bump, 255);
+    assert_eq!(bump, 254);
     let receiver = Address::new_from_array([9; 32]);
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
     let rotate = create_rotate_subinstruction(&WINTERNITZ, &identity, &[7; 41]);
@@ -34,8 +34,8 @@ fn initialize_and_client_encoding() {
     assert_eq!(
         advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough]),
         [
-            65, 103, 69, 96, 145, 228, 158, 154, 111, 107, 43, 41, 164, 133, 193, 179, 225, 56,
-            222, 144, 0, 46, 22, 223, 99, 48, 129, 42, 136, 132, 197, 65
+            101, 87, 230, 44, 110, 240, 118, 250, 10, 44, 132, 162, 159, 90, 167, 127, 176, 56,
+            100, 167, 27, 4, 16, 254, 79, 243, 97, 28, 212, 174, 1, 13
         ],
     );
 
@@ -53,7 +53,7 @@ fn initialize_and_client_encoding() {
         &[
             Check::success(),
             Check::account(&vector)
-                .owner(&WINTERNITZ.program_id)
+                .owner(&PROGRAM_ID)
                 .space(WINTERNITZ.account_len())
                 .build(),
         ],
@@ -65,13 +65,13 @@ fn initialize_and_client_encoding() {
         .unwrap()
         .1
         .data;
-    assert_eq!(stored[32], bump);
-    assert_eq!(&stored[33..65], &identity);
-    assert_eq!(&stored[65..], &public_key);
+    assert_eq!(stored[32..34], [WINTERNITZ.id, bump]);
+    assert_eq!(&stored[34..66], &identity);
+    assert_eq!(&stored[66..], &public_key);
 
     for length in [40, 42] {
         let mut malformed = initialize.clone();
-        malformed.data.resize(1 + length, 0);
+        malformed.data.resize(2 + length, 0);
         mollusk.process_and_validate_instruction(
             &malformed,
             &accounts,
@@ -90,7 +90,7 @@ fn signature_binds_close_and_rejects_replay() {
     let public_key = signer.verifying_key().to_bytes();
     let identity = winternitz_identity(&public_key);
     let stored = [identity.as_slice(), public_key.as_slice()].concat();
-    let mollusk = mollusk(&WINTERNITZ);
+    let mollusk = mollusk();
     let (vector, bump) = find_vector_pda(&WINTERNITZ, &identity);
     let lamports = mollusk
         .sysvars
@@ -118,7 +118,7 @@ fn signature_binds_close_and_rejects_replay() {
     let mut tampered = signature;
     tampered[winternitz::SIGNATURE_LEN - 1] ^= 1;
     let mut wrong_key = account.clone();
-    wrong_key.data[65] ^= 1;
+    wrong_key.data[66] ^= 1;
     let mut advanced = account.clone();
     advanced.data = expected.clone();
 

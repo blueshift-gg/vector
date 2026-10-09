@@ -7,8 +7,8 @@ use vector_common::{IdentitySeed, SigningScheme, VectorAccount};
 // SHAKE128/256, as specified by FIPS 204.
 type PreparedKey = PreparedVerifyingKey<false>;
 
-// The three-byte pad aligns prepared coefficients after the 33-byte header.
-const PREPARED: usize = PUBLIC_KEY_LEN + 3;
+// The two-byte pad aligns prepared coefficients after the 34-byte header.
+const PREPARED: usize = PUBLIC_KEY_LEN + 2;
 const IDENTITY_LEN: usize = PREPARED + PreparedKey::BYTE_LEN;
 const _: () = assert!((VectorAccount::HEADER_LEN + PREPARED).is_multiple_of(4));
 
@@ -46,6 +46,7 @@ impl MlDsa44 {
 }
 
 impl SigningScheme for MlDsa44 {
+    const ID: u8 = 4;
     const SIGNATURE_LEN: usize = SIGNATURE_LEN;
     const IDENTITY_LEN: usize = IDENTITY_LEN;
     const INIT_PAYLOAD_LEN: usize = PUBLIC_KEY_LEN;
@@ -59,10 +60,6 @@ impl SigningScheme for MlDsa44 {
         identity_out[..PUBLIC_KEY_LEN].copy_from_slice(public_key.as_bytes());
         identity_out[PUBLIC_KEY_LEN..PREPARED].fill(0);
         Self::fill(identity_out, 0)
-    }
-
-    fn digest_identity(identity: &[u8]) -> &[u8] {
-        &identity[..PUBLIC_KEY_LEN]
     }
 
     fn pda_seed_from_identity(identity: &[u8]) -> IdentitySeed {

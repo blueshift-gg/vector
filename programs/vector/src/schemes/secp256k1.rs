@@ -11,6 +11,7 @@ const COMPRESSED_PUBKEY_LEN: usize = CompressedPoint::SIZE;
 pub struct Secp256k1Ecdsa;
 
 impl SigningScheme for Secp256k1Ecdsa {
+    const ID: u8 = 2;
     const SIGNATURE_LEN: usize = 64;
     const IDENTITY_LEN: usize = COMPRESSED_PUBKEY_LEN;
     const INIT_PAYLOAD_LEN: usize = COMPRESSED_PUBKEY_LEN;

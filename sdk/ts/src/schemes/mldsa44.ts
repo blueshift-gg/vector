@@ -8,6 +8,7 @@ import {
   MLDSA44_PUBKEY_LEN,
   MLDSA44_SIGNATURE_LEN,
   MLDSA44_PREPARED_KEY_LEN,
+  PROGRAM_ID,
 } from "../scheme.js";
 import {
   createInitializeInstruction,
@@ -27,13 +28,13 @@ export const MLDSA44_SECRET_KEY_LEN = 2560;
 export const MLDSA44_EXPAND_STEPS = 2;
 /** Discriminator of the program's one extra instruction. */
 export const MLDSA44_EXPAND_DISCRIMINATOR = 6;
-/** `pk[1312] || pad[3] || prepared[20544]`. */
+/** `pk[1312] || pad[2] || prepared[20544]`. */
 export const MLDSA44_STORED_IDENTITY_LEN =
-  MLDSA44_PUBKEY_LEN + 3 + MLDSA44_PREPARED_KEY_LEN;
+  MLDSA44_PUBKEY_LEN + 2 + MLDSA44_PREPARED_KEY_LEN;
 
 /** ML-DSA-44 — the identity is the public key (1,312 bytes). */
 export const MLDSA44: Scheme = {
-  programId: new Address("5qR1iCC5hinGAR9iE8dp5xJyh3Wq1Cwsxa4BuBuJieMr"),
+  id: 4,
   signatureLen: MLDSA44_SIGNATURE_LEN,
   identityLen: MLDSA44_PUBKEY_LEN,
   storedIdentityLen: MLDSA44_STORED_IDENTITY_LEN,
@@ -89,12 +90,12 @@ export function createInitializeMlDsa44(
  * rows that fit. Permissionless and deterministic (the content is a
  * function of the stored key); fails once the account is complete.
  *
- * Accounts: `[vector_pda(writable)]`. Data: `[MLDSA44_EXPAND_DISCRIMINATOR]`.
+ * Accounts: `[vector_pda(writable)]`. Data: `[MLDSA44_EXPAND_DISCRIMINATOR, scheme]`.
  */
 export function createExpandMlDsa44(publicKey: Uint8Array): TransactionInstruction {
   const [vectorPda] = findVectorPda(MLDSA44, mldsa44Identity(publicKey));
   return new TransactionInstruction({
-    programId: MLDSA44.programId,
+    programId: PROGRAM_ID,
     keys: [{ pubkey: vectorPda, isSigner: false, isWritable: true }],
     data: Buffer.from([MLDSA44_EXPAND_DISCRIMINATOR]),
   });

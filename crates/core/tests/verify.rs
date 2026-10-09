@@ -215,7 +215,7 @@ fn tampering_any_committed_byte_fails_verification() {
 /// `sdk/ts/test/verify.test.ts` pins the SAME constant — if either
 /// implementation drifts (hashing, sysvar serialization, flag promotion,
 /// index footer), its half of the pin breaks.
-const PINNED_DIGEST_HEX: &str = "fb561cf20b01b2940889b1652f732ea100256e74f10675a3e169b1895b0a9e4f";
+const PINNED_DIGEST_HEX: &str = "8738e7628a5b6920f962f55a85edb651cad5d40ba7b7650a6f9c8c3282be7580";
 
 #[test]
 fn digest_matches_the_cross_language_pin() {
@@ -250,7 +250,7 @@ fn digest_matches_the_cross_language_pin() {
 /// `sdk/ts/test/verify.test.ts` pins the SAME constant — if either
 /// implementation drifts, its half of the pin breaks.
 const PINNED_REVOCATION_DIGEST_HEX: &str =
-    "53e3d3f9a7c687ed3dbfbbee0da290586acb5f4d64d690221134d29ce9a25aba";
+    "1a8c0ec847dc499887a920ef2c0646b3de331a2313476837f2b78c3701f5c9ec";
 
 #[test]
 fn revocation_round_trip_and_cross_language_pin() {

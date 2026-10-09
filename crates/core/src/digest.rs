@@ -8,8 +8,8 @@ use solana_address::Address;
 use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction, Instruction};
 use solana_instructions_sysvar::construct_instructions_data;
 
-use crate::instructions::create_advance_instruction;
-use crate::scheme::Scheme;
+use crate::instructions::create_multi_advance_instruction;
+use crate::scheme::{find_vector_pda, Scheme};
 
 /// Promote instruction-level account flags to message-level flags, matching
 /// what the Solana runtime writes into the live instructions sysvar: each
@@ -39,14 +39,14 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
     }
 }
 
-/// Compute the canonical `advance_vector_digest` the client must sign over,
-/// **exactly as the on-chain program recomputes it from the live
-/// instructions sysvar**. This is the mirror of `advanceVectorDigest` in
-/// `sdk/ts/src/digest.ts`.
+/// The message every signer of one `advance` approves, **exactly as the
+/// on-chain program recomputes it from the live instructions sysvar**: the
+/// SHA-256 of the sysvar with the signatures cut off the end of the advance's
+/// data. Mirrors `advanceMessage` in `sdk/ts/src/digest.ts`.
 ///
-/// `digest = SHA256(pre || nonce || identity || post)`, where `pre` and
-/// `post` span the entire instructions sysvar buffer minus the scheme's
-/// signature region inside the `advance` ix.
+/// `signers` are the advance's `(scheme, identity)` pairs, in order. The
+/// advance is inserted at `pre_instructions.len()`; a sibling `passthrough`
+/// is just another pre/post instruction, and the message covers all of it.
 ///
 /// Two runtime behaviours are reproduced before hashing:
 ///
@@ -54,19 +54,89 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
 ///    account's *message-level* `is_signer`/`is_writable` (OR-ed across all
 ///    top-level instructions), not the per-instruction flags. `fee_payer`,
 ///    when supplied, participates in this promotion only (it is always a
-///    writable signer at the message level): the digest is independent of
+///    writable signer at the message level): the message is independent of
 ///    the fee payer **unless** the fee payer's key appears among the
 ///    committed instructions' accounts, in which case promotion folds it in.
 /// 2. **Sysvar index footer** — the buffer's trailing two bytes hold the
 ///    runtime's `current_instruction_index`, i.e. the advance's own index
 ///    (`pre_instructions.len()`), not zero.
-///
-/// Callers pass the full ix layout via `pre_instructions` /
-/// `post_instructions` — the advance ix is inserted at `pre.len()`. Any
-/// sibling `passthrough` ix authorising CPIs under the vector PDA's signer
-/// seeds is just another pre/post ix; the on-chain `passthrough` handler
-/// scans the sysvar to pair with this `advance`, and the digest commits
-/// to all of it.
+pub fn advance_message(
+    signers: &[(&Scheme, &[u8])],
+    pre_instructions: &[Instruction],
+    post_instructions: &[Instruction],
+    fee_payer: Option<&Address>,
+) -> [u8; 32] {
+    let placeholders: Vec<Vec<u8>> = signers
+        .iter()
+        .map(|(scheme, _)| vec![0; scheme.signature_len])
+        .collect();
+    let signed: Vec<_> = signers
+        .iter()
+        .zip(&placeholders)
+        .map(|(&(scheme, identity), signature)| (scheme, identity, signature.as_slice()))
+        .collect();
+
+    let mut all: Vec<Instruction> = pre_instructions.to_vec();
+    let advance_index = all.len();
+    all.push(create_multi_advance_instruction(&signed));
+    all.extend_from_slice(post_instructions);
+    promote_to_message_flags(&mut all, fee_payer);
+
+    let borrowed: Vec<BorrowedInstruction> = all
+        .iter()
+        .map(|ix| BorrowedInstruction {
+            program_id: &ix.program_id,
+            accounts: ix
+                .accounts
+                .iter()
+                .map(|meta| BorrowedAccountMeta {
+                    pubkey: &meta.pubkey,
+                    is_signer: meta.is_signer,
+                    is_writable: meta.is_writable,
+                })
+                .collect(),
+            data: &ix.data,
+        })
+        .collect();
+    let mut buffer = construct_instructions_data(&borrowed);
+
+    // The runtime sets the footer to the executing instruction's index; the
+    // constructed buffer leaves it zeroed.
+    let len = buffer.len();
+    buffer[len - 2..].copy_from_slice(&(advance_index as u16).to_le_bytes());
+
+    // Header: num_instructions (u16) + one offset u16 per instruction.
+    // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
+    // u16 data_len + data. The signatures are the data after the
+    // discriminator.
+    let offset_pos = 2 + 2 * advance_index;
+    let offset = u16::from_le_bytes([buffer[offset_pos], buffer[offset_pos + 1]]) as usize;
+    let advance = &all[advance_index];
+    let data_start = offset + 2 + 33 * advance.accounts.len() + 32 + 2;
+    let signatures_start = data_start + 1;
+    let data_end = data_start + advance.data.len();
+
+    let mut hasher = Sha256::new();
+    hasher.update(&buffer[..signatures_start]);
+    hasher.update(&buffer[data_end..]);
+    hasher.finalize().into()
+}
+
+/// What one signer signs: `SHA256(message || nonce || vector)`, with
+/// `message` from [`advance_message`] and `vector` the signer's account
+/// address. The message is shared by every signer of the advance; the nonce
+/// and address make the digest this signer's own. It is also the account's
+/// next nonce. Mirrors `signerDigest` in `sdk/ts/src/digest.ts`.
+pub fn signer_digest(message: &[u8; 32], nonce: &[u8; 32], vector: &Address) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(message);
+    hasher.update(nonce);
+    hasher.update(vector);
+    hasher.finalize().into()
+}
+
+/// [`signer_digest`] for an advance with one signer. Mirrors
+/// `advanceVectorDigest` in `sdk/ts/src/digest.ts`.
 pub fn advance_vector_digest_with_fee_payer(
     scheme: &Scheme,
     nonce: &[u8; 32],
@@ -75,20 +145,13 @@ pub fn advance_vector_digest_with_fee_payer(
     post_instructions: &[Instruction],
     fee_payer: Option<&Address>,
 ) -> [u8; 32] {
-    let sig_len = scheme.signature_len;
-    let placeholder = vec![0u8; sig_len];
-    let advance_ix = create_advance_instruction(scheme, identity, &placeholder);
-
-    let mut all_owned: Vec<Instruction> =
-        Vec::with_capacity(pre_instructions.len() + 1 + post_instructions.len());
-    all_owned.extend(pre_instructions.iter().cloned());
-    let advance_index = all_owned.len();
-    all_owned.push(advance_ix);
-    all_owned.extend(post_instructions.iter().cloned());
-
-    promote_to_message_flags(&mut all_owned, fee_payer);
-
-    vector_digest(advance_index, sig_len, nonce, identity, &all_owned)
+    let message = advance_message(
+        &[(scheme, identity)],
+        pre_instructions,
+        post_instructions,
+        fee_payer,
+    );
+    signer_digest(&message, nonce, &find_vector_pda(scheme, identity).0)
 }
 
 /// [`advance_vector_digest_with_fee_payer`] for a fee payer that is not among
@@ -126,71 +189,4 @@ pub fn advance_vector_digest(
 /// verify leaves no headroom under the 200k default).
 pub fn revocation_digest(scheme: &Scheme, nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {
     advance_vector_digest(scheme, nonce, identity, &[], &[])
-}
-
-/// Shared digest computation for any vector instruction whose data starts
-/// with `[discriminator (1), signature (sig_len), ...]`. Hashes
-/// `buffer[..sig_start] || nonce || identity || buffer[sig_end..]` over the
-/// reconstructed sysvar buffer with its `current_instruction_index` footer
-/// patched to `target_index` (what the runtime stores before executing the
-/// target instruction — `construct_instructions_data` leaves it zeroed).
-fn vector_digest(
-    target_index: usize,
-    sig_len: usize,
-    nonce: &[u8; 32],
-    identity: &[u8],
-    all_ixs: &[Instruction],
-) -> [u8; 32] {
-    let borrowed_ixs: Vec<BorrowedInstruction> = all_ixs
-        .iter()
-        .map(|ix| {
-            let accounts = ix
-                .accounts
-                .iter()
-                .map(|meta| BorrowedAccountMeta {
-                    pubkey: &meta.pubkey,
-                    is_signer: meta.is_signer,
-                    is_writable: meta.is_writable,
-                })
-                .collect();
-            BorrowedInstruction {
-                program_id: &ix.program_id,
-                accounts,
-                data: &ix.data,
-            }
-        })
-        .collect();
-    let mut buffer = construct_instructions_data(&borrowed_ixs);
-
-    // Patch the trailing `current_instruction_index` footer to the target's
-    // index. The on-chain program hashes the live sysvar, whose footer the
-    // runtime sets to the executing instruction's index; the constructed
-    // buffer leaves it zeroed, which only matches when the advance is the
-    // transaction's first instruction.
-    let len = buffer.len();
-    buffer[len - 2..].copy_from_slice(&(target_index as u16).to_le_bytes());
-
-    // Header: num_instructions (u16) + one offset u16 per instruction.
-    let ix_offset_pos = 2 + 2 * target_index;
-    let ix_offset = u16::from_le_bytes(
-        buffer[ix_offset_pos..ix_offset_pos + 2]
-            .try_into()
-            .expect("vector buffer header truncated"),
-    ) as usize;
-
-    // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-    // u16 data_len + data. Signature sits right after the 1-byte
-    // discriminator.
-    let num_accounts = all_ixs[target_index].accounts.len();
-    let sig_start = ix_offset + 2 + 33 * num_accounts + 32 + 2 + 1;
-    let sig_end = sig_start + sig_len;
-
-    debug_assert!(sig_end + 2 <= buffer.len());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&buffer[..sig_start]);
-    hasher.update(nonce);
-    hasher.update(identity);
-    hasher.update(&buffer[sig_end..]);
-    hasher.finalize().into()
 }

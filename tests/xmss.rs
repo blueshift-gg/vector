@@ -8,7 +8,7 @@ use solana_winternitz::xmss;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_initialize_xmss,
     create_passthrough_instruction, create_rotate_subinstruction, create_withdraw_subinstruction,
-    find_vector_pda, xmss_identity, XMSS,
+    find_vector_pda, xmss_identity, PROGRAM_ID, XMSS,
 };
 
 use crate::common::{
@@ -17,7 +17,7 @@ use crate::common::{
 
 #[test]
 fn initialize_checks_key_length_and_pda() {
-    let mollusk = mollusk(&XMSS);
+    let mollusk = mollusk();
     let public_key = core::array::from_fn(|i| i as u8);
     let identity = xmss_identity(&public_key);
     let (system, system_account) = keyed_account_for_system_program();
@@ -26,7 +26,7 @@ fn initialize_checks_key_length_and_pda() {
     // Shared with sdk/ts/test/xmss.test.ts.
     assert_eq!(
         vector.to_string(),
-        "FVsCnwNqcdFb2EU6B6rK3UsJEQEDZPTgZoqvT1LrJYZ5"
+        "Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y"
     );
     assert_eq!(bump, 255);
     let receiver = Address::new_from_array([9; 32]);
@@ -36,8 +36,8 @@ fn initialize_checks_key_length_and_pda() {
     assert_eq!(
         advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough]),
         [
-            43, 149, 73, 28, 183, 157, 6, 233, 213, 240, 56, 226, 183, 85, 55, 93, 101, 130, 199,
-            88, 57, 188, 61, 104, 26, 251, 177, 206, 209, 175, 32, 218
+            141, 101, 255, 68, 220, 168, 160, 116, 212, 247, 3, 49, 76, 152, 181, 55, 78, 143, 73,
+            119, 119, 54, 130, 208, 176, 130, 39, 168, 49, 4, 3, 54
         ],
     );
     let accounts = [
@@ -52,7 +52,7 @@ fn initialize_checks_key_length_and_pda() {
         &[
             Check::success(),
             Check::account(&vector)
-                .owner(&XMSS.program_id)
+                .owner(&PROGRAM_ID)
                 .space(XMSS.account_len())
                 .build(),
         ],
@@ -64,13 +64,13 @@ fn initialize_checks_key_length_and_pda() {
         .unwrap()
         .1
         .data;
-    assert_eq!(stored[32], bump);
-    assert_eq!(&stored[33..65], &identity);
-    assert_eq!(&stored[65..], &public_key);
+    assert_eq!(stored[32..34], [XMSS.id, bump]);
+    assert_eq!(&stored[34..66], &identity);
+    assert_eq!(&stored[66..], &public_key);
 
     for length in [40, 42] {
         let mut malformed = initialize.clone();
-        malformed.data.resize(1 + length, 0);
+        malformed.data.resize(2 + length, 0);
         mollusk.process_and_validate_instruction(
             &malformed,
             &accounts,
@@ -99,7 +99,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
     let public_key = signer.verifying_key().to_bytes();
     let identity = xmss_identity(&public_key);
     let stored = [identity.as_slice(), public_key.as_slice()].concat();
-    let mollusk = mollusk(&XMSS);
+    let mollusk = mollusk();
     let (vector, bump) = find_vector_pda(&XMSS, &identity);
     let account = build_vector_account(
         NONCE,
@@ -139,7 +139,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
         &[(vector, advanced)],
     );
 
-    for offset in [0, 33, account.data.len() - 1] {
+    for offset in [0, 66, account.data.len() - 1] {
         let mut changed = account.clone();
         changed.data[offset] ^= 1;
         mollusk.process_and_validate_instruction_chain(
@@ -193,7 +193,7 @@ fn advance_binds_and_authorizes_withdrawal() {
     // Abandoned authorizations spend leaves even when no transaction lands.
     signer.sign(&[0; 32]).unwrap();
 
-    let mollusk = mollusk(&XMSS);
+    let mollusk = mollusk();
     let (vector, bump) = find_vector_pda(&XMSS, &identity);
     let rent = mollusk.sysvars.rent.minimum_balance(XMSS.account_len());
     let account = build_vector_account(NONCE, &XMSS, bump, rent + 5_000_000, &stored);

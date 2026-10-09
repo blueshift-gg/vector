@@ -6,8 +6,9 @@ pub mod initialize;
 pub mod passthrough;
 pub mod withdraw;
 
-/// Discriminator-tagged instructions handled by every Vector program. The set
-/// is identical across schemes.
+/// Discriminator-tagged instructions that act on one account of one scheme.
+/// `Advance` (`1`) is not here: it takes several accounts of several schemes,
+/// so the program routes it itself.
 ///
 /// `Close` and `Withdraw` are reachable as top-level instructions but their
 /// handlers gate on `vector.is_signer()`, which only holds when re-entered as
@@ -23,11 +24,6 @@ pub enum VectorInstruction {
     /// nonce on-chain, and write the header + the scheme's identity prefix.
     /// Every scheme completes registration in this one call.
     Initialize = 0,
-    /// Verify the advance signature and install the digest as the next
-    /// nonce. Does NOT execute any CPI — pair with `Passthrough` in the
-    /// same tx for that. A standalone `Advance` is valid (just bumps the
-    /// nonce).
-    Advance = 1,
     Close = 2,
     Withdraw = 3,
     /// Replay a batch of CPIs under the vector PDA's signer seeds. Must
@@ -43,7 +39,6 @@ impl TryFrom<&u8> for VectorInstruction {
     fn try_from(value: &u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Initialize),
-            1 => Ok(Self::Advance),
             2 => Ok(Self::Close),
             3 => Ok(Self::Withdraw),
             4 => Ok(Self::Passthrough),

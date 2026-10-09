@@ -6,7 +6,7 @@ use solana_falcon512::{
 use solana_nostd_sha256::hash;
 use vector_common::{IdentitySeed, SigningScheme, VectorAccount};
 
-/// Falcon's on-chain identity layout: `sha256(wire_pubkey)[32] || pad[1] ||
+/// Falcon's on-chain identity layout: `sha256(wire_pubkey)[32] ||
 /// prepared_pubkey[1024]`.
 ///
 /// * The first 32 bytes are the PDA seed and digest input — derivable
@@ -14,12 +14,10 @@ use vector_common::{IdentitySeed, SigningScheme, VectorAccount};
 /// * The 1024-byte prepared pubkey lets `verify` skip the per-call
 ///   NTT/preparation; it must be read zero-copy (a 1024-byte stack copy
 ///   overflows the BPF frame) so it has to sit at a 2-byte-aligned account
-///   offset. The 33-byte account header makes offset `33 + 32` odd, so a
-///   one-byte pad realigns `prepared` to an even offset. The
+///   offset. After the 34-byte account header and the hash it does. The
 ///   `PREPARED_ALIGNED` assertion below pins this invariant.
 const HASH_LEN: usize = 32;
-const PAD_LEN: usize = 1;
-const PREPARED_OFFSET: usize = HASH_LEN + PAD_LEN;
+const PREPARED_OFFSET: usize = HASH_LEN;
 const FALCON_IDENTITY_LEN: usize = PREPARED_OFFSET + FALCON_512_PREPARED_PUBKEY_LEN;
 
 /// `prepared` must start at a 2-byte-aligned account offset for the zero-copy
@@ -33,6 +31,7 @@ const PREPARED_ALIGNED: () =
 pub struct Falcon512;
 
 impl SigningScheme for Falcon512 {
+    const ID: u8 = 3;
     const SIGNATURE_LEN: usize = FALCON_512_SIGNATURE_LEN;
     const IDENTITY_LEN: usize = FALCON_IDENTITY_LEN;
     const INIT_PAYLOAD_LEN: usize = FALCON_512_PUBKEY_LEN;
@@ -44,10 +43,9 @@ impl SigningScheme for Falcon512 {
         let prepared = pubkey
             .try_prepare_pubkey()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        // Layout: hash[..32] || pad[1] (zero) || prepared[33..].
+        // Layout: hash[..32] || prepared[32..].
         let wire_hash = hash(payload);
         identity_out[..HASH_LEN].copy_from_slice(&wire_hash);
-        identity_out[HASH_LEN..PREPARED_OFFSET].fill(0);
         identity_out[PREPARED_OFFSET..].copy_from_slice(prepared.as_bytes());
         Ok(())
     }
@@ -66,18 +64,10 @@ impl SigningScheme for Falcon512 {
         IdentitySeed::copy_from(&hash(payload))
     }
 
-    /// The 897-byte wire pubkey can't be cheaply rebuilt on-chain, and the
-    /// 1024-byte prepared form can't be reproduced off-chain — so the digest
-    /// folds in `sha256(wire_pubkey)`, which `populate_identity` stored as
-    /// the first 32 bytes and the client computes from its wire pubkey.
-    fn digest_identity(identity: &[u8]) -> &[u8] {
-        &identity[..HASH_LEN]
-    }
-
     fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         // Zero-copy borrow of the prepared pubkey straight out of the
-        // account (a 1024-byte stack copy would overflow the BPF frame); the
-        // 1-byte pad guarantees a 2-byte-aligned offset.
+        // account (a 1024-byte stack copy would overflow the BPF frame);
+        // `PREPARED_ALIGNED` guarantees a 2-byte-aligned offset.
         let prepared = Falcon512PreparedPubkey::try_from_slice(&identity[PREPARED_OFFSET..])
             .map_err(|_| ProgramError::InvalidAccountData)?;
         let sig = Falcon512Signature::try_from_slice(signature)

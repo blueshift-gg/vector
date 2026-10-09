@@ -17,7 +17,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey. */
 export const SECP256K1: Scheme = {
-  programId: new Address("9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd"),
+  id: 2,
   signatureLen: 64,
   identityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
   storedIdentityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,

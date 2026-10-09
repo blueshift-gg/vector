@@ -18,13 +18,13 @@ test("XMSS account and rotation digest match Rust", () => {
   const identity = xmssIdentity(publicKey);
   const receiver = new Address(new Uint8Array(32).fill(9));
   const [pda, bump] = findVectorPda(XMSS, identity);
-  expect(pda.toString()).toBe("FVsCnwNqcdFb2EU6B6rK3UsJEQEDZPTgZoqvT1LrJYZ5");
+  expect(pda.toString()).toBe("Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y");
   expect(bump).toBe(255);
-  expect(vectorAccountLen(XMSS)).toBe(106);
+  expect(vectorAccountLen(XMSS)).toBe(107);
 
   const initialize = createInitializeXmss(receiver, publicKey);
   expect(initialize.keys[1].pubkey.toString()).toBe(pda.toString());
-  expect(Array.from(initialize.data)).toEqual([0, ...publicKey]);
+  expect(Array.from(initialize.data)).toEqual([0, XMSS.id, ...publicKey]);
   for (const length of [40, 42]) {
     expect(() => createInitializeXmss(receiver, new Uint8Array(length))).toThrow();
   }
@@ -44,6 +44,6 @@ test("XMSS account and rotation digest match Rust", () => {
     XMSS, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "2b95491cb79d06e9d5f038e2b755375d6582c75839bc3d681afbb1ced1af20da"
+    "8d65ff44dca8a074d4f703314c98b5374e8f4977773682d0b08227a831040336"
   );
 });

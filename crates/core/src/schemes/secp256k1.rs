@@ -2,7 +2,7 @@
 //! pubkey, verified via standard ECDSA (no envelope, no recovery byte).
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as Secp256k1SigningKey};
-use solana_address::{address, Address};
+use solana_address::Address;
 use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest_with_fee_payer;
@@ -13,7 +13,7 @@ pub const SECP256K1_COMPRESSED_PUBKEY_LEN: usize = 33;
 
 /// Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey.
 pub const SECP256K1: Scheme = Scheme {
-    program_id: address!("9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd"),
+    id: 2,
     signature_len: 64,
     identity_len: SECP256K1_COMPRESSED_PUBKEY_LEN,
     stored_identity_len: SECP256K1_COMPRESSED_PUBKEY_LEN,

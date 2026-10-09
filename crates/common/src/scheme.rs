@@ -11,6 +11,11 @@ use solana_nostd_sha256::hash;
 
 /// Contract every signing scheme satisfies. One `impl` per program.
 pub trait SigningScheme {
+    /// Identifies the scheme: the second header field of every account and
+    /// a PDA seed. The program picks the scheme for an account from that
+    /// header field.
+    const ID: u8;
+
     /// Wire signature length carried in the `advance` instruction data.
     const SIGNATURE_LEN: usize;
 
@@ -31,18 +36,6 @@ pub trait SigningScheme {
     /// `identity_out` (up to `IDENTITY_LEN`, capped by the initial allocation).
     /// Larger identities must support completing preparation after account growth.
     fn populate_identity(payload: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError>;
-
-    /// The slice of the stored identity folded into the advance digest.
-    ///
-    /// Must be reproducible off-chain by the signer. Default: the whole
-    /// identity — correct for schemes that store exactly the signer's pubkey
-    /// (Ed25519, EIP-191, secp256k1-ECDSA). Schemes that store an
-    /// expanded/prepared form the client can't cheaply recompute (Falcon)
-    /// override to return the stable client-derivable prefix, e.g.
-    /// `sha256(wire_pubkey)`.
-    fn digest_identity(identity: &[u8]) -> &[u8] {
-        identity
-    }
 
     /// PDA seed derived from the stored identity — used at advance time.
     /// Default: the identity itself when `<= 32` bytes, else `sha256`.

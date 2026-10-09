@@ -20,7 +20,7 @@ use crate::state::VectorAccount;
 /// 0. `[signer, writable]` vector PDA  (signer flag promoted by Passthrough)
 /// 1. `[writable]`         receiver
 pub fn process<S: SigningScheme>(
-    program_id: &Address,
+    _program_id: &Address,
     accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
@@ -40,9 +40,6 @@ pub fn process<S: SigningScheme>(
         .map_err(|_| ProgramError::InvalidInstructionData)?;
     let lamports = u64::from_le_bytes(amount_bytes);
 
-    if !vector.owned_by(program_id) {
-        return Err(ProgramError::InvalidAccountOwner);
-    }
     // Account length is fixed for a single-scheme program — no header read
     // needed to size the rent floor.
     let rent_min = Rent::get()?.try_minimum_balance(VectorAccount::account_len::<S>())?;

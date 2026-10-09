@@ -1,0 +1,279 @@
+//! Several signers in one `Advance`. Each signs the same message: the
+//! transaction with the signatures cut out.
+
+use ed25519_dalek::{Signer, SigningKey};
+use k256::ecdsa::{
+    signature::hazmat::PrehashSigner, Signature as Secp256k1Signature,
+    SigningKey as Secp256k1SigningKey,
+};
+use mollusk_svm::{result::types::TransactionProgramResult, Mollusk};
+use solana_account::Account;
+use solana_address::Address;
+use solana_instruction::Instruction;
+use solana_program_error::ProgramError;
+use vector_core::{
+    advance_message, create_multi_advance_instruction, create_passthrough_instruction,
+    create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
+    sign_advance_instruction_ed25519, signer_digest, Scheme, ED25519, SECP256K1,
+};
+
+use crate::common::{
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, NONCE,
+    SECP256K1_PRIVKEY,
+};
+
+const FUNDS: u64 = 5_000_000_000;
+
+/// An Ed25519 and a secp256k1 account, and somewhere to send to.
+struct World {
+    mollusk: Mollusk,
+    alice: SigningKey,
+    bob: Secp256k1SigningKey,
+    receiver: Address,
+    accounts: Vec<(Address, Account)>,
+}
+
+impl World {
+    fn new() -> Self {
+        let mollusk = mollusk();
+        let alice = SigningKey::from_bytes(&[1; 32]);
+        let bob = Secp256k1SigningKey::from_bytes(&SECP256K1_PRIVKEY.into()).unwrap();
+        let receiver = Address::new_unique();
+        let mut accounts = vec![(receiver, Account::new(1_000_000, 0, &Address::default()))];
+        for (scheme, identity) in [
+            (&ED25519, ed25519_pubkey(&alice).to_vec()),
+            (&SECP256K1, secp256k1_compressed_pubkey(&bob).to_vec()),
+        ] {
+            let (vector, bump) = find_vector_pda(scheme, &identity);
+            accounts.push((
+                vector,
+                build_vector_account(NONCE, scheme, bump, FUNDS, &identity),
+            ));
+        }
+        Self {
+            mollusk,
+            alice,
+            bob,
+            receiver,
+            accounts,
+        }
+    }
+
+    /// A `Passthrough` withdrawing `lamports` from the account to the receiver.
+    fn withdraw(&self, scheme: &Scheme, identity: &[u8], lamports: u64) -> Instruction {
+        let withdraw = create_withdraw_subinstruction(scheme, identity, &self.receiver, lamports);
+        create_passthrough_instruction(scheme, identity, &[withdraw])
+    }
+
+    /// Alice and Bob sign one `Advance`; each then withdraws from their own
+    /// account. Returns the transaction and their two digests.
+    fn alice_and_bob(&self) -> (Vec<Instruction>, [u8; 32], [u8; 32]) {
+        let alice = ed25519_pubkey(&self.alice);
+        let bob = secp256k1_compressed_pubkey(&self.bob);
+        let post = [
+            self.withdraw(&ED25519, &alice, 1_000_000_000),
+            self.withdraw(&SECP256K1, &bob, 2_000_000_000),
+        ];
+        let message = advance_message(&[(&ED25519, &alice), (&SECP256K1, &bob)], &[], &post, None);
+        let alice_digest = signer_digest(&message, &NONCE, &find_vector_pda(&ED25519, &alice).0);
+        let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0);
+        let alice_signature = self.alice.sign(&alice_digest).to_bytes();
+        let bob_signature: Secp256k1Signature = self.bob.sign_prehash(&bob_digest).unwrap();
+        let advance = create_multi_advance_instruction(&[
+            (&ED25519, &alice, &alice_signature),
+            (&SECP256K1, &bob, &bob_signature.to_bytes()),
+        ]);
+        let [first, second] = post;
+        (vec![advance, first, second], alice_digest, bob_digest)
+    }
+
+    fn run(
+        &self,
+        transaction: &[Instruction],
+        accounts: &[(Address, Account)],
+    ) -> (TransactionProgramResult, Vec<(Address, Account)>) {
+        let result = process_transaction(
+            &self.mollusk,
+            &transaction.iter().collect::<Vec<_>>(),
+            accounts,
+            &[],
+        );
+        (result.program_result, result.resulting_accounts)
+    }
+
+    /// A changed transaction must fail and leave every account as it was.
+    fn assert_rejected(&self, transaction: &[Instruction], what: &str) {
+        // An address the change introduced still needs an account to load.
+        let mut accounts = self.accounts.clone();
+        for meta in transaction.iter().flat_map(|ix| &ix.accounts) {
+            let known = accounts.iter().any(|(key, _)| *key == meta.pubkey);
+            let builtin = [vector_core::INSTRUCTIONS_SYSVAR_ID, vector_core::PROGRAM_ID];
+            if !known && !builtin.contains(&meta.pubkey) {
+                accounts.push((meta.pubkey, Account::default()));
+            }
+        }
+        let (result, after) = self.run(transaction, &accounts);
+        assert_ne!(result, TransactionProgramResult::Success, "{what}");
+        assert_eq!(after, accounts, "{what}");
+    }
+}
+
+#[test]
+fn two_schemes_sign_one_advance() {
+    let world = World::new();
+    let (transaction, alice_digest, bob_digest) = world.alice_and_bob();
+    let (result, after) = world.run(&transaction, &world.accounts);
+    assert_eq!(result, TransactionProgramResult::Success);
+
+    let account = |key: &Address| &after.iter().find(|(k, _)| k == key).unwrap().1;
+    let alice = ed25519_pubkey(&world.alice);
+    let bob = secp256k1_compressed_pubkey(&world.bob);
+    let (alice_vector, alice_bump) = find_vector_pda(&ED25519, &alice);
+    let (bob_vector, bob_bump) = find_vector_pda(&SECP256K1, &bob);
+    // Each account's next nonce is its own digest of the shared message.
+    assert_ne!(alice_digest, bob_digest);
+    assert_eq!(
+        account(&alice_vector).data,
+        expected_advanced_data(alice_digest, &ED25519, alice_bump, &alice)
+    );
+    assert_eq!(
+        account(&bob_vector).data,
+        expected_advanced_data(bob_digest, &SECP256K1, bob_bump, &bob)
+    );
+    assert_eq!(account(&alice_vector).lamports, FUNDS - 1_000_000_000);
+    assert_eq!(account(&bob_vector).lamports, FUNDS - 2_000_000_000);
+    assert_eq!(account(&world.receiver).lamports, 1_000_000 + 3_000_000_000);
+
+    // Both nonces moved, so the same transaction cannot land twice.
+    let (replay, _) = world.run(&transaction, &after);
+    assert_eq!(
+        replay,
+        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+    );
+}
+
+/// The message covers every byte that is not a signature, and a signature
+/// only verifies as it is. So no single change to the transaction survives.
+#[test]
+fn every_change_to_the_transaction_is_rejected() {
+    let world = World::new();
+    let (transaction, ..) = world.alice_and_bob();
+    let stranger = Address::new_unique();
+
+    for i in 0..transaction.len() {
+        for byte in 0..transaction[i].data.len() {
+            let mut changed = transaction.clone();
+            changed[i].data[byte] ^= 1;
+            world.assert_rejected(&changed, &format!("instruction {i}, data byte {byte}"));
+        }
+        for extra in [true, false] {
+            let mut changed = transaction.clone();
+            if extra {
+                changed[i].data.push(0);
+            } else {
+                changed[i].data.pop();
+            }
+            world.assert_rejected(&changed, &format!("instruction {i}, data length"));
+        }
+        for account in 0..transaction[i].accounts.len() {
+            let what = format!("instruction {i}, account {account}");
+            let mut changed = transaction.clone();
+            changed[i].accounts[account].pubkey = stranger;
+            world.assert_rejected(&changed, &what);
+            // A transaction has one writable flag per address, not per
+            // instruction, and the runtime ignores it for sysvars and programs.
+            let key = transaction[i].accounts[account].pubkey;
+            if ![vector_core::INSTRUCTIONS_SYSVAR_ID, vector_core::PROGRAM_ID].contains(&key) {
+                let mut changed = transaction.clone();
+                for meta in changed.iter_mut().flat_map(|ix| &mut ix.accounts) {
+                    meta.is_writable ^= meta.pubkey == key;
+                }
+                world.assert_rejected(&changed, &what);
+            }
+            let mut changed = transaction.clone();
+            changed[i].accounts.remove(account);
+            world.assert_rejected(&changed, &what);
+        }
+        let mut changed = transaction.clone();
+        changed.remove(i);
+        world.assert_rejected(&changed, &format!("without instruction {i}"));
+    }
+}
+
+#[test]
+fn advance_errors() {
+    let world = World::new();
+    let (transaction, ..) = world.alice_and_bob();
+    let run = |advance: Instruction, accounts: &[(Address, Account)]| {
+        let transaction = [advance, transaction[1].clone(), transaction[2].clone()];
+        world.run(&transaction, accounts).0
+    };
+    let failure = |error| TransactionProgramResult::Failure(0, error);
+
+    // A signature that is not the account's.
+    let mut wrong_signature = transaction[0].clone();
+    *wrong_signature.data.last_mut().unwrap() ^= 1;
+    assert_eq!(
+        run(wrong_signature, &world.accounts),
+        failure(ProgramError::MissingRequiredSignature)
+    );
+
+    // No account to verify.
+    let mut no_signers = transaction[0].clone();
+    no_signers.accounts.drain(..2);
+    assert_eq!(
+        run(no_signers, &world.accounts),
+        failure(ProgramError::NotEnoughAccountKeys)
+    );
+
+    // The last account is not the instructions sysvar.
+    let mut no_sysvar = transaction[0].clone();
+    no_sysvar.accounts.pop();
+    assert_eq!(
+        run(no_sysvar, &world.accounts),
+        failure(ProgramError::UnsupportedSysvar)
+    );
+
+    // An account the program does not own.
+    let mut foreign = world.accounts.clone();
+    foreign[1].1.owner = Address::new_unique();
+    assert_eq!(
+        run(transaction[0].clone(), &foreign),
+        failure(ProgramError::InvalidAccountOwner)
+    );
+
+    // Called from inside another instruction, where the instruction list is
+    // not the caller's.
+    let alice = ed25519_pubkey(&world.alice);
+    let outer = create_passthrough_instruction(&ED25519, &alice, &[transaction[0].clone()]);
+    let advance = sign_advance_instruction_ed25519(
+        &world.alice,
+        &NONCE,
+        &[],
+        std::slice::from_ref(&outer),
+        None,
+    );
+    assert_eq!(
+        world.run(&[advance, outer], &world.accounts).0,
+        TransactionProgramResult::Failure(1, ProgramError::IncorrectAuthority)
+    );
+}
+
+/// A `Passthrough` needs an earlier `Advance` that lists its account.
+#[test]
+fn passthrough_without_its_account_in_an_advance_is_rejected() {
+    let world = World::new();
+    let bob = secp256k1_compressed_pubkey(&world.bob);
+    let take_from_bob = world.withdraw(&SECP256K1, &bob, 2_000_000_000);
+    let advance = sign_advance_instruction_ed25519(
+        &world.alice,
+        &NONCE,
+        &[],
+        std::slice::from_ref(&take_from_bob),
+        None,
+    );
+    assert_eq!(
+        world.run(&[advance, take_from_bob], &world.accounts).0,
+        TransactionProgramResult::Failure(1, ProgramError::MissingRequiredSignature)
+    );
+}

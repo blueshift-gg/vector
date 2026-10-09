@@ -183,7 +183,7 @@ describe("sign → verify round trips", () => {
     // Registration is initialize plus two expands on the same PDA.
     const register = createRegisterMlDsa44Instructions(addr(0x33), keypair.publicKey);
     expect(register.length).toBe(3);
-    expect(register[0].data.length).toBe(1 + MLDSA44.identityLen);
+    expect(register[0].data.length).toBe(2 + MLDSA44.identityLen);
     for (const expand of register.slice(1)) {
       expect(Array.from(expand.data)).toEqual([MLDSA44_EXPAND_DISCRIMINATOR]);
       expect(expand.keys.length).toBe(1);
@@ -194,7 +194,7 @@ describe("sign → verify round trips", () => {
     // Shared with tests/mldsa44.rs: identity, PDA and signature carve-out.
     const publicKey = new Uint8Array(1312).fill(0x44);
     const [pda, bump] = findVectorPda(MLDSA44, publicKey);
-    expect(pda.toString()).toBe("FNjvHupTZp9ZRo53mmh9tV3vv3mADxU5rKo9ataMWUj2");
+    expect(pda.toString()).toBe("BFQ39c9TJoj2JeVUNse2GEtpa2za4VR8TPq3mVNaCQGo");
     expect(bump).toBe(255);
     const passthrough = createPassthroughInstruction(MLDSA44, publicKey, [
       createWithdrawSubinstruction(MLDSA44, publicKey, addr(9), 1234n),
@@ -203,7 +203,7 @@ describe("sign → verify round trips", () => {
       MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
     );
     expect(Buffer.from(pinned).toString("hex")).toBe(
-      "d6cb91bb616d7e3e4aabb371c3b52dd1bf23c759171ffa555c631856591d65e8"
+      "b00b7ab4073f5ff2b4b85d3cbca8c4ba00833a8dcac09c25d7b94b2dbd31edb1"
     );
   });
 });
@@ -296,7 +296,7 @@ describe("eip191 recovery byte", () => {
  * index footer), its half of the pin breaks.
  */
 const PINNED_DIGEST_HEX =
-  "fb561cf20b01b2940889b1652f732ea100256e74f10675a3e169b1895b0a9e4f";
+  "8738e7628a5b6920f962f55a85edb651cad5d40ba7b7650a6f9c8c3282be7580";
 
 describe("cross-language digest pin", () => {
   test("digest matches the constant pinned by the Rust suite", () => {
@@ -323,7 +323,7 @@ describe("cross-language digest pin", () => {
  * implementation drifts, its half of the pin breaks.
  */
 const PINNED_REVOCATION_DIGEST_HEX =
-  "53e3d3f9a7c687ed3dbfbbee0da290586acb5f4d64d690221134d29ce9a25aba";
+  "1a8c0ec847dc499887a920ef2c0646b3de331a2313476837f2b78c3701f5c9ec";
 
 describe("revocation (inert advance)", () => {
   test("round trip + cross-language pin", () => {

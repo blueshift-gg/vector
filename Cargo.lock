@@ -3429,6 +3429,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
+name = "vector"
+version = "0.1.0"
+dependencies = [
+ "brine-ed25519",
+ "pinocchio",
+ "solana-address 2.9.0",
+ "solana-falcon512",
+ "solana-ml-dsa",
+ "solana-nostd-keccak",
+ "solana-nostd-sha256",
+ "solana-secp256k1",
+ "solana-secp256k1-ecdsa",
+ "solana-winternitz",
+ "vector-common",
+]
+
+[[package]]
 name = "vector-common"
 version = "0.1.0"
 dependencies = [
@@ -3457,58 +3474,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vector-ed25519"
-version = "0.1.0"
-dependencies = [
- "brine-ed25519",
- "pinocchio",
- "solana-address 2.9.0",
- "vector-common",
-]
-
-[[package]]
-name = "vector-eip191"
-version = "0.1.0"
-dependencies = [
- "pinocchio",
- "solana-address 2.9.0",
- "solana-nostd-keccak",
- "vector-common",
-]
-
-[[package]]
-name = "vector-falcon512"
-version = "0.1.0"
-dependencies = [
- "pinocchio",
- "solana-address 2.9.0",
- "solana-falcon512",
- "solana-nostd-sha256",
- "vector-common",
-]
-
-[[package]]
-name = "vector-mldsa44"
-version = "0.1.0"
-dependencies = [
- "pinocchio",
- "solana-address 2.9.0",
- "solana-ml-dsa",
- "vector-common",
-]
-
-[[package]]
-name = "vector-secp256k1"
-version = "0.1.0"
-dependencies = [
- "pinocchio",
- "solana-address 2.9.0",
- "solana-secp256k1",
- "solana-secp256k1-ecdsa",
- "vector-common",
-]
-
-[[package]]
 name = "vector-tests"
 version = "0.1.0"
 dependencies = [
@@ -3532,26 +3497,6 @@ dependencies = [
  "spl-token-interface",
  "tempfile",
  "vector-core",
-]
-
-[[package]]
-name = "vector-winternitz"
-version = "0.1.0"
-dependencies = [
- "pinocchio",
- "solana-address 2.9.0",
- "solana-winternitz",
- "vector-common",
-]
-
-[[package]]
-name = "vector-xmss"
-version = "0.1.0"
-dependencies = [
- "pinocchio",
- "solana-address 2.9.0",
- "solana-winternitz",
- "vector-common",
 ]
 
 [[package]]

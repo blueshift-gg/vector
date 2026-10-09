@@ -15,15 +15,14 @@ use crate::{
     state::{signer_seeds, VectorAccount},
 };
 
-/// Discriminator the sysvar scan looks for. Kept in sync with
-/// [`VectorInstruction::Advance`](super::VectorInstruction).
-const ADVANCE_DISCRIMINATOR: u8 = 1;
+/// `Advance`: the program routes to it, and the sysvar scan looks for it.
+pub const ADVANCE_DISCRIMINATOR: u8 = 1;
 
 /// Authorize a batch of CPIs against the vector PDA's signer seeds, gated
 /// by a sibling `advance` ix earlier in the same transaction.
 ///
 /// The authorization model: `advance`'s signature commits (via the digest)
-/// to the *entire* instructions sysvar buffer minus its own sig bytes —
+/// to the *entire* instructions sysvar buffer minus the signatures —
 /// which transitively commits to this `passthrough` ix's data and account
 /// layout. So if `advance` ran successfully earlier in the tx (atomicity
 /// ensures it did, or the tx aborted), the caller signed off on this
@@ -60,9 +59,6 @@ pub fn process<S: SigningScheme>(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    if !vector.owned_by(program_id) {
-        return Err(ProgramError::InvalidAccountOwner);
-    }
     if instructions_sysvar.address() != &INSTRUCTIONS_ID {
         return Err(ProgramError::UnsupportedSysvar);
     }
@@ -74,7 +70,7 @@ pub fn process<S: SigningScheme>(
         if header_and_identity.len() < VectorAccount::HEADER_LEN + S::IDENTITY_LEN {
             return Err(ProgramError::AccountDataTooSmall);
         }
-        let bump = header_and_identity[32];
+        let bump = header_and_identity[33];
         let identity = &header_and_identity
             [VectorAccount::HEADER_LEN..VectorAccount::HEADER_LEN + S::IDENTITY_LEN];
         (S::pda_seed_from_identity(identity), bump)
@@ -88,8 +84,8 @@ pub fn process<S: SigningScheme>(
     // execute").
     verify_prior_advance(instructions_sysvar, program_id, &pda_address)?;
 
-    let bump_arr = [bump];
-    let seeds = signer_seeds(&identity_seed, &bump_arr);
+    let (scheme, bump_arr) = ([S::ID], [bump]);
+    let seeds = signer_seeds(&scheme, &identity_seed, &bump_arr);
     let signers = [Signer::from(&seeds)];
 
     passthrough_cpi(data, remaining, &signers, &pda_address)
@@ -100,8 +96,8 @@ pub fn process<S: SigningScheme>(
 /// * program_id matches `program_id` (i.e. it is one of *this* program's
 ///   ixs, so its sig was checked against this program's verify code), and
 /// * discriminator byte is [`ADVANCE_DISCRIMINATOR`], and
-/// * first meta address equals `vector_address` (binding it to the same
-///   vector PDA we are signing for here).
+/// * accounts include `vector_address`. `Advance` verifies a signature for
+///   every account it is given, so being listed means having signed.
 ///
 /// Returns `Ok(())` on hit, `ProgramError::MissingRequiredSignature` if no
 /// matching prior advance is found.
@@ -113,7 +109,7 @@ fn verify_prior_advance(
     if sysvar.address() != &INSTRUCTIONS_ID {
         return Err(ProgramError::UnsupportedSysvar);
     }
-    // The sysvar borrow is leaked (mirroring `VectorBuffer`) so the slice
+    // The sysvar borrow is leaked so the slice
     // can outlive the inner block; the data is read-only.
     core::mem::forget(sysvar.try_borrow()?);
     let data: &[u8] = unsafe { core::slice::from_raw_parts(sysvar.data_ptr(), sysvar.data_len()) };
@@ -157,21 +153,14 @@ fn verify_prior_advance(
         if &data[prog_pos..prog_pos + 32] != program_id.as_ref() {
             continue;
         }
-        if data[disc_pos] != ADVANCE_DISCRIMINATOR {
+        // An instruction without data has no discriminator to read.
+        if read_u16_at(data, data_len_pos)? == 0 || data[disc_pos] != ADVANCE_DISCRIMINATOR {
             continue;
         }
-        if num_accts < 1 {
-            continue;
-        }
-        // First meta = vector_pda. Each meta is `flag(1) || addr(32)`.
-        let first_addr_pos = off
-            .checked_add(2)
-            .and_then(|n| n.checked_add(1))
-            .ok_or(ProgramError::InvalidAccountData)?;
-        if first_addr_pos + 32 > data.len() {
-            continue;
-        }
-        if &data[first_addr_pos..first_addr_pos + 32] == vector_address {
+        // Each meta is `flag(1) || addr(32)`.
+        let (metas, _) = data[off + 2..prog_pos].as_chunks::<33>();
+        let listed = metas.iter().any(|meta| &meta[1..] == vector_address);
+        if listed {
             return Ok(());
         }
     }

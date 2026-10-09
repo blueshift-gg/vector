@@ -1,0 +1,28 @@
+[package]
+name = "vector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector — the signing program, one binary for every scheme"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+vector-common = { path = "../../crates/common" }
+pinocchio = { workspace = true, features = ["account-resize"] }
+solana-address = { workspace = true, features = ["curve25519"] }
+brine-ed25519 = { workspace = true }
+solana-falcon512 = { workspace = true }
+solana-ml-dsa = { workspace = true }
+solana-nostd-keccak = { workspace = true }
+solana-nostd-sha256 = { workspace = true }
+solana-secp256k1 = { workspace = true }
+solana-secp256k1-ecdsa = { workspace = true }
+solana-winternitz = { workspace = true }
+
+[lints]
+workspace = true

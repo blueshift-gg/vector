@@ -1,6 +1,7 @@
-use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+use pinocchio::{error::ProgramError, sysvars::instructions::INSTRUCTIONS_ID, AccountView};
+use solana_nostd_sha256::hashv;
 
-use crate::{scheme::SigningScheme, state::VectorAccount};
+use crate::{helpers::read_u16_at, scheme::SigningScheme, state::VectorAccount};
 
 /// Vector's auth model relies on instructions-sysvar introspection, which is
 /// only reliable in a top-level instruction. Reject any CPI invocation of
@@ -27,41 +28,75 @@ pub(crate) fn cpi_guard() -> Result<(), ProgramError> {
     }
 }
 
-/// Verify the `advance_vector_signature` over the canonical
-/// `advance_vector_digest` and install the digest as the next nonce.
-/// CPI passthrough lives in the sibling [`crate::passthrough`] handler
-/// (disc `4`); a tx that just wants to bump the nonce can call `advance`
-/// alone.
+/// The message every signer of the executing `Advance` approves: the
+/// SHA-256 of the instructions sysvar with the signatures cut out.
 ///
-/// Instruction data (after the discriminator stripped by [`crate::dispatch`]):
-///
-/// ```text
-/// [0..sig_len]  advance_vector_signature  (scheme-defined: 64 / 65 / 666)
-/// ```
-///
-/// Accounts:
-/// 0. `[writable]` vector PDA
-/// 1. `[]`         instructions sysvar
-pub fn process<S: SigningScheme>(
-    program_id: &Address,
-    accounts: &mut [AccountView],
-    data: &[u8],
-) -> ProgramResult {
+/// `Advance` data is `[discriminator, sig_1..sig_n]` for accounts
+/// `[vector_1..vector_n, instructions_sysvar]`. The signatures are everything
+/// after the discriminator and nothing else is cut, so the message covers
+/// every other byte of every instruction in the transaction. That is what
+/// authorises a sibling `passthrough`.
+pub fn message(sysvar: &AccountView) -> Result<[u8; 32], ProgramError> {
     cpi_guard()?;
-
-    let [vector, instructions_sysvar] = accounts else {
-        return Err(ProgramError::NotEnoughAccountKeys);
-    };
-
-    // `advance_nonce` verifies the sig over a digest that commits to the
-    // ENTIRE instructions sysvar buffer (minus the sig bytes), so any
-    // sibling `passthrough` ix's data + accounts in the same tx are
-    // committed to as part of pre/post. That's what authorises a
-    // standalone `passthrough` to run with `vector_pda`'s signer seeds.
-    let outcome =
-        VectorAccount::advance_nonce::<S>(vector, &*instructions_sysvar, program_id, data)?;
-    if !outcome.payload.is_empty() {
-        return Err(ProgramError::InvalidInstructionData);
+    if sysvar.address() != &INSTRUCTIONS_ID {
+        return Err(ProgramError::UnsupportedSysvar);
     }
-    Ok(())
+    let data = sysvar.try_borrow()?;
+
+    // Sysvar layout:
+    //   [0..2]                          num_instructions (u16 LE)
+    //   [2..2 + 2 * num_instructions]   u16 LE offset per instruction
+    //   ...instruction regions...
+    //   [len - 2..len]                  current instruction index (u16 LE)
+    if data.len() < 6 {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let num_instructions = read_u16_at(&data, 0)? as usize;
+    let current_index = read_u16_at(&data, data.len() - 2)? as usize;
+    if current_index >= num_instructions {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let ix_offset = read_u16_at(&data, 2 + 2 * current_index)? as usize;
+
+    // Instruction region layout:
+    //   [0..2]                       num_accounts (u16 LE)
+    //   [2..2 + 33 * num_accounts]   metas (1 flag byte + 32 addr each)
+    //   [+ 32]                       program id
+    //   [+ 2]                        data_len (u16 LE)
+    //   [...]                        instruction data
+    // Every value is a u16, so none of this overflows.
+    let num_accounts = read_u16_at(&data, ix_offset)? as usize;
+    let data_len_pos = ix_offset + 2 + 33 * num_accounts + 32;
+    let data_len = read_u16_at(&data, data_len_pos)? as usize;
+    let data_start = data_len_pos + 2;
+    let data_end = data_start + data_len;
+
+    // The cut starts after the discriminator and ends before the index footer.
+    if data_len == 0 || data_end + 2 > data.len() {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(hashv(&[&data[..data_start + 1], &data[data_end..]]))
+}
+
+/// Verify one signer of an `Advance`: take scheme `S`'s signature off the
+/// front of `signatures`, check it over `SHA256(message || nonce ||
+/// address)`, install that digest as the account's next nonce, and return
+/// the signatures that follow. `S` is the scheme in `vector`'s header.
+pub fn process<'a, S: SigningScheme>(
+    vector: &mut AccountView,
+    message: &[u8; 32],
+    signatures: &'a [u8],
+) -> Result<&'a [u8], ProgramError> {
+    let (signature, rest) = signatures
+        .split_at_checked(S::SIGNATURE_LEN)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let address = vector.address().to_bytes();
+    let mut data = vector.try_borrow_mut()?;
+    let identity = data
+        .get(VectorAccount::HEADER_LEN..VectorAccount::HEADER_LEN + S::IDENTITY_LEN)
+        .ok_or(ProgramError::AccountDataTooSmall)?;
+    let digest = hashv(&[message, &data[..32], &address]);
+    S::verify(identity, &digest, signature)?;
+    data[..32].copy_from_slice(&digest);
+    Ok(rest)
 }
