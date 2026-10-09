@@ -113,7 +113,7 @@ fn verify_prior_advance(
     if sysvar.address() != &INSTRUCTIONS_ID {
         return Err(ProgramError::UnsupportedSysvar);
     }
-    // The sysvar borrow is leaked (mirroring `VectorBuffer`) so the slice
+    // The sysvar borrow is leaked so the slice
     // can outlive the inner block; the data is read-only.
     core::mem::forget(sysvar.try_borrow()?);
     let data: &[u8] = unsafe { core::slice::from_raw_parts(sysvar.data_ptr(), sysvar.data_len()) };

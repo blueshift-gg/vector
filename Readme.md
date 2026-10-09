@@ -172,7 +172,7 @@ Vector advances state by reusing the same SHA-256 digest that was just verified 
 next_nonce = SHA256(message || current_nonce || identity)
 ```
 
-where `message` covers the entire instructions sysvar buffer minus the signatures. Because `current_nonce` is itself an input to the hash, every nonce transition is a deterministic function of both the prior state and the exact transaction being authorized — there is no separate mixing pass and no second hash.
+where `message` covers the entire instructions sysvar buffer minus the signatures. The first nonce comes from the account's identity and the latest slot hash, so do not create and close an account in the same slot: created again in that slot it would start from the same nonce, and its old signatures would be valid again. Because `current_nonce` is itself an input to the hash, every nonce transition is a deterministic function of both the prior state and the exact transaction being authorized — there is no separate mixing pass and no second hash.
 
 The signature itself is not used as the state transition input, as ECDSA signatures contain a malleable per-signature ephemeral scalar. Tying the progression to the digest of the current nonce and the current authorized buffer ensures that state advancement is determined by the actual transaction being authorized.
 

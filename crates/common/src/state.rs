@@ -1,11 +1,9 @@
-use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address};
-use solana_nostd_sha256::hashv;
+use pinocchio::{cpi::Seed, error::ProgramError};
 
 use crate::scheme::{IdentitySeed, SigningScheme};
 
-/// On-chain vector state — fixed-size header.
+/// The fixed-size header every vector account starts with.
 ///
-/// Layout (34 bytes, `#[repr(C)]`):
 /// ```text
 /// nonce:  [u8; 32]  // offset  0 — current state nonce
 /// scheme: u8        // offset 32 — `SigningScheme::ID`
@@ -14,13 +12,7 @@ use crate::scheme::{IdentitySeed, SigningScheme};
 ///
 /// The scheme's identity bytes follow at offset
 /// [`HEADER_LEN`](Self::HEADER_LEN); length is `S::IDENTITY_LEN`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VectorAccount {
-    pub nonce: [u8; 32],
-    pub scheme: u8,
-    pub bump: u8,
-}
+pub struct VectorAccount;
 
 impl VectorAccount {
     /// Length of the fixed-size header preceding the identity bytes.
@@ -41,51 +33,6 @@ impl VectorAccount {
             Some(_) => Err(ProgramError::InvalidAccountData),
             None => Err(ProgramError::AccountDataTooSmall),
         }
-    }
-
-    /// Read-only header snapshot. Validates ownership, minimum size and
-    /// scheme, then releases the runtime borrow before returning so the same
-    /// PDA can appear as a CPI signer downstream.
-    fn load<S: SigningScheme>(
-        account: &AccountView,
-        program_id: &Address,
-    ) -> Result<Self, ProgramError> {
-        if !account.owned_by(program_id) {
-            return Err(ProgramError::InvalidAccountOwner);
-        }
-        if account.data_len() < Self::HEADER_LEN {
-            return Err(ProgramError::AccountDataTooSmall);
-        }
-        let data = account.try_borrow()?;
-        Self::check_scheme::<S>(&data)?;
-        let mut nonce = [0u8; 32];
-        nonce.copy_from_slice(&data[..32]);
-        Ok(Self {
-            nonce,
-            scheme: data[32],
-            bump: data[33],
-        })
-    }
-
-    /// Verify `signature` over `SHA256(message || nonce || identity)` and
-    /// install that digest as the next nonce. `message` is what all signers
-    /// of the transaction share ([`crate::buffer::message`]); the nonce and
-    /// identity make the digest this account's alone.
-    pub fn advance_nonce<S: SigningScheme>(
-        account: &mut AccountView,
-        program_id: &Address,
-        message: &[u8; 32],
-        signature: &[u8],
-    ) -> Result<(), ProgramError> {
-        let state = Self::load::<S>(account, program_id)?;
-        let mut data = account.try_borrow_mut()?;
-        let identity = data
-            .get(Self::HEADER_LEN..Self::HEADER_LEN + S::IDENTITY_LEN)
-            .ok_or(ProgramError::AccountDataTooSmall)?;
-        let digest = hashv(&[message, &state.nonce, S::digest_identity(identity)]);
-        S::verify(identity, &digest, signature)?;
-        data[..32].copy_from_slice(&digest);
-        Ok(())
     }
 }
 
