@@ -53,8 +53,8 @@ export const SECP256K1_COMPRESSED_PUBKEY_LEN = 33;
  */
 export interface Scheme {
   /**
-   * The scheme byte: the second byte of every instruction, the second
-   * header field of every account, and a PDA seed.
+   * The scheme byte: the second header field of every account, a PDA
+   * seed, and what `initialize` takes after its discriminator.
    */
   id: number;
   /** Wire signature length carried in `advance` instruction data. */

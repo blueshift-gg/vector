@@ -20,10 +20,6 @@ impl<S: SigningScheme> SigningScheme for Rotating<S> {
         S::populate_identity(payload, &mut identity[32..])
     }
 
-    fn digest_identity(identity: &[u8]) -> &[u8] {
-        &identity[..32]
-    }
-
     fn pda_seed_from_identity(identity: &[u8]) -> IdentitySeed {
         IdentitySeed::copy_from(&identity[..32])
     }
@@ -57,14 +53,10 @@ pub fn dispatch<S: SigningScheme>(
     if !vector.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    if !vector.owned_by(program_id) {
-        return Err(ProgramError::InvalidAccountOwner);
-    }
     if payload.len() != S::INIT_PAYLOAD_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
     let mut data = vector.try_borrow_mut()?;
-    VectorAccount::check_scheme::<S>(&data)?;
     if data.len() != VectorAccount::account_len::<Rotating<S>>() {
         return Err(ProgramError::InvalidAccountData);
     }

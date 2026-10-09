@@ -28,8 +28,8 @@ pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scheme {
     /// On-chain program ID. Must match the program's `declare_id!`.
-    /// The scheme byte: the second byte of every instruction, the second
-    /// header field of every account, and a PDA seed.
+    /// The scheme byte: the second header field of every account, a PDA
+    /// seed, and what `initialize` takes after its discriminator.
     pub id: u8,
     /// Wire signature length carried in `advance` instruction data.
     pub signature_len: usize,

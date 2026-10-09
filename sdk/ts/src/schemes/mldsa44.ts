@@ -97,7 +97,7 @@ export function createExpandMlDsa44(publicKey: Uint8Array): TransactionInstructi
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [{ pubkey: vectorPda, isSigner: false, isWritable: true }],
-    data: Buffer.from([MLDSA44_EXPAND_DISCRIMINATOR, MLDSA44.id]),
+    data: Buffer.from([MLDSA44_EXPAND_DISCRIMINATOR]),
   });
 }
 

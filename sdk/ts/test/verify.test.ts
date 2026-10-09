@@ -76,7 +76,7 @@ function fixedIxLists() {
 /** Wire signature carried in an `advance` ix: data after the discriminator. */
 function sigOf(advanceIx: TransactionInstruction): Uint8Array {
   expect(advanceIx.data[0]).toBe(ADVANCE_DISCRIMINATOR);
-  return new Uint8Array(advanceIx.data.subarray(2));
+  return new Uint8Array(advanceIx.data.subarray(1));
 }
 
 /** Negate `s` — the high-S malleated twin of a (noble-produced) low-S sig. */
@@ -185,7 +185,7 @@ describe("sign → verify round trips", () => {
     expect(register.length).toBe(3);
     expect(register[0].data.length).toBe(2 + MLDSA44.identityLen);
     for (const expand of register.slice(1)) {
-      expect(Array.from(expand.data)).toEqual([MLDSA44_EXPAND_DISCRIMINATOR, MLDSA44.id]);
+      expect(Array.from(expand.data)).toEqual([MLDSA44_EXPAND_DISCRIMINATOR]);
       expect(expand.keys.length).toBe(1);
       expect(expand.keys[0].pubkey.equals(register[0].keys[1].pubkey)).toBe(true);
       expect(expand.keys[0].isWritable).toBe(true);
@@ -203,7 +203,7 @@ describe("sign → verify round trips", () => {
       MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
     );
     expect(Buffer.from(pinned).toString("hex")).toBe(
-      "c64dba79709f78c2c2a1422aacccf81a60b06dee5f9f568e97b7660c219de361"
+      "b00b7ab4073f5ff2b4b85d3cbca8c4ba00833a8dcac09c25d7b94b2dbd31edb1"
     );
   });
 });
@@ -296,7 +296,7 @@ describe("eip191 recovery byte", () => {
  * index footer), its half of the pin breaks.
  */
 const PINNED_DIGEST_HEX =
-  "3168e2aeb527ab77e07139418ef011290eb5915e2cfc530819e166e314ed5308";
+  "8738e7628a5b6920f962f55a85edb651cad5d40ba7b7650a6f9c8c3282be7580";
 
 describe("cross-language digest pin", () => {
   test("digest matches the constant pinned by the Rust suite", () => {
@@ -323,7 +323,7 @@ describe("cross-language digest pin", () => {
  * implementation drifts, its half of the pin breaks.
  */
 const PINNED_REVOCATION_DIGEST_HEX =
-  "9e63382f7b072a97721ad91ab82dc550ae89cd56077b8330540f77e5c7cc6428";
+  "1a8c0ec847dc499887a920ef2c0646b3de331a2313476837f2b78c3701f5c9ec";
 
 describe("revocation (inert advance)", () => {
   test("round trip + cross-language pin", () => {

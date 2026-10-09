@@ -31,7 +31,7 @@ test("XMSS account and rotation digest match Rust", () => {
 
   expect(() => findVectorPda(XMSS, publicKey)).toThrow();
   const rotate = createRotateSubinstruction(XMSS, identity, new Uint8Array(41).fill(7));
-  expect(Array.from(rotate.data)).toEqual([5, XMSS.id, ...new Uint8Array(41).fill(7)]);
+  expect(Array.from(rotate.data)).toEqual([5, ...new Uint8Array(41).fill(7)]);
   expect(rotate.keys).toEqual([{ pubkey: pda, isSigner: false, isWritable: true }]);
   for (const length of [40, 42]) {
     expect(() => createRotateSubinstruction(XMSS, identity, new Uint8Array(length))).toThrow();
@@ -44,6 +44,6 @@ test("XMSS account and rotation digest match Rust", () => {
     XMSS, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "ddba834e8c5e37af86d851ba6b5f4746278296a854b5eb55e0cedf76ec2f0315"
+    "8d65ff44dca8a074d4f703314c98b5374e8f4977773682d0b08227a831040336"
   );
 });

@@ -65,3 +65,7 @@ overflow-checks = false
 
 [profile.release.package.brine-ed25519]
 overflow-checks = false
+
+[workspace.lints.rust]
+# Code for the on-chain build is behind `target_os = "solana"`.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

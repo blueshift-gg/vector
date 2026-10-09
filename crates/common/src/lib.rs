@@ -7,18 +7,17 @@
 //! shared handlers here ([`initialize`], [`advance`], [`close`],
 //! [`withdraw`], [`passthrough`]), generic over the scheme.
 //!
-//! [`SigningScheme::ID`] says which scheme an instruction or an account is
-//! for:
+//! [`SigningScheme::ID`] says which scheme an account is for:
 //!
-//! * Instruction data starts `discriminator[1] || scheme[1]`.
 //! * Account header is `nonce[32] || scheme[1] || bump[1]` (34 bytes); the
 //!   scheme's identity bytes follow at offset [`VectorAccount::HEADER_LEN`].
 //! * PDA seeds are `["vector", &[scheme], identity_seed, &[bump]]`, where
 //!   `identity_seed` is the identity itself when `IDENTITY_LEN <= 32`, else
 //!   `sha256(identity)`.
 //!
-//! Every handler that reads an account's identity checks that the account's
-//! scheme is the instruction's.
+//! The program reads the scheme from the account's header and routes to
+//! that scheme's handlers. Only `Initialize`, which has no account yet,
+//! takes it from the instruction.
 #![no_std]
 
 extern crate alloc;
@@ -46,9 +45,9 @@ use pinocchio::{AccountView, Address, ProgramResult};
 
 /// Router for the instructions that act on one account of one scheme: `0`
 /// Initialize, `2` Close, `3` Withdraw, `4` Passthrough — where `Initialize`
-/// is a strict create. The program has already read the discriminator and
-/// the scheme byte that follows it, and chosen `S` from the latter; `data` is
-/// what comes after both. `1` Advance is the program's to route.
+/// is a strict create. The program has already chosen `S`; `data` is what
+/// follows the discriminator (and, for `Initialize`, the scheme byte). `1`
+/// Advance is the program's to route.
 #[inline(always)]
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,

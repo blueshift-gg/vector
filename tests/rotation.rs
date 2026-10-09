@@ -228,7 +228,7 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
     )];
     for key in [vec![0; 40], vec![0; 42], public_key.to_vec()] {
         let mut rotate = create_rotate_subinstruction(&XMSS, &identity, &public_key);
-        rotate.data.truncate(2);
+        rotate.data.truncate(1);
         rotate.data.extend_from_slice(&key);
         let passthrough = create_passthrough_instruction(&XMSS, &identity, &[rotate]);
         let digest = advance_vector_digest_with_fee_payer(

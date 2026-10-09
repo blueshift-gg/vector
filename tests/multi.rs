@@ -81,8 +81,8 @@ impl World {
             self.withdraw(&SECP256K1, &bob, 2_000_000_000),
         ];
         let message = advance_message(&[(&ED25519, &alice), (&SECP256K1, &bob)], &[], &post, None);
-        let alice_digest = signer_digest(&message, &NONCE, &alice);
-        let bob_digest = signer_digest(&message, &NONCE, &bob);
+        let alice_digest = signer_digest(&message, &NONCE, &find_vector_pda(&ED25519, &alice).0);
+        let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0);
         let alice_signature = self.alice.sign(&alice_digest).to_bytes();
         let bob_signature: Secp256k1Signature = self.bob.sign_prehash(&bob_digest).unwrap();
         let advance = create_multi_advance_instruction(&[
@@ -234,11 +234,19 @@ fn a_signature_only_works_for_its_own_account() {
     let message = advance_message(&[(&ED25519, &alice), (&ED25519, &carol)], &[], &post, None);
     let alice_signature = world
         .alice
-        .sign(&signer_digest(&message, &NONCE, &alice))
+        .sign(&signer_digest(
+            &message,
+            &NONCE,
+            &find_vector_pda(&ED25519, &alice).0,
+        ))
         .to_bytes();
     let carol_signature = world
         .carol
-        .sign(&signer_digest(&message, &NONCE, &carol))
+        .sign(&signer_digest(
+            &message,
+            &NONCE,
+            &find_vector_pda(&ED25519, &carol).0,
+        ))
         .to_bytes();
     let advance = |signers: &[(&Scheme, &[u8], &[u8])]| {
         vec![create_multi_advance_instruction(signers), post[0].clone()]
@@ -312,14 +320,6 @@ fn passthrough_needs_its_own_account_to_have_signed() {
             &format!("Bob's account listed at {position}"),
         );
     }
-
-    // Nor by claiming his scheme byte without his signature.
-    let mut claimed = advance.clone();
-    claimed
-        .accounts
-        .insert(1, AccountMeta::new(bob_vector, false));
-    claimed.data.insert(2, SECP256K1.id);
-    world.assert_rejected(&[claimed, take_from_bob.clone()], "Bob's scheme claimed");
 
     // With no signers at all there is nothing to verify, and nothing passes.
     let mut nobody = advance.clone();

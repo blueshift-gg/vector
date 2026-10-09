@@ -34,7 +34,7 @@ Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving ev
 | Winternitz | `5` | `sha256(initial_pubkey)` | 849 bytes | 32 B identity + 41 B current key | SHA-256 |
 | XMSS | `6` | `sha256(initial_pubkey)` | 1,037 bytes | 32 B identity + 41 B current key | SHA-256 |
 
-The scheme byte is the second byte of every instruction, a field of the account header and a PDA seed. Every handler that reads an account's identity checks that the account's scheme byte is the instruction's, so an account registered under one scheme never reaches another scheme's verifier. The previous BSM and Schnorr schemes have been removed.
+The scheme byte is a field of the account header and a PDA seed. The program reads it from the account and routes to that scheme, so an account is always handled by the scheme that created it. Only `Initialize`, which has no account yet, takes the byte in its instruction data. The previous BSM and Schnorr schemes have been removed.
 
 ### Ed25519
 The signer's 32-byte Ed25519 public key is stored directly in the account. The 64-byte `(r, s)` signature is verified directly over the SHA-256 digest. Verification uses [`brine-ed25519`](https://github.com/zfedoran/brine-ed25519) with its `fast-sha512` feature, which keeps Ed25519 advance under ~14k CUs.
@@ -110,22 +110,22 @@ Every signer of an `Advance` approves the same message: the instructions sysvar 
 
 ```
 message = SHA256(buffer[..signatures_start] || buffer[advance_data_end..])
-digest  = SHA256(message || nonce || identity)
+digest  = SHA256(message || nonce || vector_address)
 ```
 
-Each signer signs its own `digest`: the shared message, then its account's current nonce and its identity.
+Each signer signs its own `digest`: the shared message, then its account's current nonce and address.
 
-`identity` is the client-derivable identity: the stored pubkey/address for Ed25519/EIP-191/Secp256k1, `sha256(wire_pubkey)` for Falcon-512, the 1,312-byte public key for ML-DSA-44, and the permanent `sha256(initial_pubkey)` for Winternitz/XMSS (the program's `digest_identity` hook selects it). Everything else in the buffer — the discriminator, the scheme bytes, the accounts, CPI payload, surrounding instructions, and sysvar framing — is committed to by the message.
+Everything else in the buffer — the discriminator, the accounts, CPI payload, surrounding instructions, and sysvar framing — is committed to by the message.
 
 ### Several Signers
 One `Advance` takes any number of signers, of any schemes:
 
 ```
 accounts: [vector_1, ..., vector_n, instructions_sysvar]
-data:     [1, scheme_1, ..., scheme_n, sig_1 || ... || sig_n]
+data:     [1, sig_1 || ... || sig_n]
 ```
 
-The program verifies one signature per account and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature.
+The program verifies one signature per account, taking each signature's length from its account's scheme, and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature.
 
 A one-time key (Winternitz, XMSS) should sign last: its signature only lands if every other signer's does, and it must not be used for a second message.
 
@@ -169,7 +169,7 @@ This sets Vector apart from other onchain signing primitives which typically req
 Vector advances state by reusing the same SHA-256 digest that was just verified as the next nonce:
 
 ```
-next_nonce = SHA256(message || current_nonce || identity)
+next_nonce = SHA256(message || current_nonce || vector_address)
 ```
 
 where `message` covers the entire instructions sysvar buffer minus the signatures. The first nonce comes from the account's identity and the latest slot hash, so do not create and close an account in the same slot: created again in that slot it would start from the same nonce, and its old signatures would be valid again. Because `current_nonce` is itself an input to the hash, every nonce transition is a deterministic function of both the prior state and the exact transaction being authorized — there is no separate mixing pass and no second hash.
@@ -225,10 +225,10 @@ identity: [u8; N]   // offset 34 — N = stored identity length
 | ML-DSA-44   | 21,892 B           | 1,312 B public key + 2 B pad + 20,544 B prepared key |
 | Winternitz / XMSS | 107 B | 32 B permanent identity + 41 B current public key |
 
-Two schemes cannot share a PDA: the scheme byte is one of the seeds, so the same identity bytes derive a different address under each scheme. The header's scheme byte is what a handler checks before it reads the identity.
+Two schemes cannot share a PDA: the scheme byte is one of the seeds, so the same identity bytes derive a different address under each scheme. The header's scheme byte is what the program routes on.
 
 ## Initialization
-A Vector account is created via the `initialize` instruction, which allocates the `34 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...init_payload]`, where `init_payload` is scheme-defined:
+A Vector account is created via the `initialize` instruction, which allocates the `34 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...init_payload]` (the only instruction that carries the scheme byte), where `init_payload` is scheme-defined:
 
 | Scheme      | `init_payload`            | Stored Identity                              |
 |-------------|---------------------------|----------------------------------------------|
@@ -307,7 +307,7 @@ The signed digest doubles as the next on-chain nonce, so a successful advance al
 
 ## Operational Patterns
 
-Everything below is native protocol behaviour — no extra programs, accounts, or formats. The building blocks are the digest (`SHA256(message || nonce || identity)`), digest-as-next-nonce progression, and the fact that one vector account holds exactly one outstanding nonce.
+Everything below is native protocol behaviour — no extra programs, accounts, or formats. The building blocks are the digest (`SHA256(message || nonce || vector_address)`), digest-as-next-nonce progression, and the fact that one vector account holds exactly one outstanding nonce.
 
 ### Offline verification
 

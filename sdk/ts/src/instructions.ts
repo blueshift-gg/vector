@@ -83,7 +83,7 @@ export function createAdvanceInstruction(
  * its own `signerDigest` of the one `advanceMessage`.
  *
  * Accounts: `[vector_pda(writable)..., instructions_sysvar]`.
- * Data: `[ADVANCE_DISCRIMINATOR, scheme..., signature...]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, signature...]`.
  */
 export function createMultiAdvanceInstruction(
   signers: { scheme: Scheme; identity: Uint8Array; signature: Uint8Array }[]
@@ -99,7 +99,7 @@ export function createMultiAdvanceInstruction(
       { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
     ],
     data: Buffer.concat([
-      Uint8Array.of(ADVANCE_DISCRIMINATOR, ...signers.map((s) => s.scheme.id)),
+      Uint8Array.of(ADVANCE_DISCRIMINATOR),
       ...signers.map((s) => s.signature),
     ]),
   });
@@ -151,8 +151,8 @@ export function createPassthroughInstruction(
     }
   }
 
-  // [disc(1)][scheme(1)][num_ixs(u8)][per ix: num_accounts(u8) data_len(u16 LE) data]
-  let dataLen = 1 + 1 + 1;
+  // [disc(1)][num_ixs(u8)][per ix: num_accounts(u8) data_len(u16 LE) data]
+  let dataLen = 1 + 1;
   for (const ix of subInstructions) {
     dataLen += 1 + 2 + ix.data.length;
   }
@@ -161,7 +161,6 @@ export function createPassthroughInstruction(
   let off = 0;
 
   data[off++] = PASSTHROUGH_DISCRIMINATOR;
-  data[off++] = scheme.id;
   data[off++] = subInstructions.length;
 
   for (const ix of subInstructions) {
@@ -211,7 +210,7 @@ export function createCloseSubinstruction(
       { pubkey: vectorPda, isSigner: false, isWritable: true },
       { pubkey: closeTo, isSigner: false, isWritable: true },
     ],
-    data: Buffer.from([CLOSE_DISCRIMINATOR, scheme.id]),
+    data: Buffer.from([CLOSE_DISCRIMINATOR]),
   });
 }
 
@@ -229,10 +228,9 @@ export function createWithdrawSubinstruction(
   lamports: bigint
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
-  const data = new Uint8Array(2 + 8);
+  const data = new Uint8Array(1 + 8);
   data[0] = WITHDRAW_DISCRIMINATOR;
-  data[1] = scheme.id;
-  writeU64LE(data, lamports, 2);
+  writeU64LE(data, lamports, 1);
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
@@ -260,7 +258,7 @@ export function createRotateSubinstruction(
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [{ pubkey: vectorPda, isSigner: false, isWritable: true }],
-    data: Buffer.from([ROTATE_DISCRIMINATOR, scheme.id, ...newPublicKey]),
+    data: Buffer.from([ROTATE_DISCRIMINATOR, ...newPublicKey]),
   });
 }
 

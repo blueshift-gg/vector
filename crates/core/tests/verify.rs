@@ -47,7 +47,7 @@ fn fixed_ix_lists() -> (Vec<Instruction>, Vec<Instruction>) {
 
 /// Wire signature carried in an `advance` ix: data after the discriminator.
 fn signature_of(advance_ix: &Instruction) -> &[u8] {
-    &advance_ix.data[2..]
+    &advance_ix.data[1..]
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ fn tampering_any_committed_byte_fails_verification() {
 /// `sdk/ts/test/verify.test.ts` pins the SAME constant — if either
 /// implementation drifts (hashing, sysvar serialization, flag promotion,
 /// index footer), its half of the pin breaks.
-const PINNED_DIGEST_HEX: &str = "3168e2aeb527ab77e07139418ef011290eb5915e2cfc530819e166e314ed5308";
+const PINNED_DIGEST_HEX: &str = "8738e7628a5b6920f962f55a85edb651cad5d40ba7b7650a6f9c8c3282be7580";
 
 #[test]
 fn digest_matches_the_cross_language_pin() {
@@ -250,7 +250,7 @@ fn digest_matches_the_cross_language_pin() {
 /// `sdk/ts/test/verify.test.ts` pins the SAME constant — if either
 /// implementation drifts, its half of the pin breaks.
 const PINNED_REVOCATION_DIGEST_HEX: &str =
-    "9e63382f7b072a97721ad91ab82dc550ae89cd56077b8330540f77e5c7cc6428";
+    "1a8c0ec847dc499887a920ef2c0646b3de331a2313476837f2b78c3701f5c9ec";
 
 #[test]
 fn revocation_round_trip_and_cross_language_pin() {

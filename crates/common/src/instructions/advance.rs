@@ -1,6 +1,4 @@
-use pinocchio::{
-    error::ProgramError, sysvars::instructions::INSTRUCTIONS_ID, AccountView, Address,
-};
+use pinocchio::{error::ProgramError, sysvars::instructions::INSTRUCTIONS_ID, AccountView};
 use solana_nostd_sha256::hashv;
 
 use crate::{helpers::read_u16_at, scheme::SigningScheme, state::VectorAccount};
@@ -33,14 +31,13 @@ pub(crate) fn cpi_guard() -> Result<(), ProgramError> {
 /// The message every signer of the executing `Advance` approves: the
 /// SHA-256 of the instructions sysvar with the signatures cut out.
 ///
-/// `Advance` data is `[discriminator, scheme_1..scheme_n, sig_1..sig_n]` for
-/// accounts `[vector_1..vector_n, instructions_sysvar]`. The signatures are
-/// the tail of that data and nothing else is cut, so the message covers
+/// `Advance` data is `[discriminator, sig_1..sig_n]` for accounts
+/// `[vector_1..vector_n, instructions_sysvar]`. The signatures are everything
+/// after the discriminator and nothing else is cut, so the message covers
 /// every other byte of every instruction in the transaction. That is what
 /// authorises a sibling `passthrough`.
-pub fn message(sysvar: &AccountView, signers: usize) -> Result<[u8; 32], ProgramError> {
+pub fn message(sysvar: &AccountView) -> Result<[u8; 32], ProgramError> {
     cpi_guard()?;
-    let prefix_len = 1 + signers;
     if sysvar.address() != &INSTRUCTIONS_ID {
         return Err(ProgramError::UnsupportedSysvar);
     }
@@ -74,22 +71,18 @@ pub fn message(sysvar: &AccountView, signers: usize) -> Result<[u8; 32], Program
     let data_start = data_len_pos + 2;
     let data_end = data_start + data_len;
 
-    // The cut stays inside the instruction data, before the index footer.
-    if prefix_len > data_len || data_end + 2 > data.len() {
+    // The cut starts after the discriminator and ends before the index footer.
+    if data_len == 0 || data_end + 2 > data.len() {
         return Err(ProgramError::InvalidAccountData);
     }
-    Ok(hashv(&[
-        &data[..data_start + prefix_len],
-        &data[data_end..],
-    ]))
+    Ok(hashv(&[&data[..data_start + 1], &data[data_end..]]))
 }
 
 /// Verify one signer of an `Advance`: take scheme `S`'s signature off the
 /// front of `signatures`, check it over `SHA256(message || nonce ||
-/// identity)`, install that digest as the account's next nonce, and return
-/// the signatures that follow.
+/// address)`, install that digest as the account's next nonce, and return
+/// the signatures that follow. `S` is the scheme in `vector`'s header.
 pub fn process<'a, S: SigningScheme>(
-    program_id: &Address,
     vector: &mut AccountView,
     message: &[u8; 32],
     signatures: &'a [u8],
@@ -97,15 +90,12 @@ pub fn process<'a, S: SigningScheme>(
     let (signature, rest) = signatures
         .split_at_checked(S::SIGNATURE_LEN)
         .ok_or(ProgramError::InvalidInstructionData)?;
-    if !vector.owned_by(program_id) {
-        return Err(ProgramError::InvalidAccountOwner);
-    }
+    let address = vector.address().to_bytes();
     let mut data = vector.try_borrow_mut()?;
-    VectorAccount::check_scheme::<S>(&data)?;
     let identity = data
         .get(VectorAccount::HEADER_LEN..VectorAccount::HEADER_LEN + S::IDENTITY_LEN)
         .ok_or(ProgramError::AccountDataTooSmall)?;
-    let digest = hashv(&[message, &data[..32], S::digest_identity(identity)]);
+    let digest = hashv(&[message, &data[..32], &address]);
     S::verify(identity, &digest, signature)?;
     data[..32].copy_from_slice(&digest);
     Ok(rest)

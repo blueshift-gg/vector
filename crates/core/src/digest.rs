@@ -9,7 +9,7 @@ use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction, Instruction};
 use solana_instructions_sysvar::construct_instructions_data;
 
 use crate::instructions::create_multi_advance_instruction;
-use crate::scheme::Scheme;
+use crate::scheme::{find_vector_pda, Scheme};
 
 /// Promote instruction-level account flags to message-level flags, matching
 /// what the Solana runtime writes into the live instructions sysvar: each
@@ -107,13 +107,13 @@ pub fn advance_message(
 
     // Header: num_instructions (u16) + one offset u16 per instruction.
     // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-    // u16 data_len + data. The signatures follow the discriminator and one
-    // scheme byte per signer, and run to the end of the data.
+    // u16 data_len + data. The signatures are the data after the
+    // discriminator.
     let offset_pos = 2 + 2 * advance_index;
     let offset = u16::from_le_bytes([buffer[offset_pos], buffer[offset_pos + 1]]) as usize;
     let advance = &all[advance_index];
     let data_start = offset + 2 + 33 * advance.accounts.len() + 32 + 2;
-    let signatures_start = data_start + 1 + signers.len();
+    let signatures_start = data_start + 1;
     let data_end = data_start + advance.data.len();
 
     let mut hasher = Sha256::new();
@@ -122,16 +122,16 @@ pub fn advance_message(
     hasher.finalize().into()
 }
 
-/// What one signer signs: `SHA256(message || nonce || identity)`, with
-/// `message` from [`advance_message`]. The message is shared by every signer
-/// of the advance; the nonce and identity make the digest this signer's own.
-/// It is also the account's next nonce. Mirrors `signerDigest` in
-/// `sdk/ts/src/digest.ts`.
-pub fn signer_digest(message: &[u8; 32], nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {
+/// What one signer signs: `SHA256(message || nonce || vector)`, with
+/// `message` from [`advance_message`] and `vector` the signer's account
+/// address. The message is shared by every signer of the advance; the nonce
+/// and address make the digest this signer's own. It is also the account's
+/// next nonce. Mirrors `signerDigest` in `sdk/ts/src/digest.ts`.
+pub fn signer_digest(message: &[u8; 32], nonce: &[u8; 32], vector: &Address) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(message);
     hasher.update(nonce);
-    hasher.update(identity);
+    hasher.update(vector);
     hasher.finalize().into()
 }
 
@@ -151,7 +151,7 @@ pub fn advance_vector_digest_with_fee_payer(
         post_instructions,
         fee_payer,
     );
-    signer_digest(&message, nonce, identity)
+    signer_digest(&message, nonce, &find_vector_pda(scheme, identity).0)
 }
 
 /// [`advance_vector_digest_with_fee_payer`] for a fee payer that is not among

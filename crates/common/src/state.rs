@@ -1,4 +1,4 @@
-use pinocchio::{cpi::Seed, error::ProgramError};
+use pinocchio::{cpi::Seed, error::ProgramError, AccountView, Address};
 
 use crate::scheme::{IdentitySeed, SigningScheme};
 
@@ -24,15 +24,18 @@ impl VectorAccount {
         Self::HEADER_LEN + S::IDENTITY_LEN
     }
 
-    /// The account is one scheme `S` created. Every handler that reads the
-    /// identity through `S` calls this first: the bytes after the header
-    /// mean something else under any other scheme.
-    pub fn check_scheme<S: SigningScheme>(data: &[u8]) -> Result<(), ProgramError> {
-        match data.get(32) {
-            Some(&scheme) if scheme == S::ID => Ok(()),
-            Some(_) => Err(ProgramError::InvalidAccountData),
-            None => Err(ProgramError::AccountDataTooSmall),
+    /// The scheme of a vector account, from its header. The program picks
+    /// the [`SigningScheme`] from this, never from what a caller says, so the
+    /// bytes after the header are always read as the scheme that wrote them.
+    pub fn scheme(account: &AccountView, program_id: &Address) -> Result<u8, ProgramError> {
+        if !account.owned_by(program_id) {
+            return Err(ProgramError::InvalidAccountOwner);
         }
+        account
+            .try_borrow()?
+            .get(32)
+            .copied()
+            .ok_or(ProgramError::AccountDataTooSmall)
     }
 }
 

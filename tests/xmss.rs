@@ -36,8 +36,8 @@ fn initialize_checks_key_length_and_pda() {
     assert_eq!(
         advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough]),
         [
-            221, 186, 131, 78, 140, 94, 55, 175, 134, 216, 81, 186, 107, 95, 71, 70, 39, 130, 150,
-            168, 84, 181, 235, 85, 224, 206, 223, 118, 236, 47, 3, 21
+            141, 101, 255, 68, 220, 168, 160, 116, 212, 247, 3, 49, 76, 152, 181, 55, 78, 143, 73,
+            119, 119, 54, 130, 208, 176, 130, 39, 168, 49, 4, 3, 54
         ],
     );
     let accounts = [
@@ -139,7 +139,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
         &[(vector, advanced)],
     );
 
-    for offset in [0, 34, account.data.len() - 1] {
+    for offset in [0, 66, account.data.len() - 1] {
         let mut changed = account.clone();
         changed.data[offset] ^= 1;
         mollusk.process_and_validate_instruction_chain(

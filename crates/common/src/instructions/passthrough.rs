@@ -59,9 +59,6 @@ pub fn process<S: SigningScheme>(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    if !vector.owned_by(program_id) {
-        return Err(ProgramError::InvalidAccountOwner);
-    }
     if instructions_sysvar.address() != &INSTRUCTIONS_ID {
         return Err(ProgramError::UnsupportedSysvar);
     }
@@ -73,7 +70,6 @@ pub fn process<S: SigningScheme>(
         if header_and_identity.len() < VectorAccount::HEADER_LEN + S::IDENTITY_LEN {
             return Err(ProgramError::AccountDataTooSmall);
         }
-        VectorAccount::check_scheme::<S>(&header_and_identity)?;
         let bump = header_and_identity[33];
         let identity = &header_and_identity
             [VectorAccount::HEADER_LEN..VectorAccount::HEADER_LEN + S::IDENTITY_LEN];

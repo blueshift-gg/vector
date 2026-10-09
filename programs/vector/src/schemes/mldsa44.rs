@@ -62,10 +62,6 @@ impl SigningScheme for MlDsa44 {
         Self::fill(identity_out, 0)
     }
 
-    fn digest_identity(identity: &[u8]) -> &[u8] {
-        &identity[..PUBLIC_KEY_LEN]
-    }
-
     fn pda_seed_from_identity(identity: &[u8]) -> IdentitySeed {
         IdentitySeed::from_hash(&identity[..PUBLIC_KEY_LEN])
     }

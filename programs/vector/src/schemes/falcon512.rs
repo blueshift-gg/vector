@@ -64,14 +64,6 @@ impl SigningScheme for Falcon512 {
         IdentitySeed::copy_from(&hash(payload))
     }
 
-    /// The 897-byte wire pubkey can't be cheaply rebuilt on-chain, and the
-    /// 1024-byte prepared form can't be reproduced off-chain — so the digest
-    /// folds in `sha256(wire_pubkey)`, which `populate_identity` stored as
-    /// the first 32 bytes and the client computes from its wire pubkey.
-    fn digest_identity(identity: &[u8]) -> &[u8] {
-        &identity[..HASH_LEN]
-    }
-
     fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         // Zero-copy borrow of the prepared pubkey straight out of the
         // account (a 1024-byte stack copy would overflow the BPF frame);

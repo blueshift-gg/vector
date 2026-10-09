@@ -23,3 +23,6 @@ solana-nostd-sha256 = { workspace = true }
 solana-secp256k1 = { workspace = true }
 solana-secp256k1-ecdsa = { workspace = true }
 solana-winternitz = { workspace = true }
+
+[lints]
+workspace = true

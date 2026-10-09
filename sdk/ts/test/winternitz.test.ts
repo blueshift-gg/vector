@@ -31,7 +31,7 @@ test("Winternitz account and rotation digest match Rust", () => {
 
   expect(() => findVectorPda(WINTERNITZ, publicKey)).toThrow();
   const rotate = createRotateSubinstruction(WINTERNITZ, identity, new Uint8Array(41).fill(7));
-  expect(Array.from(rotate.data)).toEqual([5, WINTERNITZ.id, ...new Uint8Array(41).fill(7)]);
+  expect(Array.from(rotate.data)).toEqual([5, ...new Uint8Array(41).fill(7)]);
   expect(rotate.keys).toEqual([{ pubkey: pda, isSigner: false, isWritable: true }]);
   for (const length of [40, 42]) {
     expect(() => createRotateSubinstruction(WINTERNITZ, identity, new Uint8Array(length))).toThrow();
@@ -44,6 +44,6 @@ test("Winternitz account and rotation digest match Rust", () => {
     WINTERNITZ, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "c0ac7e902003e9742e5019a67d7cc3e717aa833c4084d8bcb71dc12e886b8378"
+    "6557e62c6ef076fa0a2c84a29f5aa77fb03864a71b0410fe4ff3611cd4ae010d"
   );
 });

@@ -83,12 +83,15 @@ fn register_in_one_transaction() {
     assert_eq!(foreign.resulting_accounts, accounts);
     let mut malformed = expand_ix.clone();
     malformed.data.push(0);
-    let rejected = mollusk.process_instruction(&malformed, &accounts);
+    let mut header = vec![0; 34];
+    header[32] = MLDSA44.id;
+    let mut owned = Account::new(1_000_000_000, 0, &vector_core::PROGRAM_ID);
+    owned.data = header;
+    let rejected = mollusk.process_instruction(&malformed, &[(vector, owned)]);
     assert_eq!(
         rejected.program_result,
         mollusk_svm::result::ProgramResult::Failure(ProgramError::InvalidInstructionData)
     );
-    assert_eq!(rejected.resulting_accounts, accounts);
 
     let result = process_transaction(
         &mollusk,
@@ -236,8 +239,8 @@ fn client_encoding_matches_typescript() {
     assert_eq!(
         digest,
         [
-            198, 77, 186, 121, 112, 159, 120, 194, 194, 161, 66, 42, 172, 204, 248, 26, 96, 176,
-            109, 238, 95, 159, 86, 142, 151, 183, 102, 12, 33, 157, 227, 97
+            176, 11, 122, 180, 7, 63, 95, 242, 180, 184, 93, 60, 188, 168, 196, 186, 0, 131, 58,
+            141, 202, 192, 156, 37, 215, 185, 75, 45, 189, 49, 237, 177
         ]
     );
 }

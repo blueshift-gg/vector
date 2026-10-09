@@ -65,13 +65,12 @@ pub fn create_advance_instruction(
 /// [`advance_message`](crate::advance_message).
 ///
 /// Accounts: `[vector_pda(writable)..., instructions_sysvar]`.
-/// Data: `[ADVANCE_DISCRIMINATOR, scheme..., signature...]`.
+/// Data: `[ADVANCE_DISCRIMINATOR, signature...]`.
 pub fn create_multi_advance_instruction(signers: &[(&Scheme, &[u8], &[u8])]) -> Instruction {
     let mut accounts = Vec::with_capacity(signers.len() + 1);
     let mut data = vec![ADVANCE_DISCRIMINATOR];
     for (scheme, identity, _) in signers {
         accounts.push(AccountMeta::new(find_vector_pda(scheme, identity).0, false));
-        data.push(scheme.id);
     }
     accounts.push(AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false));
     for (_, _, signature) in signers {
@@ -95,7 +94,7 @@ pub fn create_multi_advance_instruction(signers: &[(&Scheme, &[u8], &[u8])]) -> 
 ///
 /// Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
 /// ...sub_ix accounts...]` repeated per sub-instruction.
-/// Data: `[PASSTHROUGH_DISCRIMINATOR, scheme, num_ixs(u8),
+/// Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
 /// {num_accounts(u8), data_len(u16 LE), data}...]`.
 pub fn create_passthrough_instruction(
     scheme: &Scheme,
@@ -125,14 +124,12 @@ pub fn create_passthrough_instruction(
 
     let payload_len: usize = 1
         + 1
-        + 1
         + instructions
             .iter()
             .map(|ix| 1 + 2 + ix.data.len())
             .sum::<usize>();
     let mut data = Vec::with_capacity(payload_len);
     data.push(PASSTHROUGH_DISCRIMINATOR);
-    data.push(scheme.id);
     data.push(instructions.len() as u8);
     for ix in instructions {
         assert!(
@@ -173,7 +170,7 @@ pub fn create_close_subinstruction(
             AccountMeta::new(vector_pda, false),
             AccountMeta::new(*close_to, false),
         ],
-        data: vec![CLOSE_DISCRIMINATOR, scheme.id],
+        data: vec![CLOSE_DISCRIMINATOR],
     }
 }
 
@@ -193,7 +190,6 @@ pub fn create_rotate_subinstruction(
     let (vector_pda, _) = find_vector_pda(scheme, identity);
     let mut data = Vec::with_capacity(1 + new_public_key.len());
     data.push(ROTATE_DISCRIMINATOR);
-    data.push(scheme.id);
     data.extend_from_slice(new_public_key);
     Instruction {
         program_id: PROGRAM_ID,
@@ -214,7 +210,6 @@ pub fn create_withdraw_subinstruction(
     let (vector_pda, _bump) = find_vector_pda(scheme, identity);
     let mut data = Vec::with_capacity(1 + 8);
     data.push(WITHDRAW_DISCRIMINATOR);
-    data.push(scheme.id);
     data.extend_from_slice(&lamports.to_le_bytes());
     Instruction {
         program_id: PROGRAM_ID,

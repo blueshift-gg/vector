@@ -25,9 +25,9 @@ use crate::state::{signer_seeds, VectorAccount};
 /// `AccountAlreadyInitialized`. Schemes with larger identities finish
 /// preparation in later instructions.
 ///
-/// Instruction data (after the discriminator): `init_payload` — the wire
-/// pubkey/address, length `S::INIT_PAYLOAD_LEN`. No scheme byte (the program
-/// ID identifies the scheme).
+/// Instruction data (after the discriminator and the scheme byte the
+/// program chose `S` from): `init_payload` — the wire pubkey/address, length
+/// `S::INIT_PAYLOAD_LEN`.
 ///
 /// Accounts:
 /// 0. `[signer, writable]` payer

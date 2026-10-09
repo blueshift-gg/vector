@@ -7,7 +7,7 @@
 import { createHash } from "crypto";
 import { Address, TransactionInstruction } from "@solana/web3.js";
 
-import { Scheme, readU16LE, writeU16LE } from "./scheme.js";
+import { Scheme, findVectorPda, readU16LE, writeU16LE } from "./scheme.js";
 import {
   createMultiAdvanceInstruction,
   constructInstructionsData,
@@ -95,11 +95,11 @@ export function advanceMessage(
   writeU16LE(buffer, advanceIndex, buffer.length - 2);
 
   // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-  // u16 data_len + data. The signatures follow the discriminator and one
-  // scheme byte per signer, and run to the end of the data.
+  // u16 data_len + data. The signatures are the data after the
+  // discriminator.
   const offset = readU16LE(buffer, 2 + 2 * advanceIndex);
   const dataStart = offset + 2 + 33 * advanceIx.keys.length + 32 + 2;
-  const signaturesStart = dataStart + 1 + signers.length;
+  const signaturesStart = dataStart + 1;
   const dataEnd = dataStart + advanceIx.data.length;
 
   const h = createHash("sha256");
@@ -109,22 +109,21 @@ export function advanceMessage(
 }
 
 /**
- * What one signer signs: `SHA256(message || nonce || identity)`, with
- * `message` from {@link advanceMessage}. It is also the account's next
- * nonce. `identity` is the scheme's client identity bytes (for Falcon,
- * `sha256(wire_pubkey)`).
+ * What one signer signs: `SHA256(message || nonce || vector)`, with
+ * `message` from {@link advanceMessage} and `vector` the signer's account
+ * address. It is also the account's next nonce.
  *
  * Mirrors `signer_digest` in `crates/core/src/digest.rs`.
  */
 export function signerDigest(
   message: Uint8Array,
   nonce: Uint8Array,
-  identity: Uint8Array
+  vector: Address
 ): Uint8Array {
   const h = createHash("sha256");
   h.update(message);
   h.update(nonce);
-  h.update(identity);
+  h.update(vector.toBytes());
   return new Uint8Array(h.digest());
 }
 
@@ -143,7 +142,7 @@ export function advanceVectorDigest(
     postInstructions,
     feePayer
   );
-  return signerDigest(message, nonce, identity);
+  return signerDigest(message, nonce, findVectorPda(scheme, identity)[0]);
 }
 
 /**

@@ -44,6 +44,6 @@ pub fn create_expand_mldsa44(public_key: &[u8; MLDSA44_PUBKEY_LEN]) -> Instructi
     Instruction {
         program_id: PROGRAM_ID,
         accounts: vec![AccountMeta::new(vector, false)],
-        data: vec![MLDSA44_EXPAND_DISCRIMINATOR, MLDSA44.id],
+        data: vec![MLDSA44_EXPAND_DISCRIMINATOR],
     }
 }
