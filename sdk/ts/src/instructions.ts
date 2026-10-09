@@ -20,6 +20,7 @@ import {
   ADVANCE_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
+  ROTATE_DISCRIMINATOR,
   WITHDRAW_DISCRIMINATOR,
 } from "./scheme.js";
 
@@ -125,11 +126,10 @@ export function createPassthroughInstruction(
   for (const ix of subInstructions) {
     keys.push({ pubkey: ix.programId, isSigner: false, isWritable: false });
     for (const meta of ix.keys) {
-      // Clear isSigner: PDA signing comes from invoke_signed during CPI,
-      // not from transaction-level signatures.
+      // Only the PDA receives its signer privilege during CPI.
       keys.push({
         pubkey: meta.pubkey,
-        isSigner: false,
+        isSigner: meta.isSigner && !meta.pubkey.equals(vectorPda),
         isWritable: meta.isWritable,
       });
     }
@@ -222,6 +222,27 @@ export function createWithdrawSubinstruction(
       { pubkey: receiver, isSigner: false, isWritable: true },
     ],
     data: Buffer.from(data),
+  });
+}
+
+/**
+ * Replace the current key through Passthrough (Winternitz and XMSS only).
+ * Keep using the initial key's identity after rotation. Persist the fresh
+ * signer before authorizing this instruction.
+ */
+export function createRotateSubinstruction(
+  scheme: Scheme,
+  identity: Uint8Array,
+  newPublicKey: Uint8Array
+): TransactionInstruction {
+  if (newPublicKey.length !== scheme.storedIdentityLen - scheme.identityLen) {
+    throw new Error("Replacement key length mismatch");
+  }
+  const [vectorPda] = findVectorPda(scheme, identity);
+  return new TransactionInstruction({
+    programId: scheme.programId,
+    keys: [{ pubkey: vectorPda, isSigner: false, isWritable: true }],
+    data: Buffer.from([ROTATE_DISCRIMINATOR, ...newPublicKey]),
   });
 }
 

@@ -20,7 +20,7 @@
  *   ({@link verifyAdvanceSignatureEd25519} and friends), returning the
  *   digest (= next nonce) on success.
  * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
- *   `falcon512`, `secp256k1`): its `Scheme`/program-ID const,
+ *   `falcon512`, `mldsa44`, `secp256k1`, `winternitz`, `xmss`): its `Scheme`/program-ID const,
  *   identity derivation, an `initialize` builder, and a signer where one
  *   exists.
  *
@@ -46,6 +46,8 @@ export * from "./verify.js";
 export * from "./schemes/ed25519.js";
 export * from "./schemes/eip191.js";
 export * from "./schemes/secp256k1.js";
+export * from "./schemes/winternitz.js";
+export * from "./schemes/xmss.js";
 
 // Falcon: re-export only the scheme-unique symbols. The wire-size
 // constants come from `./scheme.js` above (re-exporting them again via
@@ -61,3 +63,20 @@ export {
   signAdvanceInstructionFalcon512,
 } from "./schemes/falcon512.js";
 export type { Falcon512Keypair } from "./schemes/falcon512.js";
+
+// ML-DSA-44: as for Falcon, the size constants come from `./scheme.js`.
+export {
+  MLDSA44,
+  MLDSA44_SECRET_KEY_LEN,
+  MLDSA44_EXPAND_STEPS,
+  MLDSA44_EXPAND_DISCRIMINATOR,
+  MLDSA44_STORED_IDENTITY_LEN,
+  mldsa44Identity,
+  mldsa44Keygen,
+  mldsa44PublicKey,
+  createInitializeMlDsa44,
+  createExpandMlDsa44,
+  createRegisterMlDsa44Instructions,
+  signAdvanceInstructionMlDsa44,
+} from "./schemes/mldsa44.js";
+export type { MlDsa44Keypair } from "./schemes/mldsa44.js";

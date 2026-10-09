@@ -21,13 +21,15 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
+import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
 
-import { Scheme, sha256, FALCON_PUBKEY_LEN } from "./scheme.js";
+import { Scheme, sha256, FALCON_PUBKEY_LEN, MLDSA44_PUBKEY_LEN } from "./scheme.js";
 import { advanceVectorDigest } from "./digest.js";
 import { ED25519 } from "./schemes/ed25519.js";
 import { EIP191, eip191EnvelopeHash } from "./schemes/eip191.js";
 import { SECP256K1 } from "./schemes/secp256k1.js";
 import { FALCON512 } from "./schemes/falcon512.js";
+import { MLDSA44 } from "./schemes/mldsa44.js";
 
 // ── Errors ───────────────────────────────────────────────────────────
 
@@ -283,3 +285,26 @@ export function verifyAdvanceSignatureFalcon512(
   );
 }
 
+/**
+ * Verify an ML-DSA-44 `advance` signature offline, given the 1,312-byte
+ * public key (the identity) and the 2,420-byte signature, under the empty
+ * context the program uses. Returns the recomputed digest on success.
+ */
+export function verifyAdvanceSignatureMlDsa44(
+  publicKey: Uint8Array,
+  nonce: Uint8Array,
+  preInstructions: TransactionInstruction[],
+  postInstructions: TransactionInstruction[],
+  signature: Uint8Array,
+  feePayer?: Address
+): Uint8Array {
+  checkInputs(
+    "mldsa44", nonce, publicKey, MLDSA44_PUBKEY_LEN,
+    signature, MLDSA44.signatureLen
+  );
+  return checkedDigest(
+    "mldsa44", MLDSA44, publicKey, nonce, preInstructions,
+    postInstructions, feePayer,
+    (digest) => ml_dsa44.verify(signature, digest, publicKey)
+  );
+}

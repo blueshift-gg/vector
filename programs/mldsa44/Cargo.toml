@@ -1,0 +1,18 @@
+[package]
+name = "vector-mldsa44"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vector — ML-DSA-44 (FIPS 204, post-quantum) signing program"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+vector-common = { path = "../../crates/common" }
+pinocchio = { workspace = true, features = ["account-resize"] }
+solana-address = { workspace = true }
+solana-ml-dsa = { workspace = true }
