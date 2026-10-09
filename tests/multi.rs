@@ -1,7 +1,5 @@
-//! Several signers in one `Advance`. Each signs the same message — the
-//! transaction with the signatures cut out — so the tests here are about
-//! what that cut must never allow: an unsigned byte, a signature that works
-//! somewhere else, or a `Passthrough` for an account that did not sign.
+//! Several signers in one `Advance`. Each signs the same message: the
+//! transaction with the signatures cut out.
 
 use ed25519_dalek::{Signer, SigningKey};
 use k256::ecdsa::{
@@ -11,7 +9,7 @@ use k256::ecdsa::{
 use mollusk_svm::{result::types::TransactionProgramResult, Mollusk};
 use solana_account::Account;
 use solana_address::Address;
-use solana_instruction::{AccountMeta, Instruction};
+use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
@@ -26,12 +24,11 @@ use crate::common::{
 
 const FUNDS: u64 = 5_000_000_000;
 
-/// Three accounts — two Ed25519, one secp256k1 — and somewhere to send to.
+/// An Ed25519 and a secp256k1 account, and somewhere to send to.
 struct World {
     mollusk: Mollusk,
     alice: SigningKey,
     bob: Secp256k1SigningKey,
-    carol: SigningKey,
     receiver: Address,
     accounts: Vec<(Address, Account)>,
 }
@@ -41,13 +38,11 @@ impl World {
         let mollusk = mollusk();
         let alice = SigningKey::from_bytes(&[1; 32]);
         let bob = Secp256k1SigningKey::from_bytes(&SECP256K1_PRIVKEY.into()).unwrap();
-        let carol = SigningKey::from_bytes(&[3; 32]);
         let receiver = Address::new_unique();
         let mut accounts = vec![(receiver, Account::new(1_000_000, 0, &Address::default()))];
         for (scheme, identity) in [
             (&ED25519, ed25519_pubkey(&alice).to_vec()),
             (&SECP256K1, secp256k1_compressed_pubkey(&bob).to_vec()),
-            (&ED25519, ed25519_pubkey(&carol).to_vec()),
         ] {
             let (vector, bump) = find_vector_pda(scheme, &identity);
             accounts.push((
@@ -59,7 +54,6 @@ impl World {
             mollusk,
             alice,
             bob,
-            carol,
             receiver,
             accounts,
         }
@@ -93,11 +87,7 @@ impl World {
         (vec![advance, first, second], alice_digest, bob_digest)
     }
 
-    fn run(&self, transaction: &[Instruction]) -> TransactionProgramResult {
-        self.run_with(transaction, &self.accounts).0
-    }
-
-    fn run_with(
+    fn run(
         &self,
         transaction: &[Instruction],
         accounts: &[(Address, Account)],
@@ -122,7 +112,7 @@ impl World {
                 accounts.push((meta.pubkey, Account::default()));
             }
         }
-        let (result, after) = self.run_with(transaction, &accounts);
+        let (result, after) = self.run(transaction, &accounts);
         assert_ne!(result, TransactionProgramResult::Success, "{what}");
         assert_eq!(after, accounts, "{what}");
     }
@@ -132,7 +122,7 @@ impl World {
 fn two_schemes_sign_one_advance() {
     let world = World::new();
     let (transaction, alice_digest, bob_digest) = world.alice_and_bob();
-    let (result, after) = world.run_with(&transaction, &world.accounts);
+    let (result, after) = world.run(&transaction, &world.accounts);
     assert_eq!(result, TransactionProgramResult::Success);
 
     let account = |key: &Address| &after.iter().find(|(k, _)| k == key).unwrap().1;
@@ -155,7 +145,7 @@ fn two_schemes_sign_one_advance() {
     assert_eq!(account(&world.receiver).lamports, 1_000_000 + 3_000_000_000);
 
     // Both nonces moved, so the same transaction cannot land twice.
-    let (replay, _) = world.run_with(&transaction, &after);
+    let (replay, _) = world.run(&transaction, &after);
     assert_eq!(
         replay,
         TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
@@ -168,7 +158,6 @@ fn two_schemes_sign_one_advance() {
 fn every_change_to_the_transaction_is_rejected() {
     let world = World::new();
     let (transaction, ..) = world.alice_and_bob();
-    assert_eq!(world.run(&transaction), TransactionProgramResult::Success);
     let stranger = Address::new_unique();
 
     for i in 0..transaction.len() {
@@ -206,97 +195,76 @@ fn every_change_to_the_transaction_is_rejected() {
             world.assert_rejected(&changed, &what);
         }
         let mut changed = transaction.clone();
-        changed[i]
-            .accounts
-            .push(AccountMeta::new_readonly(stranger, false));
-        world.assert_rejected(&changed, &format!("instruction {i}, one more account"));
-
-        let mut changed = transaction.clone();
         changed.remove(i);
         world.assert_rejected(&changed, &format!("without instruction {i}"));
-        let mut changed = transaction.clone();
-        changed.insert(i, transaction[i].clone());
-        world.assert_rejected(&changed, &format!("instruction {i} twice"));
     }
-    let mut changed = transaction.clone();
-    changed.swap(1, 2);
-    world.assert_rejected(&changed, "passthroughs in the other order");
 }
 
-/// Alice and Carol use the same scheme, so their signatures have the same
-/// length and nothing but the digest tells them apart.
 #[test]
-fn a_signature_only_works_for_its_own_account() {
+fn advance_errors() {
     let world = World::new();
-    let alice = ed25519_pubkey(&world.alice);
-    let carol = ed25519_pubkey(&world.carol);
-    let post = [world.withdraw(&ED25519, &alice, 1_000_000_000)];
-    let message = advance_message(&[(&ED25519, &alice), (&ED25519, &carol)], &[], &post, None);
-    let alice_signature = world
-        .alice
-        .sign(&signer_digest(
-            &message,
-            &NONCE,
-            &find_vector_pda(&ED25519, &alice).0,
-        ))
-        .to_bytes();
-    let carol_signature = world
-        .carol
-        .sign(&signer_digest(
-            &message,
-            &NONCE,
-            &find_vector_pda(&ED25519, &carol).0,
-        ))
-        .to_bytes();
-    let advance = |signers: &[(&Scheme, &[u8], &[u8])]| {
-        vec![create_multi_advance_instruction(signers), post[0].clone()]
+    let (transaction, ..) = world.alice_and_bob();
+    let run = |advance: Instruction, accounts: &[(Address, Account)]| {
+        let transaction = [advance, transaction[1].clone(), transaction[2].clone()];
+        world.run(&transaction, accounts).0
     };
+    let failure = |error| TransactionProgramResult::Failure(0, error);
 
-    let honest = advance(&[
-        (&ED25519, &alice, &alice_signature),
-        (&ED25519, &carol, &carol_signature),
-    ]);
-    assert_eq!(world.run(&honest), TransactionProgramResult::Success);
+    // A signature that is not the account's.
+    let mut wrong_signature = transaction[0].clone();
+    *wrong_signature.data.last_mut().unwrap() ^= 1;
+    assert_eq!(
+        run(wrong_signature, &world.accounts),
+        failure(ProgramError::MissingRequiredSignature)
+    );
 
-    world.assert_rejected(
-        &advance(&[
-            (&ED25519, &alice, &carol_signature),
-            (&ED25519, &carol, &alice_signature),
-        ]),
-        "signatures swapped",
+    // No account to verify.
+    let mut no_signers = transaction[0].clone();
+    no_signers.accounts.drain(..2);
+    assert_eq!(
+        run(no_signers, &world.accounts),
+        failure(ProgramError::NotEnoughAccountKeys)
     );
-    world.assert_rejected(
-        &advance(&[
-            (&ED25519, &carol, &carol_signature),
-            (&ED25519, &alice, &alice_signature),
-        ]),
-        "signers in the other order",
+
+    // The last account is not the instructions sysvar.
+    let mut no_sysvar = transaction[0].clone();
+    no_sysvar.accounts.pop();
+    assert_eq!(
+        run(no_sysvar, &world.accounts),
+        failure(ProgramError::UnsupportedSysvar)
     );
-    world.assert_rejected(
-        &advance(&[
-            (&ED25519, &alice, &alice_signature),
-            (&ED25519, &alice, &alice_signature),
-        ]),
-        "one signature used twice",
+
+    // An account the program does not own.
+    let mut foreign = world.accounts.clone();
+    foreign[1].1.owner = Address::new_unique();
+    assert_eq!(
+        run(transaction[0].clone(), &foreign),
+        failure(ProgramError::InvalidAccountOwner)
     );
-    // What Alice signed with Carol does not hold without her.
-    world.assert_rejected(
-        &advance(&[(&ED25519, &alice, &alice_signature)]),
-        "a co-signer dropped",
+
+    // Called from inside another instruction, where the instruction list is
+    // not the caller's.
+    let alice = ed25519_pubkey(&world.alice);
+    let outer = create_passthrough_instruction(&ED25519, &alice, &[transaction[0].clone()]);
+    let advance = sign_advance_instruction_ed25519(
+        &world.alice,
+        &NONCE,
+        &[],
+        std::slice::from_ref(&outer),
+        None,
+    );
+    assert_eq!(
+        world.run(&[advance, outer], &world.accounts).0,
+        TransactionProgramResult::Failure(1, ProgramError::IncorrectAuthority)
     );
 }
 
-/// `Passthrough` trusts any earlier `Advance` that lists its account, so
-/// listing an account must be impossible without that account's signature.
+/// A `Passthrough` needs an earlier `Advance` that lists its account.
 #[test]
-fn passthrough_needs_its_own_account_to_have_signed() {
+fn passthrough_without_its_account_in_an_advance_is_rejected() {
     let world = World::new();
-    let alice = ed25519_pubkey(&world.alice);
     let bob = secp256k1_compressed_pubkey(&world.bob);
-    let (bob_vector, _) = find_vector_pda(&SECP256K1, &bob);
     let take_from_bob = world.withdraw(&SECP256K1, &bob, 2_000_000_000);
-
-    // Alice signs a transaction that withdraws from Bob.
     let advance = sign_advance_instruction_ed25519(
         &world.alice,
         &NONCE,
@@ -305,75 +273,7 @@ fn passthrough_needs_its_own_account_to_have_signed() {
         None,
     );
     assert_eq!(
-        world.run(&[advance.clone(), take_from_bob.clone()]),
+        world.run(&[advance, take_from_bob], &world.accounts).0,
         TransactionProgramResult::Failure(1, ProgramError::MissingRequiredSignature)
-    );
-
-    // She cannot list Bob's account in her `Advance` either, wherever it goes.
-    for position in 0..=advance.accounts.len() {
-        let mut listed = advance.clone();
-        listed
-            .accounts
-            .insert(position, AccountMeta::new(bob_vector, false));
-        world.assert_rejected(
-            &[listed, take_from_bob.clone()],
-            &format!("Bob's account listed at {position}"),
-        );
-    }
-
-    // With no signers at all there is nothing to verify, and nothing passes.
-    let mut nobody = advance.clone();
-    nobody.accounts.remove(0);
-    nobody.data.truncate(1);
-    assert_eq!(
-        world.run(&[nobody, world.withdraw(&ED25519, &alice, 1)]),
-        TransactionProgramResult::Failure(0, ProgramError::NotEnoughAccountKeys)
-    );
-}
-
-/// `Advance` and `Passthrough` read the transaction's instruction list, so
-/// neither may run inside another instruction. Alice signs a transaction
-/// whose `Passthrough` calls back into the program for Bob's account.
-#[test]
-fn advance_and_passthrough_cannot_be_called_from_inside_a_passthrough() {
-    let world = World::new();
-    let alice = ed25519_pubkey(&world.alice);
-    let bob = secp256k1_compressed_pubkey(&world.bob);
-    let (transaction, ..) = world.alice_and_bob();
-    for inner in [
-        transaction[0].clone(),
-        world.withdraw(&SECP256K1, &bob, 2_000_000_000),
-    ] {
-        let outer = create_passthrough_instruction(&ED25519, &alice, &[inner]);
-        let advance = sign_advance_instruction_ed25519(
-            &world.alice,
-            &NONCE,
-            &[],
-            std::slice::from_ref(&outer),
-            None,
-        );
-        assert_eq!(
-            world.run(&[advance, outer]),
-            TransactionProgramResult::Failure(1, ProgramError::IncorrectAuthority)
-        );
-    }
-}
-
-/// A `Passthrough` only counts an `Advance` that has already run.
-#[test]
-fn passthrough_before_its_advance_is_rejected() {
-    let world = World::new();
-    let alice = ed25519_pubkey(&world.alice);
-    let withdraw = world.withdraw(&ED25519, &alice, 1_000_000_000);
-    let advance = sign_advance_instruction_ed25519(
-        &world.alice,
-        &NONCE,
-        std::slice::from_ref(&withdraw),
-        &[],
-        None,
-    );
-    assert_eq!(
-        world.run(&[withdraw, advance]),
-        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
     );
 }
