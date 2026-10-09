@@ -89,7 +89,7 @@ function vectorDigest(
   const ixOffset = readU16LE(buffer, ixOffsetPos);
 
   const numAccounts = readU16LE(buffer, ixOffset);
-  const sigStart = ixOffset + 2 + 33 * numAccounts + 32 + 2 + 1;
+  const sigStart = ixOffset + 2 + 33 * numAccounts + 32 + 2 + 2;
   const sigEnd = sigStart + sigLen;
 
   const h = createHash("sha256");

@@ -8,7 +8,7 @@ export const XMSS_PUBKEY_LEN = 41;
 export const XMSS_SIGNATURE_LEN = 1037;
 
 export const XMSS: Scheme = {
-  programId: new Address("7qCyy3NJQDMctSDiM4DxNjNR6TyasouyyRTBREhcXdsE"),
+  id: 6,
   signatureLen: XMSS_SIGNATURE_LEN,
   identityLen: 32,
   storedIdentityLen: 32 + XMSS_PUBKEY_LEN,

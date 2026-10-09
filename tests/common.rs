@@ -16,7 +16,7 @@ use spl_token_interface::{
 };
 use vector_core::{
     advance_vector_digest, create_passthrough_instruction, find_vector_pda, Scheme, VectorAccount,
-    ED25519, EIP191, FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
+    PROGRAM_ID,
 };
 
 /// Initial nonce used for advance/close digests across the suite.
@@ -29,24 +29,9 @@ pub const SECP256K1_PRIVKEY: [u8; 32] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ];
 
-/// Path (sans `.so`) to a program's built ELF, keyed off its program ID.
-fn program_path(scheme: &Scheme) -> &'static str {
-    match scheme.program_id {
-        id if id == ED25519.program_id => "../target/deploy/vector_ed25519",
-        id if id == EIP191.program_id => "../target/deploy/vector_eip191",
-        id if id == FALCON512.program_id => "../target/deploy/vector_falcon512",
-        id if id == MLDSA44.program_id => "../target/deploy/vector_mldsa44",
-        id if id == SECP256K1.program_id => "../target/deploy/vector_secp256k1",
-        id if id == WINTERNITZ.program_id => "../target/deploy/vector_winternitz",
-        id if id == XMSS.program_id => "../target/deploy/vector_xmss",
-        _ => panic!("unknown scheme program id"),
-    }
-}
-
-/// Construct a freshly-loaded `Mollusk` instance pointed at the program ELF
-/// for `scheme`.
-pub fn mollusk(scheme: &Scheme) -> Mollusk {
-    Mollusk::new(&scheme.program_id, program_path(scheme))
+/// Construct a freshly-loaded `Mollusk` instance with the program's ELF.
+pub fn mollusk() -> Mollusk {
+    Mollusk::new(&PROGRAM_ID, "../target/deploy/vector")
 }
 
 /// Run `instructions` as one transaction and check its result. The
@@ -76,7 +61,7 @@ pub fn process_transaction(
 
 /// Build a fully-populated vector account. `stored_identity` is the on-chain
 /// identity blob (length `scheme.stored_identity_len`) appended after the
-/// 33-byte header.
+/// 34-byte header.
 pub fn build_vector_account(
     nonce: [u8; 32],
     scheme: &Scheme,
@@ -86,18 +71,25 @@ pub fn build_vector_account(
 ) -> Account {
     assert_eq!(stored_identity.len(), scheme.stored_identity_len);
     let mut data = Vec::with_capacity(scheme.account_len());
-    data.extend_from_slice(&VectorAccount { nonce, bump }.header_bytes());
+    data.extend_from_slice(
+        &VectorAccount {
+            nonce,
+            scheme: scheme.id,
+            bump,
+        }
+        .header_bytes(),
+    );
     data.extend_from_slice(stored_identity);
     Account {
         lamports,
         data,
-        owner: scheme.program_id,
+        owner: PROGRAM_ID,
         executable: false,
         rent_epoch: 0,
     }
 }
 
-/// Expected on-chain account data after a successful advance: the 33-byte
+/// Expected on-chain account data after a successful advance: the 34-byte
 /// header with `nonce = next_nonce` followed by the unchanged identity.
 pub fn expected_advanced_data(
     next_nonce: [u8; 32],
@@ -109,6 +101,7 @@ pub fn expected_advanced_data(
     out.extend_from_slice(
         &VectorAccount {
             nonce: next_nonce,
+            scheme: scheme.id,
             bump,
         }
         .header_bytes(),
@@ -136,7 +129,7 @@ pub fn run_round_trip_spl<F>(
 ) where
     F: Fn(&[u8; 32], &[Instruction], &[Instruction]) -> Instruction,
 {
-    let mut mollusk = mollusk(scheme);
+    let mut mollusk = mollusk();
     token::add_program(&mut mollusk);
     mollusk.compute_budget.compute_unit_limit = 1_400_000;
 
@@ -248,7 +241,7 @@ pub fn run_round_trip_spl<F>(
         ],
     );
     println!(
-        "{} spl-round-trip: {} CUs",
-        scheme.program_id, result.compute_units_consumed
+        "scheme {} spl-round-trip: {} CUs",
+        scheme.id, result.compute_units_consumed
     );
 }

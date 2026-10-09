@@ -38,7 +38,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let identity = pda_seed_from_identity(first.verifying_key().as_bytes());
     let (vector, bump) = find_vector_pda(scheme, &identity);
     let stored = [identity.as_slice(), first.verifying_key().as_ref()].concat();
-    let mollusk = mollusk(scheme);
+    let mollusk = mollusk();
     let rent = mollusk.sysvars.rent.minimum_balance(scheme.account_len());
     let receiver = Address::new_unique();
     let accounts = vec![
@@ -193,7 +193,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .find(|(key, _)| *key == vector)
         .unwrap()
         .1
-        .data[65..]
+        .data[66..]
         .copy_from_slice(first.verifying_key().as_bytes());
     let rejected = process_transaction(
         &mollusk,
@@ -215,7 +215,7 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
     let identity = pda_seed_from_identity(&public_key);
     let (vector, bump) = find_vector_pda(&XMSS, &identity);
     let stored = [identity.as_slice(), public_key.as_slice()].concat();
-    let mollusk = mollusk(&XMSS);
+    let mollusk = mollusk();
     let accounts = [(
         vector,
         build_vector_account(
@@ -228,7 +228,7 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
     )];
     for key in [vec![0; 40], vec![0; 42], public_key.to_vec()] {
         let mut rotate = create_rotate_subinstruction(&XMSS, &identity, &public_key);
-        rotate.data.truncate(1);
+        rotate.data.truncate(2);
         rotate.data.extend_from_slice(&key);
         let passthrough = create_passthrough_instruction(&XMSS, &identity, &[rotate]);
         let digest = advance_vector_digest_with_fee_payer(

@@ -11,6 +11,12 @@ use solana_nostd_sha256::hash;
 
 /// Contract every signing scheme satisfies. One `impl` per program.
 pub trait SigningScheme {
+    /// Identifies the scheme: the second byte of every instruction, the
+    /// second header field of every account, and a PDA seed. One program
+    /// serves every scheme, so this is what keeps an account registered
+    /// under one from reaching another's verifier.
+    const ID: u8;
+
     /// Wire signature length carried in the `advance` instruction data.
     const SIGNATURE_LEN: usize;
 

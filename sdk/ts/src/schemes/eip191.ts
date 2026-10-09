@@ -19,7 +19,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
 export const EIP191: Scheme = {
-  programId: new Address("G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu"),
+  id: 1,
   signatureLen: 65,
   identityLen: 20,
   storedIdentityLen: 20,

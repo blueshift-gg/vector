@@ -2,7 +2,7 @@
 //! each key permits one signing attempt, including failed salt sampling.
 
 use sha2::{Digest, Sha256};
-use solana_address::{address, Address};
+use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_winternitz::{winternitz, PUBLIC_KEY_LEN};
 
@@ -13,7 +13,7 @@ pub const WINTERNITZ_SIGNATURE_LEN: usize = winternitz::SIGNATURE_LEN;
 
 /// The initial key hash is the permanent identity; the current key follows it.
 pub const WINTERNITZ: Scheme = Scheme {
-    program_id: address!("GvCGfvMTr8YZJZkV9KxaGF1Y2EzxUksur8iDwjVwJwGf"),
+    id: 5,
     signature_len: WINTERNITZ_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: 32 + WINTERNITZ_PUBKEY_LEN,

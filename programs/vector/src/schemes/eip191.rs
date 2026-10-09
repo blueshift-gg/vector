@@ -11,6 +11,7 @@ const ETH_ADDRESS_LEN: usize = 20;
 pub struct Secp256k1Eip191;
 
 impl SigningScheme for Secp256k1Eip191 {
+    const ID: u8 = 1;
     const SIGNATURE_LEN: usize = 65;
     const IDENTITY_LEN: usize = ETH_ADDRESS_LEN;
     const INIT_PAYLOAD_LEN: usize = ETH_ADDRESS_LEN;

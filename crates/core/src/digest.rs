@@ -179,10 +179,10 @@ fn vector_digest(
     ) as usize;
 
     // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-    // u16 data_len + data. Signature sits right after the 1-byte
-    // discriminator.
+    // u16 data_len + data. Signature sits right after the discriminator
+    // and the scheme byte.
     let num_accounts = all_ixs[target_index].accounts.len();
-    let sig_start = ix_offset + 2 + 33 * num_accounts + 32 + 2 + 1;
+    let sig_start = ix_offset + 2 + 33 * num_accounts + 32 + 2 + 2;
     let sig_end = sig_start + sig_len;
 
     debug_assert!(sig_end + 2 <= buffer.len());

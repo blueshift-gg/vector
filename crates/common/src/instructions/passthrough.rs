@@ -74,7 +74,8 @@ pub fn process<S: SigningScheme>(
         if header_and_identity.len() < VectorAccount::HEADER_LEN + S::IDENTITY_LEN {
             return Err(ProgramError::AccountDataTooSmall);
         }
-        let bump = header_and_identity[32];
+        VectorAccount::check_scheme::<S>(&header_and_identity)?;
+        let bump = header_and_identity[33];
         let identity = &header_and_identity
             [VectorAccount::HEADER_LEN..VectorAccount::HEADER_LEN + S::IDENTITY_LEN];
         (S::pda_seed_from_identity(identity), bump)
@@ -88,8 +89,8 @@ pub fn process<S: SigningScheme>(
     // execute").
     verify_prior_advance(instructions_sysvar, program_id, &pda_address)?;
 
-    let bump_arr = [bump];
-    let seeds = signer_seeds(&identity_seed, &bump_arr);
+    let (scheme, bump_arr) = ([S::ID], [bump]);
+    let seeds = signer_seeds(&scheme, &identity_seed, &bump_arr);
     let signers = [Signer::from(&seeds)];
 
     passthrough_cpi(data, remaining, &signers, &pda_address)

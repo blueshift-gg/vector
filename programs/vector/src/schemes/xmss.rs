@@ -1,12 +1,13 @@
 use pinocchio::error::ProgramError;
-use solana_winternitz::{winternitz, VerifyingKey, PUBLIC_KEY_LEN};
+use solana_winternitz::{xmss, VerifyingKey, PUBLIC_KEY_LEN};
 use vector_common::SigningScheme;
 
-/// DKKW25 Winternitz verification for the shared rotation adapter.
-pub struct Winternitz;
+/// DKKW25 XMSS verification for the shared rotation adapter.
+pub struct Xmss;
 
-impl SigningScheme for Winternitz {
-    const SIGNATURE_LEN: usize = winternitz::SIGNATURE_LEN;
+impl SigningScheme for Xmss {
+    const ID: u8 = 6;
+    const SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
     const IDENTITY_LEN: usize = PUBLIC_KEY_LEN;
     const INIT_PAYLOAD_LEN: usize = PUBLIC_KEY_LEN;
 
@@ -21,7 +22,7 @@ impl SigningScheme for Winternitz {
     fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         let public_key =
             VerifyingKey::ref_from_bytes(identity).map_err(|_| ProgramError::InvalidAccountData)?;
-        let signature = winternitz::Signature::ref_from_bytes(signature)
+        let signature = xmss::Signature::ref_from_bytes(signature)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         public_key
             .verify(digest, signature)

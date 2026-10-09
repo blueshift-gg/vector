@@ -2,7 +2,7 @@
 //! over the advance digest.
 
 use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
-use solana_address::{address, Address};
+use solana_address::Address;
 use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest_with_fee_payer;
@@ -13,7 +13,7 @@ pub const ED25519_PUBKEY_LEN: usize = 32;
 
 /// Ed25519 — identity is the 32-byte public key.
 pub const ED25519: Scheme = Scheme {
-    program_id: address!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV"),
+    id: 0,
     signature_len: 64,
     identity_len: ED25519_PUBKEY_LEN,
     stored_identity_len: ED25519_PUBKEY_LEN,

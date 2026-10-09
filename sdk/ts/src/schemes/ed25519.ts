@@ -17,7 +17,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** Ed25519 — identity is the 32-byte public key. */
 export const ED25519: Scheme = {
-  programId: new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV"),
+  id: 0,
   signatureLen: 64,
   identityLen: 32,
   storedIdentityLen: 32,

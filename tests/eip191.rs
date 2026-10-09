@@ -7,7 +7,7 @@ use solana_address::Address;
 use vector_core::{
     advance_vector_digest, create_close_subinstruction, create_initialize_secp256k1_eip191,
     create_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
-    secp256k1_eip191_eth_address, sign_advance_instruction_secp256k1_eip191, EIP191,
+    secp256k1_eip191_eth_address, sign_advance_instruction_secp256k1_eip191, EIP191, PROGRAM_ID,
 };
 
 use crate::common::{
@@ -21,7 +21,7 @@ fn signing_key() -> Secp256k1SigningKey {
 
 #[test]
 fn initialize() {
-    let mollusk = mollusk(&EIP191);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_eip191_eth_address(&key);
 
@@ -47,7 +47,7 @@ fn initialize() {
         &[
             Check::success(),
             Check::account(&vector)
-                .owner(&EIP191.program_id)
+                .owner(&PROGRAM_ID)
                 .space(EIP191.account_len())
                 .build(),
         ],
@@ -56,7 +56,7 @@ fn initialize() {
 
 #[test]
 fn advance_empty() {
-    let mollusk = mollusk(&EIP191);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_eip191_eth_address(&key);
 
@@ -100,7 +100,7 @@ fn advance_round_trips_spl_mint_authority() {
 
 #[test]
 fn close_via_advance() {
-    let mollusk = mollusk(&EIP191);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_eip191_eth_address(&key);
 
@@ -142,7 +142,7 @@ fn close_via_advance() {
 
 #[test]
 fn withdraw_via_advance() {
-    let mollusk = mollusk(&EIP191);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_eip191_eth_address(&key);
 

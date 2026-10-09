@@ -6,6 +6,8 @@
 use sha2::{Digest as Sha2Digest, Sha256};
 use solana_address::{address, Address};
 
+/// The Vector program: one program for every signing scheme.
+pub const PROGRAM_ID: Address = address!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 pub const SYSTEM_PROGRAM_ID: Address = address!("11111111111111111111111111111111");
 pub const INSTRUCTIONS_SYSVAR_ID: Address = address!("Sysvar1nstructions1111111111111111111111111");
 
@@ -26,16 +28,18 @@ pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scheme {
     /// On-chain program ID. Must match the program's `declare_id!`.
-    pub program_id: Address,
+    /// The scheme byte: the second byte of every instruction, the second
+    /// header field of every account, and a PDA seed.
+    pub id: u8,
     /// Wire signature length carried in `advance` instruction data.
     pub signature_len: usize,
     /// Length of the client-side identity — the value hashed into the
     /// advance digest and used to derive the PDA. Winternitz/XMSS retain
     /// `sha256(initial_pubkey)` across rotations; Falcon uses `sha256(wire)`.
     pub identity_len: usize,
-    /// Bytes the on-chain account stores after the 33-byte header. Equals
+    /// Bytes the on-chain account stores after the 34-byte header. Equals
     /// `identity_len` for schemes that store the pubkey verbatim; larger for
-    /// schemes that store an expanded form (Falcon: 32 + 1 + 1024).
+    /// schemes that store an expanded form (Falcon: 32 + 1024).
     pub stored_identity_len: usize,
 }
 
@@ -54,11 +58,12 @@ impl Scheme {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VectorAccount {
     pub nonce: [u8; 32],
+    pub scheme: u8,
     pub bump: u8,
 }
 
 impl VectorAccount {
-    pub const HEADER_LEN: usize = 33;
+    pub const HEADER_LEN: usize = 34;
 
     /// Total on-chain account length for an identity of `identity_len` bytes.
     pub const fn account_len(identity_len: usize) -> usize {
@@ -68,7 +73,8 @@ impl VectorAccount {
     pub fn header_bytes(&self) -> [u8; Self::HEADER_LEN] {
         let mut bytes = [0u8; Self::HEADER_LEN];
         bytes[..32].copy_from_slice(&self.nonce);
-        bytes[32] = self.bump;
+        bytes[32] = self.scheme;
+        bytes[33] = self.bump;
         bytes
     }
 
@@ -77,7 +83,8 @@ impl VectorAccount {
         nonce.copy_from_slice(&bytes[..32]);
         VectorAccount {
             nonce,
-            bump: bytes[32],
+            scheme: bytes[32],
+            bump: bytes[33],
         }
     }
 }
@@ -96,14 +103,13 @@ pub fn pda_seed_from_identity(identity: &[u8]) -> [u8; 32] {
 }
 
 /// Derive the canonical `(vector_pda, bump)` for a scheme + identity.
-/// Seeds: `["vector", identity_seed]` (no scheme byte — the program ID is
-/// the discriminator).
+/// Seeds: `["vector", [scheme], identity_seed]`.
 pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
     assert_eq!(identity.len(), scheme.identity_len, "identity length mismatch");
     let seed_bytes = pda_seed_from_identity(identity);
     let seed_len = identity.len().min(32);
     Address::find_program_address(
-        &[VECTOR_PDA_SEED, &seed_bytes[..seed_len]],
-        &scheme.program_id,
+        &[VECTOR_PDA_SEED, &[scheme.id], &seed_bytes[..seed_len]],
+        &PROGRAM_ID,
     )
 }

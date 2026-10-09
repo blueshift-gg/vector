@@ -2,7 +2,8 @@ use pinocchio::{error::ProgramError, sysvars::instructions::INSTRUCTIONS_ID, Acc
 
 use crate::helpers::read_u16_at;
 
-const DISCRIMINATOR_LEN: usize = 1;
+/// The discriminator and the scheme byte, before the signature.
+const PREFIX_LEN: usize = 2;
 
 /// The pre/post slices of the instructions sysvar bracketing the executing
 /// instruction's signature region. `pre || sig || post` reconstructs the
@@ -15,7 +16,8 @@ pub struct VectorBuffer<'a> {
 
 impl<'a> VectorBuffer<'a> {
     /// Construct a `VectorBuffer` from the instructions sysvar, carving out
-    /// `sig_len` bytes (scheme-dependent) after the discriminator.
+    /// `sig_len` bytes (scheme-dependent) after the discriminator and the
+    /// scheme byte.
     pub fn from_instructions_sysvar(
         account: &'a AccountView,
         sig_len: usize,
@@ -58,7 +60,7 @@ impl<'a> VectorBuffer<'a> {
         //   [2..2 + 33 * num_accounts]   metas (1 flag byte + 32 addr each)
         //   [+ 32]                       program id
         //   [+ 2]                        data_len (u16 LE)
-        //   [...]                        instruction data (disc byte first)
+        //   [...]                        instruction data (disc, scheme, signature)
         let num_accounts = read_u16_at(data, ix_offset)? as usize;
 
         let metas_len = num_accounts
@@ -72,7 +74,7 @@ impl<'a> VectorBuffer<'a> {
             .ok_or(ProgramError::InvalidAccountData)?;
 
         let sig_start = disc_pos
-            .checked_add(DISCRIMINATOR_LEN)
+            .checked_add(PREFIX_LEN)
             .ok_or(ProgramError::InvalidAccountData)?;
         let sig_end = sig_start
             .checked_add(sig_len)

@@ -43,6 +43,7 @@ pub fn process<S: SigningScheme>(
     if !vector.owned_by(program_id) {
         return Err(ProgramError::InvalidAccountOwner);
     }
+    VectorAccount::check_scheme::<S>(&vector.try_borrow()?)?;
     // Account length is fixed for a single-scheme program — no header read
     // needed to size the rent floor.
     let rent_min = Rent::get()?.try_minimum_balance(VectorAccount::account_len::<S>())?;

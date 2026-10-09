@@ -8,6 +8,7 @@ use vector_common::SigningScheme;
 pub struct Ed25519;
 
 impl SigningScheme for Ed25519 {
+    const ID: u8 = 0;
     const SIGNATURE_LEN: usize = 64;
     const IDENTITY_LEN: usize = 32;
     const INIT_PAYLOAD_LEN: usize = 32;

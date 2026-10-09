@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 
 use pinocchio::{
     account::MAX_PERMITTED_DATA_INCREASE,
-    cpi::{Seed, Signer},
+    cpi::Signer,
     error::ProgramError,
     sysvars::{rent::Rent, slot_hashes, Sysvar},
     AccountView, Address, ProgramResult,
@@ -13,7 +13,7 @@ use pinocchio_system::{
 use solana_nostd_sha256::hashv;
 
 use crate::scheme::SigningScheme;
-use crate::state::VectorAccount;
+use crate::state::{signer_seeds, VectorAccount};
 
 /// Create the vector account at the canonical PDA for the identity derived
 /// from the init payload, derive the initial nonce on-chain, and write the
@@ -56,7 +56,7 @@ pub fn process<S: SigningScheme>(
     let identity_seed = S::pda_seed_from_payload(init_payload);
 
     let (expected_pda, bump) =
-        Address::find_program_address(&[b"vector", identity_seed.as_slice()], program_id);
+        Address::find_program_address(&[b"vector", &[S::ID], identity_seed.as_slice()], program_id);
     if vector.address() != &expected_pda {
         return Err(ProgramError::InvalidAccountData);
     }
@@ -72,12 +72,8 @@ pub fn process<S: SigningScheme>(
     };
     let nonce = hashv(&[identity_seed.as_slice(), entry]);
 
-    let bump_arr = [bump];
-    let seeds = [
-        Seed::from(b"vector"),
-        Seed::from(identity_seed.as_slice()),
-        Seed::from(&bump_arr),
-    ];
+    let (scheme, bump_arr) = ([S::ID], [bump]);
+    let seeds = signer_seeds(&scheme, &identity_seed, &bump_arr);
     let signers = [Signer::from(&seeds)];
 
     // One instruction can only grow an account by
@@ -108,12 +104,13 @@ pub fn process<S: SigningScheme>(
         .invoke()?;
     }
 
-    // Single mutable borrow: write the 33-byte header, then have the scheme
+    // Single mutable borrow: write the 34-byte header, then have the scheme
     // populate the identity bytes that fit in the initial allocation.
     {
         let mut data = vector.try_borrow_mut()?;
         data[..32].copy_from_slice(&nonce);
-        data[32] = bump;
+        data[32] = S::ID;
+        data[33] = bump;
         let (_, identity_out) = data.split_at_mut(VectorAccount::HEADER_LEN);
         S::populate_identity(init_payload, identity_out)?;
     }

@@ -1,22 +1,24 @@
-//! Shared on-chain logic for the per-scheme Vector programs.
+//! Shared on-chain logic for the Vector program.
 //!
-//! Every Vector program (Ed25519, EIP-191, Falcon-512, secp256k1-ECDSA) is
-//! a thin shell: it picks one [`SigningScheme`] and routes a discriminator
-//! to the shared instruction handlers exposed here ([`initialize`],
-//! [`advance`], [`close`], [`withdraw`], [`passthrough`]). The handlers are
-//! the single source of truth; only signature verification (the program's
-//! `SigningScheme` impl) varies per program.
+//! The program is one binary serving every signing scheme. A scheme is one
+//! [`SigningScheme`] impl: how big its signature is, what it stores as the
+//! signer's identity, and how it verifies. Everything else — account
+//! creation, nonce advancement, CPI passthrough, close/withdraw — is the
+//! shared handlers here ([`initialize`], [`advance`], [`close`],
+//! [`withdraw`], [`passthrough`]), generic over the scheme.
 //!
-//! Every scheme registers in a single `initialize` call and uses the
-//! canonical [`dispatch`] router verbatim.
+//! [`SigningScheme::ID`] says which scheme an instruction or an account is
+//! for:
 //!
-//! Because each scheme ships as its own program with its own program ID, the
-//! account layout carries no scheme discriminator:
+//! * Instruction data starts `discriminator[1] || scheme[1]`.
+//! * Account header is `nonce[32] || scheme[1] || bump[1]` (34 bytes); the
+//!   scheme's identity bytes follow at offset [`VectorAccount::HEADER_LEN`].
+//! * PDA seeds are `["vector", &[scheme], identity_seed, &[bump]]`, where
+//!   `identity_seed` is the identity itself when `IDENTITY_LEN <= 32`, else
+//!   `sha256(identity)`.
 //!
-//! * Account header is `nonce[32] || bump[1]` (33 bytes); the scheme's
-//!   identity bytes follow at offset [`VectorAccount::HEADER_LEN`].
-//! * PDA seeds are `["vector", identity_seed, &[bump]]`, where `identity_seed`
-//!   is the identity itself when `IDENTITY_LEN <= 32`, else `sha256(identity)`.
+//! Every handler that reads an account's identity checks that the account's
+//! scheme is the instruction's.
 #![no_std]
 
 extern crate alloc;
@@ -40,27 +42,25 @@ pub use instructions::{
 };
 
 use instructions::VectorInstruction;
-use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
+use pinocchio::{AccountView, Address, ProgramResult};
 
-/// Canonical discriminator router, used verbatim by every scheme
-/// (Ed25519/EIP-191/Falcon-512/secp256k1): `0` Initialize, `1` Advance,
-/// `2` Close, `3` Withdraw, `4` Passthrough — where `Initialize` is a strict
-/// create.
+/// Canonical discriminator router, used verbatim by every scheme: `0`
+/// Initialize, `1` Advance, `2` Close, `3` Withdraw, `4` Passthrough — where
+/// `Initialize` is a strict create. The program has already read the
+/// discriminator and the scheme byte that follows it, and chosen `S` from
+/// the latter; `data` is what comes after both.
 #[inline(always)]
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,
     accounts: &mut [AccountView],
-    instruction_data: &[u8],
+    discriminator: u8,
+    data: &[u8],
 ) -> ProgramResult {
-    let (discriminator, rest) = instruction_data
-        .split_first()
-        .ok_or(ProgramError::InvalidInstructionData)?;
-
-    match VectorInstruction::try_from(discriminator)? {
-        VectorInstruction::Initialize => initialize::<S>(program_id, accounts, rest),
-        VectorInstruction::Advance => advance::<S>(program_id, accounts, rest),
-        VectorInstruction::Close => close(program_id, accounts, rest),
-        VectorInstruction::Withdraw => withdraw::<S>(program_id, accounts, rest),
-        VectorInstruction::Passthrough => passthrough::<S>(program_id, accounts, rest),
+    match VectorInstruction::try_from(&discriminator)? {
+        VectorInstruction::Initialize => initialize::<S>(program_id, accounts, data),
+        VectorInstruction::Advance => advance::<S>(program_id, accounts, data),
+        VectorInstruction::Close => close(program_id, accounts, data),
+        VectorInstruction::Withdraw => withdraw::<S>(program_id, accounts, data),
+        VectorInstruction::Passthrough => passthrough::<S>(program_id, accounts, data),
     }
 }

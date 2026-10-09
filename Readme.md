@@ -22,19 +22,19 @@ The fee payer or relayer is therefore not entrusted with authority over transact
 
 ## Multi-Scheme Support
 
-Vector ships one program per signing scheme. The instruction set, account header, nonce progression and CPI passthrough are implemented in the [`vector-common`](crates/common/) crate; each program is a thin shell that plugs in one `SigningScheme` impl and routes discriminators to the shared handlers via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new program crate (a `declare_id!`, a `SigningScheme` impl, and a one-line dispatch). Winternitz and XMSS use `vector_common::rotating::dispatch`, which adds a fixed account identity and key rotation around the shared handlers.
+Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving every signing scheme. The instruction set, account header, nonce progression and CPI passthrough are implemented in the [`vector-common`](crates/common/) crate; each scheme is one `SigningScheme` impl in [`programs/vector/src/schemes`](programs/vector/src/schemes/), and the program routes to it by a scheme byte via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new module with an unused scheme byte and one arm in the router.
 
-| Scheme | Program ID | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
+| Scheme | Scheme byte | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
 |--------|------------|----------|-----------|---------------------------|------------------|
-| Ed25519    | `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV` | 32-byte public key                | 64 bytes `(r, s)`    | 32 B pubkey                          | SHA-256          |
-| Secp256k1  | `9NCknbW4LpePSZzbZGFk2HHsSH4y4pkmRjEguJo7qqjd` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | SHA-256          |
-| EIP-191    | `G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | EIP-191 + SHA-256|
-| Falcon-512 | `HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm` | `sha256(wire_pubkey_897)`         | 666 bytes (zero-padded compressed) | 32 B hash + 1 B pad + 1024 B prepared pubkey | SHA-256 |
-| ML-DSA-44 | `5qR1iCC5hinGAR9iE8dp5xJyh3Wq1Cwsxa4BuBuJieMr` (local) | 1,312-byte public key | 2,420 bytes | 1,312 B pubkey + 3 B pad + 20,544 B prepared key | SHA-256 |
-| Winternitz | `GvCGfvMTr8YZJZkV9KxaGF1Y2EzxUksur8iDwjVwJwGf` (local) | `sha256(initial_pubkey)` | 849 bytes | 32 B identity + 41 B current key | SHA-256 |
-| XMSS | `7qCyy3NJQDMctSDiM4DxNjNR6TyasouyyRTBREhcXdsE` (local) | `sha256(initial_pubkey)` | 1,037 bytes | 32 B identity + 41 B current key | SHA-256 |
+| Ed25519    | `0` | 32-byte public key                | 64 bytes `(r, s)`    | 32 B pubkey                          | SHA-256          |
+| Secp256k1  | `2` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | SHA-256          |
+| EIP-191    | `1` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | EIP-191 + SHA-256|
+| Falcon-512 | `3` | `sha256(wire_pubkey_897)`         | 666 bytes (zero-padded compressed) | 32 B hash + 1024 B prepared pubkey | SHA-256 |
+| ML-DSA-44 | `4` | 1,312-byte public key | 2,420 bytes | 1,312 B pubkey + 2 B pad + 20,544 B prepared key | SHA-256 |
+| Winternitz | `5` | `sha256(initial_pubkey)` | 849 bytes | 32 B identity + 41 B current key | SHA-256 |
+| XMSS | `6` | `sha256(initial_pubkey)` | 1,037 bytes | 32 B identity + 41 B current key | SHA-256 |
 
-Because the program ID identifies the scheme, there is no on-chain scheme discriminator: no `key_type` byte in the account, and no `key_type` in the PDA seeds. The previous BSM and Schnorr schemes have been removed.
+The scheme byte is the second byte of every instruction, a field of the account header and a PDA seed. Every handler that reads an account's identity checks that the account's scheme byte is the instruction's, so an account registered under one scheme never reaches another scheme's verifier. The previous BSM and Schnorr schemes have been removed.
 
 ### Ed25519
 The signer's 32-byte Ed25519 public key is stored directly in the account. The 64-byte `(r, s)` signature is verified directly over the SHA-256 digest. Verification uses [`brine-ed25519`](https://github.com/zfedoran/brine-ed25519) with its `fast-sha512` feature, which keeps Ed25519 advance under ~14k CUs.
@@ -70,7 +70,7 @@ Falcon signatures are variable-length (compressed Huffman); the wire format zero
 
 Vector verifies [ML-DSA-44 (FIPS 204)](https://csrc.nist.gov/pubs/fips/204/final) through [`solana-ml-dsa`](https://github.com/blueshift-gg/solana-ml-dsa), using SHAKE128/256 and an empty context. The 1,312-byte public key is the digest identity and is hashed for the PDA seed. Rust callers supply signatures from an external signer; the TypeScript SDK uses Noble's `ml_dsa44`.
 
-The program prepares the key on chain once, following Falcon's approach. The 21,892-byte account holds `nonce[32] || bump[1] || public_key[1312] || pad[3] || prepared_key[20544]`. Registration is `Initialize` followed by two permissionless `Expand` instructions; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
+The program prepares the key on chain once, following Falcon's approach. The 21,892-byte account holds `nonce[32] || scheme[1] || bump[1] || public_key[1312] || pad[2] || prepared_key[20544]`. Registration is `Initialize` followed by two permissionless `Expand` instructions; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
 
 Registration takes about 1.1M CU and a subsequent `Advance` about 264K CU in local SBPF tests. Registration and the 2,420-byte signature require [V1 transactions](https://solana.com/upgrades/larger-transaction-sizes); callers supply the transaction limits. The SDK builds instructions and does not submit transactions. The workspace pins `solana-ml-dsa` to a git revision; publish the crate with its required `solana-shake` revision and depend on the release before deploying. The program ID is local and undeployed.
 
@@ -81,7 +81,7 @@ Both programs link [`solana-winternitz`](https://github.com/blueshift-gg/solana-
 The account is 106 bytes:
 
 ```text
-nonce[32] || bump[1] || identity[32] || current_public_key[41]
+nonce[32] || scheme[1] || bump[1] || identity[32] || current_public_key[41]
 ```
 
 `identity = sha256(initial_public_key)` is permanent. It is the PDA seed and the identity folded into the Vector digest. Verification uses `current_public_key`, which can change without moving the account or its assets and authorities. This separation also appears in [Winterwallet's account layout](https://github.com/blueshift-gg/winterwallet/blob/672fc6789b1532ee680f24842d235e0be8737b61/program/src/state.rs).
@@ -103,7 +103,7 @@ Callers manage key freshness, persistent signing state and rotation timing. The 
 
 Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
 
-The workspace pins `solana-winternitz` to a git revision. Publish that crate and depend on the release before deploying. Build each program with `cargo build-sbf --manifest-path programs/xmss/Cargo.toml`, substituting `winternitz` for the one-time program. The listed program IDs are local and undeployed.
+The workspace pins `solana-winternitz` to a git revision. Publish that crate and depend on the release before deploying. Build the program with `cargo build-sbf --manifest-path programs/vector/Cargo.toml`. It is undeployed.
 
 ### Digest Construction
 All schemes share the same SHA-256 digest over the instructions sysvar buffer. The signature region is carved out of the buffer and replaced with the current nonce and the scheme's identity:
@@ -190,36 +190,37 @@ One simple way to mitigate this is to require Vector users to place an ownership
 
 ## Account Layout
 
-A Vector account is a PDA at `["vector", identity_seed]` under the scheme's program, with a fixed 33-byte header followed by the scheme's identity bytes:
+A Vector account is a PDA at `["vector", [scheme], identity_seed]`, with a fixed 34-byte header followed by the scheme's identity bytes:
 
 ```
 nonce:    [u8; 32]  // offset  0 — current state nonce
-bump:     u8        // offset 32 — PDA bump seed
-identity: [u8; N]   // offset 33 — N = stored identity length
+scheme:   u8        // offset 32 — scheme byte
+bump:     u8        // offset 33 — PDA bump seed
+identity: [u8; N]   // offset 34 — N = stored identity length
 ```
 
 `identity_seed` is derived from the client identity: the identity itself when it is `<= 32` bytes, otherwise `sha256(identity)`. For Winternitz/XMSS it is the fixed 32-byte hash of the initial key, even after rotation.
 
-| Scheme      | Total Account Size | Identity Bytes (offset 33)                      |
+| Scheme      | Total Account Size | Identity Bytes (offset 34)                      |
 |-------------|--------------------|-------------------------------------------------|
-| Ed25519     | 65 B               | 32 B public key                                 |
-| EIP-191     | 53 B               | 20 B ETH address                                |
-| Secp256k1   | 66 B               | 33 B compressed pubkey                          |
-| Falcon-512  | 1090 B             | 32 B `sha256(wire)` + 1 B pad + 1024 B prepared |
-| ML-DSA-44   | 21,892 B           | 1,312 B public key + 3 B pad + 20,544 B prepared key |
-| Winternitz / XMSS | 106 B | 32 B permanent identity + 41 B current public key |
+| Ed25519     | 66 B               | 32 B public key                                 |
+| EIP-191     | 54 B               | 20 B ETH address                                |
+| Secp256k1   | 67 B               | 33 B compressed pubkey                          |
+| Falcon-512  | 1090 B             | 32 B `sha256(wire)` + 1024 B prepared           |
+| ML-DSA-44   | 21,892 B           | 1,312 B public key + 2 B pad + 20,544 B prepared key |
+| Winternitz / XMSS | 107 B | 32 B permanent identity + 41 B current public key |
 
-Because each scheme is its own program, the program ID is the scheme discriminator — there is no `key_type` byte and no `key_type` PDA seed. Cross-scheme collision is impossible: two schemes cannot share a PDA because the PDA is derived under a different program ID.
+Two schemes cannot share a PDA: the scheme byte is one of the seeds, so the same identity bytes derive a different address under each scheme. The header's scheme byte is what a handler checks before it reads the identity.
 
 ## Initialization
-A Vector account is created via the `initialize` instruction, which allocates the `33 + stored_identity_len` byte PDA under the scheme's program. Instruction data: `[disc, ...init_payload]` (no scheme byte — the program identifies the scheme), where `init_payload` is scheme-defined:
+A Vector account is created via the `initialize` instruction, which allocates the `34 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...init_payload]`, where `init_payload` is scheme-defined:
 
 | Scheme      | `init_payload`            | Stored Identity                              |
 |-------------|---------------------------|----------------------------------------------|
 | Ed25519     | 32-byte pubkey            | the pubkey verbatim                          |
 | EIP-191     | 20-byte ETH address       | the address verbatim                        |
-| Falcon-512  | 897-byte wire pubkey      | `sha256(wire)[32] \|\| pad[1] \|\| prepared[1024]` |
-| ML-DSA-44   | 1,312-byte public key     | `pk[1312] \|\| pad[3] \|\| prepared[20544]`, over `initialize` + 2 × `expand` |
+| Falcon-512  | 897-byte wire pubkey      | `sha256(wire)[32] \|\| prepared[1024]` |
+| ML-DSA-44   | 1,312-byte public key     | `pk[1312] \|\| pad[2] \|\| prepared[20544]`, over `initialize` + 2 × `expand` |
 | Secp256k1   | 33-byte compressed pubkey | the compressed pubkey verbatim              |
 | Winternitz / XMSS | 41-byte public key | `sha256(initial_pubkey)[32]` followed by the current 41-byte key |
 
@@ -244,10 +245,10 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 ### Rust (`vector-core`)
 
-The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes a `Scheme` descriptor (`program_id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
+The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes `PROGRAM_ID` and a `Scheme` descriptor (`id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
 - `create_rotate_subinstruction(&scheme, &identity, new_public_key)` — authorize a Winternitz/XMSS key replacement through Passthrough.
-- `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", identity_seed]`).
+- `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", [scheme], identity_seed]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; `create_expand_mldsa44(public_key)` builds ML-DSA-44's two follow-up instructions.
 - `create_initialize_instruction(payer, &scheme, identity, init_payload)` — generic init-instruction builder.
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
@@ -268,7 +269,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 
 - `createRotateSubinstruction(scheme, identity, newPublicKey)` — authorize a Winternitz/XMSS key replacement through Passthrough.
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
-- `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 33-byte header.
+- `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 34-byte header.
 - `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` / `createInitializeMlDsa44(payer, publicKey)` — convenience wrappers; `createExpandMlDsa44(publicKey)` and `createRegisterMlDsa44Instructions(payer, publicKey)` build ML-DSA-44's three-instruction registration.
 - `createInitializeInstruction(payer, scheme, identity, initPayload)` — generic init builder.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.

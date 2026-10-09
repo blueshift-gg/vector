@@ -3,7 +3,7 @@
 //! signer). The client identity is `sha256(wire_pubkey)`.
 
 use sha2::{Digest as Sha2Digest, Sha256};
-use solana_address::{address, Address};
+use solana_address::Address;
 use solana_falcon512::{FALCON_512_PUBKEY_LEN, FALCON_512_SIGNATURE_LEN};
 use solana_instruction::Instruction;
 
@@ -14,15 +14,14 @@ pub const FALCON512_WIRE_PUBKEY_LEN: usize = FALCON_512_PUBKEY_LEN;
 pub const FALCON512_SIGNATURE_LEN: usize = FALCON_512_SIGNATURE_LEN;
 /// Falcon-512 prepared pubkey (`N * 2`, `N = 512`).
 pub const FALCON512_PREPARED_PUBKEY_LEN: usize = 1024;
-/// Falcon's on-chain stored identity: `sha256(wire_pubkey)[32] || pad[1] ||
-/// prepared_pubkey[1024]`. The 1-byte pad lands `prepared` on a 2-byte
-/// account offset for the on-chain zero-copy borrow.
-pub const FALCON512_STORED_IDENTITY_LEN: usize = 32 + 1 + FALCON512_PREPARED_PUBKEY_LEN;
+/// Falcon's on-chain stored identity: `sha256(wire_pubkey)[32] ||
+/// prepared_pubkey[1024]`.
+pub const FALCON512_STORED_IDENTITY_LEN: usize = 32 + FALCON512_PREPARED_PUBKEY_LEN;
 
 /// Falcon-512 — the client identity is `sha256(wire_pubkey)` (32 bytes); the
 /// account stores that hash plus the 1024-byte prepared pubkey.
 pub const FALCON512: Scheme = Scheme {
-    program_id: address!("HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm"),
+    id: 3,
     signature_len: FALCON512_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: FALCON512_STORED_IDENTITY_LEN,

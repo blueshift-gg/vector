@@ -15,7 +15,7 @@ use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
     create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
     falcon512_identity, find_vector_pda, FALCON512, FALCON512_SIGNATURE_LEN,
-    FALCON512_WIRE_PUBKEY_LEN,
+    FALCON512_WIRE_PUBKEY_LEN, PROGRAM_ID,
 };
 
 use crate::common::{
@@ -42,20 +42,19 @@ fn wire_pubkey(pk: &falcon512::PublicKey) -> [u8; FALCON512_WIRE_PUBKEY_LEN] {
     out
 }
 
-/// On-chain stored identity: `sha256(wire)[32] || pad[1] ||
-/// prepared_pubkey[1024]` (mirrors `populate_identity`).
+/// On-chain stored identity: `sha256(wire)[32] || prepared_pubkey[1024]`
+/// (mirrors `populate_identity`).
 fn stored_identity(wire: &[u8; FALCON512_WIRE_PUBKEY_LEN]) -> Vec<u8> {
     let pk = Falcon512Pubkey::try_from_slice(wire).expect("valid wire pubkey");
     let prepared = pk.try_prepare_pubkey().expect("preparable pubkey");
     let mut out = falcon512_identity(wire).to_vec();
-    out.push(0); // alignment pad
     out.extend_from_slice(prepared.as_bytes());
     out
 }
 
 #[test]
 fn initialize() {
-    let mollusk = mollusk(&FALCON512);
+    let mollusk = mollusk();
 
     let (pk, _sk) = falcon512::keypair();
     let wire = wire_pubkey(&pk);
@@ -83,7 +82,7 @@ fn initialize() {
         &[
             Check::success(),
             Check::account(&vector)
-                .owner(&FALCON512.program_id)
+                .owner(&PROGRAM_ID)
                 .space(FALCON512.account_len())
                 .build(),
         ],
@@ -96,7 +95,7 @@ fn initialize() {
 
 #[test]
 fn advance_empty() {
-    let mut mollusk = mollusk(&FALCON512);
+    let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = 500_000;
 
     let (pk, sk) = falcon512::keypair();
@@ -152,7 +151,7 @@ fn advance_round_trips_spl_mint_authority() {
 
 #[test]
 fn close_via_advance() {
-    let mut mollusk = mollusk(&FALCON512);
+    let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = 500_000;
 
     let (pk, sk) = falcon512::keypair();
@@ -203,7 +202,7 @@ fn close_via_advance() {
 
 #[test]
 fn withdraw_via_advance() {
-    let mut mollusk = mollusk(&FALCON512);
+    let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = 500_000;
 
     let (pk, sk) = falcon512::keypair();

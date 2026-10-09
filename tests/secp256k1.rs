@@ -7,7 +7,7 @@ use solana_address::Address;
 use vector_core::{
     advance_vector_digest, create_close_subinstruction, create_initialize_secp256k1_ecdsa,
     create_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
-    secp256k1_compressed_pubkey, sign_advance_instruction_secp256k1_ecdsa, SECP256K1,
+    secp256k1_compressed_pubkey, sign_advance_instruction_secp256k1_ecdsa, PROGRAM_ID, SECP256K1,
 };
 
 use crate::common::{
@@ -21,7 +21,7 @@ fn signing_key() -> Secp256k1SigningKey {
 
 #[test]
 fn initialize() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
@@ -47,7 +47,7 @@ fn initialize() {
         &[
             Check::success(),
             Check::account(&vector)
-                .owner(&SECP256K1.program_id)
+                .owner(&PROGRAM_ID)
                 .space(SECP256K1.account_len())
                 .build(),
         ],
@@ -56,7 +56,7 @@ fn initialize() {
 
 #[test]
 fn advance_empty() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
@@ -103,7 +103,7 @@ fn advance_round_trips_spl_mint_authority() {
 
 #[test]
 fn close_via_advance() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
@@ -148,7 +148,7 @@ fn close_via_advance() {
 
 #[test]
 fn withdraw_via_advance() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 

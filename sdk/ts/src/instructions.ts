@@ -16,6 +16,7 @@ import {
   findVectorPda,
   writeU16LE,
   writeU64LE,
+  PROGRAM_ID,
   INITIALIZE_DISCRIMINATOR,
   ADVANCE_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
@@ -27,11 +28,10 @@ import {
 // ── Initialize ───────────────────────────────────────────────────────
 
 /**
- * Build an `initialize` instruction. `initPayload` shape is scheme-defined;
- * there is no scheme byte (the program ID identifies the scheme).
+ * Build an `initialize` instruction. `initPayload` shape is scheme-defined.
  *
  * Accounts: `[payer, vector_pda, system_program]`.
- * Data: `[INITIALIZE_DISCRIMINATOR, ...initPayload]`.
+ * Data: `[INITIALIZE_DISCRIMINATOR, scheme, ...initPayload]`.
  */
 export function createInitializeInstruction(
   payer: Address,
@@ -41,12 +41,13 @@ export function createInitializeInstruction(
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
 
-  const data = new Uint8Array(1 + initPayload.length);
+  const data = new Uint8Array(2 + initPayload.length);
   data[0] = INITIALIZE_DISCRIMINATOR;
-  data.set(initPayload, 1);
+  data[1] = scheme.id;
+  data.set(initPayload, 2);
 
   return new TransactionInstruction({
-    programId: scheme.programId,
+    programId: PROGRAM_ID,
     keys: [
       { pubkey: payer, isSigner: true, isWritable: true },
       { pubkey: vectorPda, isSigner: false, isWritable: true },
@@ -65,7 +66,7 @@ export function createInitializeInstruction(
  * authorise CPIs under the vector PDA's signer seeds.
  *
  * Accounts: `[vector_pda(writable), instructions_sysvar]`.
- * Data: `[ADVANCE_DISCRIMINATOR, ...signature]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, scheme, ...signature]`.
  */
 export function createAdvanceInstruction(
   scheme: Scheme,
@@ -75,12 +76,13 @@ export function createAdvanceInstruction(
   const [vectorPda] = findVectorPda(scheme, identity);
 
   const sigLen = advanceVectorSignature.length;
-  const data = new Uint8Array(1 + sigLen);
+  const data = new Uint8Array(2 + sigLen);
   data[0] = ADVANCE_DISCRIMINATOR;
-  data.set(advanceVectorSignature, 1);
+  data[1] = scheme.id;
+  data.set(advanceVectorSignature, 2);
 
   return new TransactionInstruction({
-    programId: scheme.programId,
+    programId: PROGRAM_ID,
     keys: [
       { pubkey: vectorPda, isSigner: false, isWritable: true },
       { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
@@ -103,7 +105,7 @@ export function createAdvanceInstruction(
  *
  * Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
  * ...sub_ix accounts...]` repeated per sub-instruction.
- * Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
+ * Data: `[PASSTHROUGH_DISCRIMINATOR, scheme, num_ixs(u8),
  * {num_accounts(u8), data_len(u16 LE), data}...]`.
  */
 export function createPassthroughInstruction(
@@ -135,8 +137,8 @@ export function createPassthroughInstruction(
     }
   }
 
-  // [disc(1)][num_ixs(u8)][per ix: num_accounts(u8) data_len(u16 LE) data]
-  let dataLen = 1 + 1;
+  // [disc(1)][scheme(1)][num_ixs(u8)][per ix: num_accounts(u8) data_len(u16 LE) data]
+  let dataLen = 1 + 1 + 1;
   for (const ix of subInstructions) {
     dataLen += 1 + 2 + ix.data.length;
   }
@@ -145,6 +147,7 @@ export function createPassthroughInstruction(
   let off = 0;
 
   data[off++] = PASSTHROUGH_DISCRIMINATOR;
+  data[off++] = scheme.id;
   data[off++] = subInstructions.length;
 
   for (const ix of subInstructions) {
@@ -166,7 +169,7 @@ export function createPassthroughInstruction(
   }
 
   return new TransactionInstruction({
-    programId: scheme.programId,
+    programId: PROGRAM_ID,
     keys,
     data: Buffer.from(data),
   });
@@ -180,7 +183,7 @@ export function createPassthroughInstruction(
  * reachable as a CPI from passthrough (which promotes the vector PDA to a
  * signer via `invoke_signed`).
  *
- * Accounts: `[vector_pda, close_to]`. Data: `[CLOSE_DISCRIMINATOR]`.
+ * Accounts: `[vector_pda, close_to]`. Data: `[CLOSE_DISCRIMINATOR, scheme]`.
  */
 export function createCloseSubinstruction(
   scheme: Scheme,
@@ -189,12 +192,12 @@ export function createCloseSubinstruction(
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
   return new TransactionInstruction({
-    programId: scheme.programId,
+    programId: PROGRAM_ID,
     keys: [
       { pubkey: vectorPda, isSigner: false, isWritable: true },
       { pubkey: closeTo, isSigner: false, isWritable: true },
     ],
-    data: Buffer.from([CLOSE_DISCRIMINATOR]),
+    data: Buffer.from([CLOSE_DISCRIMINATOR, scheme.id]),
   });
 }
 
@@ -203,7 +206,7 @@ export function createCloseSubinstruction(
  * {@link createCloseSubinstruction}.
  *
  * Accounts: `[vector_pda, receiver]`.
- * Data: `[WITHDRAW_DISCRIMINATOR, lamports: u64 LE]`.
+ * Data: `[WITHDRAW_DISCRIMINATOR, scheme, lamports: u64 LE]`.
  */
 export function createWithdrawSubinstruction(
   scheme: Scheme,
@@ -212,11 +215,12 @@ export function createWithdrawSubinstruction(
   lamports: bigint
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
-  const data = new Uint8Array(1 + 8);
+  const data = new Uint8Array(2 + 8);
   data[0] = WITHDRAW_DISCRIMINATOR;
-  writeU64LE(data, lamports, 1);
+  data[1] = scheme.id;
+  writeU64LE(data, lamports, 2);
   return new TransactionInstruction({
-    programId: scheme.programId,
+    programId: PROGRAM_ID,
     keys: [
       { pubkey: vectorPda, isSigner: false, isWritable: true },
       { pubkey: receiver, isSigner: false, isWritable: true },
@@ -240,9 +244,9 @@ export function createRotateSubinstruction(
   }
   const [vectorPda] = findVectorPda(scheme, identity);
   return new TransactionInstruction({
-    programId: scheme.programId,
+    programId: PROGRAM_ID,
     keys: [{ pubkey: vectorPda, isSigner: false, isWritable: true }],
-    data: Buffer.from([ROTATE_DISCRIMINATOR, ...newPublicKey]),
+    data: Buffer.from([ROTATE_DISCRIMINATOR, scheme.id, ...newPublicKey]),
   });
 }
 

@@ -2,7 +2,7 @@
 //! each key permits 256 signing attempts, including failed salt sampling.
 
 use sha2::{Digest, Sha256};
-use solana_address::{address, Address};
+use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_winternitz::{xmss, PUBLIC_KEY_LEN};
 
@@ -13,7 +13,7 @@ pub const XMSS_SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
 
 /// The initial key hash is the permanent identity; the current key follows it.
 pub const XMSS: Scheme = Scheme {
-    program_id: address!("7qCyy3NJQDMctSDiM4DxNjNR6TyasouyyRTBREhcXdsE"),
+    id: 6,
     signature_len: XMSS_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: 32 + XMSS_PUBKEY_LEN,

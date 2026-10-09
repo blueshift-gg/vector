@@ -1,11 +1,11 @@
 //! Off-chain helpers for constructing Vector program instructions and
 //! computing the digests the on-chain programs verify.
 //!
-//! Each signing scheme is its own on-chain program with its own program ID.
-//! There is no on-chain scheme discriminator: the program ID identifies the
-//! scheme, the account header is `nonce[32] || bump[1]` (33 bytes), and PDA
-//! seeds are `["vector", identity_seed]`. A [`Scheme`] bundles what a client
-//! needs to talk to a given program: its program ID, wire signature length,
+//! One on-chain program, [`PROGRAM_ID`], serves every signing scheme. A
+//! scheme byte says which: it is the second byte of every instruction, the
+//! account header is `nonce[32] || scheme[1] || bump[1]` (34 bytes), and PDA
+//! seeds are `["vector", &[scheme], identity_seed]`. A [`Scheme`] bundles
+//! what a client needs to use one: its scheme byte, wire signature length,
 //! and identity/stored-identity lengths.
 //!
 //! # Layout

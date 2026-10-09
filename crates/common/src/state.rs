@@ -23,26 +23,26 @@ pub struct AdvanceOutcome<'a> {
 
 /// On-chain vector state — fixed-size header.
 ///
-/// Layout (33 bytes, `#[repr(C)]`):
+/// Layout (34 bytes, `#[repr(C)]`):
 /// ```text
-/// nonce: [u8; 32]  // offset  0 — current state nonce
-/// bump:  u8        // offset 32 — PDA bump seed
+/// nonce:  [u8; 32]  // offset  0 — current state nonce
+/// scheme: u8        // offset 32 — `SigningScheme::ID`
+/// bump:   u8        // offset 33 — PDA bump seed
 /// ```
 ///
 /// The scheme's identity bytes follow at offset
-/// [`HEADER_LEN`](Self::HEADER_LEN); length is `S::IDENTITY_LEN`. Because
-/// each scheme is its own program, there is no on-chain scheme discriminator
-/// — the program ID *is* the discriminator.
+/// [`HEADER_LEN`](Self::HEADER_LEN); length is `S::IDENTITY_LEN`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VectorAccount {
     pub nonce: [u8; 32],
+    pub scheme: u8,
     pub bump: u8,
 }
 
 impl VectorAccount {
     /// Length of the fixed-size header preceding the identity bytes.
-    pub const HEADER_LEN: usize = 33;
+    pub const HEADER_LEN: usize = 34;
 
     /// Total account length for scheme `S`: `HEADER_LEN + S::IDENTITY_LEN`.
     #[inline]
@@ -50,10 +50,24 @@ impl VectorAccount {
         Self::HEADER_LEN + S::IDENTITY_LEN
     }
 
-    /// Read-only header snapshot. Validates ownership and minimum size, then
-    /// releases the runtime borrow before returning so the same PDA can
-    /// appear as a CPI signer downstream.
-    fn load(account: &AccountView, program_id: &Address) -> Result<Self, ProgramError> {
+    /// The account is one scheme `S` created. Every handler that reads the
+    /// identity through `S` calls this first: the bytes after the header
+    /// mean something else under any other scheme.
+    pub fn check_scheme<S: SigningScheme>(data: &[u8]) -> Result<(), ProgramError> {
+        match data.get(32) {
+            Some(&scheme) if scheme == S::ID => Ok(()),
+            Some(_) => Err(ProgramError::InvalidAccountData),
+            None => Err(ProgramError::AccountDataTooSmall),
+        }
+    }
+
+    /// Read-only header snapshot. Validates ownership, minimum size and
+    /// scheme, then releases the runtime borrow before returning so the same
+    /// PDA can appear as a CPI signer downstream.
+    fn load<S: SigningScheme>(
+        account: &AccountView,
+        program_id: &Address,
+    ) -> Result<Self, ProgramError> {
         if !account.owned_by(program_id) {
             return Err(ProgramError::InvalidAccountOwner);
         }
@@ -61,11 +75,13 @@ impl VectorAccount {
             return Err(ProgramError::AccountDataTooSmall);
         }
         let data = account.try_borrow()?;
+        Self::check_scheme::<S>(&data)?;
         let mut nonce = [0u8; 32];
         nonce.copy_from_slice(&data[..32]);
         Ok(Self {
             nonce,
-            bump: data[32],
+            scheme: data[32],
+            bump: data[33],
         })
     }
 
@@ -100,7 +116,7 @@ impl VectorAccount {
         instruction_data: &'a [u8],
     ) -> Result<AdvanceOutcome<'a>, ProgramError> {
         let pda_address = account.address().to_bytes();
-        let mut state = Self::load(account, program_id)?;
+        let mut state = Self::load::<S>(account, program_id)?;
 
         let (signature, payload) = instruction_data
             .split_at_checked(S::SIGNATURE_LEN)
@@ -129,11 +145,16 @@ impl VectorAccount {
     }
 }
 
-/// Build the three PDA signer seeds for a vector account:
-/// `["vector", identity-or-hash, &[bump]]`.
-pub fn signer_seeds<'a>(identity_seed: &'a IdentitySeed, bump: &'a [u8; 1]) -> [Seed<'a>; 3] {
+/// Build the four PDA signer seeds for a vector account:
+/// `["vector", &[scheme], identity-or-hash, &[bump]]`.
+pub fn signer_seeds<'a>(
+    scheme: &'a [u8; 1],
+    identity_seed: &'a IdentitySeed,
+    bump: &'a [u8; 1],
+) -> [Seed<'a>; 4] {
     [
         Seed::from(b"vector"),
+        Seed::from(&scheme[..]),
         Seed::from(identity_seed.as_slice()),
         Seed::from(&bump[..]),
     ]

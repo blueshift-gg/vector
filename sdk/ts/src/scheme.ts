@@ -20,12 +20,15 @@ export const WITHDRAW_DISCRIMINATOR = 3;
 export const PASSTHROUGH_DISCRIMINATOR = 4;
 export const ROTATE_DISCRIMINATOR = 5;
 
+/** The Vector program: one program for every signing scheme. */
+export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
+
 /**
- * Fixed-size account header: `nonce[32] || bump[1]`. Each scheme is its own
- * program, so there is no on-chain scheme discriminator; the program ID
- * identifies the scheme. The scheme's identity bytes follow the header.
+ * Fixed-size account header: `nonce[32] || scheme[1] || bump[1]`. The
+ * scheme byte says which signing scheme the account belongs to; the scheme's
+ * identity bytes follow the header.
  */
-export const VECTOR_HEADER_LEN = 33;
+export const VECTOR_HEADER_LEN = 34;
 export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
 
 // Falcon-512 wire sizes — mirror `solana-falcon512` constants.
@@ -49,8 +52,11 @@ export const SECP256K1_COMPRESSED_PUBKEY_LEN = 33;
  * `vector-core` crate.
  */
 export interface Scheme {
-  /** On-chain program ID (matches the program's `declare_id!`). */
-  programId: Address;
+  /**
+   * The scheme byte: the second byte of every instruction, the second
+   * header field of every account, and a PDA seed.
+   */
+  id: number;
   /** Wire signature length carried in `advance` instruction data. */
   signatureLen: number;
   /**
@@ -61,9 +67,9 @@ export interface Scheme {
    */
   identityLen: number;
   /**
-   * Bytes the on-chain account stores after the 33-byte header. Equals
-   * `identityLen` for verbatim-pubkey schemes; larger for Falcon (32 + 1
-   * pad + 1024 prepared).
+   * Bytes the on-chain account stores after the 34-byte header. Equals
+   * `identityLen` for verbatim-pubkey schemes; larger for Falcon (32 + 1024
+   * prepared).
    */
   storedIdentityLen: number;
 }
@@ -75,9 +81,10 @@ export function vectorAccountLen(scheme: Scheme): number {
 
 // ── VectorAccount ────────────────────────────────────────────────────
 
-/** Header of a vector account. Scheme identity follows at offset 33. */
+/** Header of a vector account. Scheme identity follows at offset 34. */
 export interface VectorAccount {
   nonce: Uint8Array; // 32 bytes
+  scheme: number; // 1 byte
   bump: number; // 1 byte
 }
 
@@ -89,14 +96,16 @@ export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
   }
   return {
     nonce: data.slice(0, 32),
-    bump: data[32],
+    scheme: data[32],
+    bump: data[33],
   };
 }
 
 export function serializeVectorAccountHeader(account: VectorAccount): Uint8Array {
   const buf = new Uint8Array(VECTOR_HEADER_LEN);
   buf.set(account.nonce, 0);
-  buf[32] = account.bump;
+  buf[32] = account.scheme;
+  buf[33] = account.bump;
   return buf;
 }
 
@@ -115,7 +124,7 @@ export function pdaSeedFromIdentity(identity: Uint8Array): Uint8Array {
   return identity.length <= 32 ? identity : sha256(identity);
 }
 
-/** Derive `(vector_pda, bump)`. Seeds: `["vector", identity_seed]`. */
+/** Derive `(vector_pda, bump)`. Seeds: `["vector", [scheme], identity_seed]`. */
 export function findVectorPda(
   scheme: Scheme,
   identity: Uint8Array
@@ -124,8 +133,8 @@ export function findVectorPda(
     throw new Error(`Identity must be ${scheme.identityLen} bytes`);
   }
   return findProgramAddressSync(
-    [VECTOR_PDA_SEED, pdaSeedFromIdentity(identity)],
-    scheme.programId
+    [VECTOR_PDA_SEED, Uint8Array.of(scheme.id), pdaSeedFromIdentity(identity)],
+    PROGRAM_ID
   );
 }
 

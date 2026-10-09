@@ -2,13 +2,7 @@
 resolver = "2"
 members = [
     "crates/common",
-    "programs/ed25519",
-    "programs/eip191",
-    "programs/falcon512",
-    "programs/mldsa44",
-    "programs/secp256k1",
-    "programs/winternitz",
-    "programs/xmss",
+    "programs/vector",
     "crates/core",
     "tests",
 ]
@@ -16,17 +10,11 @@ members = [
 # package or `--workspace` flag is given. Excludes `tests` so a plain
 # `cargo build-sbf` doesn't try to compile mollusk/pqcrypto for the SBF
 # target. Run the test suite explicitly with `cargo test -p vector-tests`.
-# Build a single program with `cargo build-sbf --manifest-path
-# programs/<scheme>/Cargo.toml`.
+# Build the program with `cargo build-sbf --manifest-path
+# programs/vector/Cargo.toml`.
 default-members = [
     "crates/common",
-    "programs/ed25519",
-    "programs/eip191",
-    "programs/falcon512",
-    "programs/mldsa44",
-    "programs/secp256k1",
-    "programs/winternitz",
-    "programs/xmss",
+    "programs/vector",
     "crates/core",
 ]
 

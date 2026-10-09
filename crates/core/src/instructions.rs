@@ -6,19 +6,19 @@ use solana_instruction::{AccountMeta, Instruction};
 
 use crate::scheme::{
     find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
-    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, ROTATE_DISCRIMINATOR, SYSTEM_PROGRAM_ID,
-    WITHDRAW_DISCRIMINATOR,
+    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, ROTATE_DISCRIMINATOR,
+    SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
 };
 
 /// Build an `initialize` instruction. `init_payload`'s shape is
-/// scheme-defined; there is no scheme byte (the program ID identifies it).
+/// scheme-defined.
 ///
 /// Accounts: `[payer, vector_pda, system_program]`. `system_program` is
 /// required — Solana resolves the pinocchio `CreateAccount` CPI by looking
 /// up System in the parent program's account_infos (built-in programs are
 /// NOT auto-loaded for CPI dispatch).
 ///
-/// Data: `[INITIALIZE_DISCRIMINATOR, ...init_payload]`.
+/// Data: `[INITIALIZE_DISCRIMINATOR, scheme, ...init_payload]`.
 pub fn create_initialize_instruction(
     payer: &Address,
     scheme: &Scheme,
@@ -34,10 +34,11 @@ pub fn create_initialize_instruction(
 
     let mut data = Vec::with_capacity(1 + init_payload.len());
     data.push(INITIALIZE_DISCRIMINATOR);
+    data.push(scheme.id);
     data.extend_from_slice(init_payload);
 
     Instruction {
-        program_id: scheme.program_id,
+        program_id: PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(*payer, true),
             AccountMeta::new(vector, false),
@@ -52,7 +53,7 @@ pub fn create_initialize_instruction(
 /// [`create_passthrough_instruction`] in the same tx for that.
 ///
 /// Accounts: `[vector_pda(writable), instructions_sysvar]`.
-/// Data: `[ADVANCE_DISCRIMINATOR, ...signature]`.
+/// Data: `[ADVANCE_DISCRIMINATOR, scheme, ...signature]`.
 pub fn create_advance_instruction(
     scheme: &Scheme,
     identity: &[u8],
@@ -61,9 +62,10 @@ pub fn create_advance_instruction(
     let (vector_pda, _bump) = find_vector_pda(scheme, identity);
     let mut data = Vec::with_capacity(1 + advance_vector_signature.len());
     data.push(ADVANCE_DISCRIMINATOR);
+    data.push(scheme.id);
     data.extend_from_slice(advance_vector_signature);
     Instruction {
-        program_id: scheme.program_id,
+        program_id: PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(vector_pda, false),
             AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
@@ -83,7 +85,7 @@ pub fn create_advance_instruction(
 ///
 /// Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
 /// ...sub_ix accounts...]` repeated per sub-instruction.
-/// Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
+/// Data: `[PASSTHROUGH_DISCRIMINATOR, scheme, num_ixs(u8),
 /// {num_accounts(u8), data_len(u16 LE), data}...]`.
 pub fn create_passthrough_instruction(
     scheme: &Scheme,
@@ -113,12 +115,14 @@ pub fn create_passthrough_instruction(
 
     let payload_len: usize = 1
         + 1
+        + 1
         + instructions
             .iter()
             .map(|ix| 1 + 2 + ix.data.len())
             .sum::<usize>();
     let mut data = Vec::with_capacity(payload_len);
     data.push(PASSTHROUGH_DISCRIMINATOR);
+    data.push(scheme.id);
     data.push(instructions.len() as u8);
     for ix in instructions {
         assert!(
@@ -138,7 +142,7 @@ pub fn create_passthrough_instruction(
     debug_assert_eq!(data.len(), payload_len);
 
     Instruction {
-        program_id: scheme.program_id,
+        program_id: PROGRAM_ID,
         accounts,
         data,
     }
@@ -154,12 +158,12 @@ pub fn create_close_subinstruction(
 ) -> Instruction {
     let (vector_pda, _bump) = find_vector_pda(scheme, identity);
     Instruction {
-        program_id: scheme.program_id,
+        program_id: PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(vector_pda, false),
             AccountMeta::new(*close_to, false),
         ],
-        data: vec![CLOSE_DISCRIMINATOR],
+        data: vec![CLOSE_DISCRIMINATOR, scheme.id],
     }
 }
 
@@ -179,9 +183,10 @@ pub fn create_rotate_subinstruction(
     let (vector_pda, _) = find_vector_pda(scheme, identity);
     let mut data = Vec::with_capacity(1 + new_public_key.len());
     data.push(ROTATE_DISCRIMINATOR);
+    data.push(scheme.id);
     data.extend_from_slice(new_public_key);
     Instruction {
-        program_id: scheme.program_id,
+        program_id: PROGRAM_ID,
         accounts: vec![AccountMeta::new(vector_pda, false)],
         data,
     }
@@ -199,9 +204,10 @@ pub fn create_withdraw_subinstruction(
     let (vector_pda, _bump) = find_vector_pda(scheme, identity);
     let mut data = Vec::with_capacity(1 + 8);
     data.push(WITHDRAW_DISCRIMINATOR);
+    data.push(scheme.id);
     data.extend_from_slice(&lamports.to_le_bytes());
     Instruction {
-        program_id: scheme.program_id,
+        program_id: PROGRAM_ID,
         accounts: vec![
             AccountMeta::new(vector_pda, false),
             AccountMeta::new(*receiver, false),

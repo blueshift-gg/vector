@@ -39,10 +39,10 @@ export const FALCON_SECRET_KEY_LEN = 1281;
 
 /** Falcon-512 — client identity is `sha256(wire_pubkey)` (32 bytes). */
 export const FALCON512: Scheme = {
-  programId: new Address("HdkE3dPYgCRZJgLv64mbFmojyCprUim8VRXzK2wR6Qgm"),
+  id: 3,
   signatureLen: FALCON_SIGNATURE_LEN,
   identityLen: 32,
-  storedIdentityLen: 32 + 1 + FALCON_PREPARED_PUBKEY_LEN,
+  storedIdentityLen: 32 + FALCON_PREPARED_PUBKEY_LEN,
 };
 
 /** Falcon-512 client identity: `sha256(wire_pubkey)` (32 bytes). */

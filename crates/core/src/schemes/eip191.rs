@@ -4,7 +4,7 @@
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as Secp256k1SigningKey};
 use sha3::{Digest as Sha3Digest, Keccak256};
-use solana_address::{address, Address};
+use solana_address::Address;
 use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest_with_fee_payer;
@@ -15,7 +15,7 @@ pub const EIP191_ETH_ADDRESS_LEN: usize = 20;
 
 /// secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address.
 pub const EIP191: Scheme = Scheme {
-    program_id: address!("G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu"),
+    id: 1,
     signature_len: 65,
     identity_len: EIP191_ETH_ADDRESS_LEN,
     stored_identity_len: EIP191_ETH_ADDRESS_LEN,

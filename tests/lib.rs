@@ -27,3 +27,6 @@ mod winternitz;
 
 #[cfg(test)]
 mod rotation;
+
+#[cfg(test)]
+mod schemes;
