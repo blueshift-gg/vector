@@ -36,7 +36,8 @@ use crate::{
 ///
 /// Parameters:
 ///
-/// - for Winternitz and XMSS, the key that signs next
+/// - for Winternitz, the key that signs next; for XMSS, `0`, or `1` and
+///   the key that signs next
 /// - num_instructions: u8
 /// - for each instruction: num_accounts: u8, data_len: u16, data
 ///

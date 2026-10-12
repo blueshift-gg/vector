@@ -139,22 +139,36 @@ export function createPassthroughInstruction(
  * rotates. `nextPublicKey` is the key that signs the next transaction; it
  * follows the discriminator and is covered by the signature like the rest.
  * Persist that signer before authorizing this instruction. `identity` stays
- * the SHA-256 of the first key. To keep the current key, pass it again.
+ * the SHA-256 of the first key.
+ *
+ * A Winternitz key signs once, so it must be replaced every time. An XMSS
+ * key may be kept with `null` until its tree runs out.
  */
 export function createRotatingPassthroughInstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  nextPublicKey: Uint8Array,
+  nextPublicKey: Uint8Array | null,
   subInstructions: TransactionInstruction[]
 ): TransactionInstruction {
-  if (scheme.nextKeyLen === 0 || nextPublicKey.length !== scheme.nextKeyLen) {
+  if (scheme.nextKeyLen === 0) {
+    throw new Error("This scheme's key does not rotate");
+  }
+  if (nextPublicKey === null && !scheme.nextKeyOptional) {
+    throw new Error("This scheme's key signs once");
+  }
+  if (nextPublicKey !== null && nextPublicKey.length !== scheme.nextKeyLen) {
     throw new Error(`Next key must be ${scheme.nextKeyLen} bytes`);
   }
   const ix = passthroughInstruction(scheme, identity, subInstructions);
   return new TransactionInstruction({
     programId: ix.programId,
     keys: ix.keys,
-    data: Buffer.concat([ix.data.subarray(0, 1), nextPublicKey, ix.data.subarray(1)]),
+    data: Buffer.concat([
+      ix.data.subarray(0, 1),
+      scheme.nextKeyOptional ? Uint8Array.of(nextPublicKey ? 1 : 0) : new Uint8Array(),
+      nextPublicKey ?? new Uint8Array(),
+      ix.data.subarray(1),
+    ]),
   });
 }
 

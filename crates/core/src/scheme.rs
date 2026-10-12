@@ -37,9 +37,11 @@ pub struct Scheme {
     /// `identity_len` for schemes that store the pubkey verbatim; larger for
     /// schemes that store an expanded form (Falcon: 32 + 1024).
     pub stored_identity_len: usize,
-    /// Length of the key every `passthrough` carries for a scheme whose key
+    /// Length of the key a `passthrough` carries for a scheme whose key
     /// rotates (Winternitz, XMSS): the key that signs next. Zero otherwise.
     pub next_key_len: usize,
+    /// The next key may be left out, keeping the current one (XMSS).
+    pub next_key_optional: bool,
 }
 
 impl Scheme {

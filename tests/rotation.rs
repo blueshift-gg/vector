@@ -53,7 +53,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let passthrough = create_rotating_passthrough_instruction(
         scheme,
         &identity,
-        second.verifying_key().as_bytes(),
+        Some(second.verifying_key().as_bytes()),
         std::slice::from_ref(&withdraw),
     );
     let digest = advance_vector_digest_with_fee_payer(
@@ -78,7 +78,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let changed = create_rotating_passthrough_instruction(
         scheme,
         &identity,
-        third.verifying_key().as_bytes(),
+        Some(third.verifying_key().as_bytes()),
         &[withdraw],
     );
     let result = process_transaction(&mollusk, &[&advance.clone(), &changed], &accounts, &[]);
@@ -132,7 +132,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let passthrough = create_rotating_passthrough_instruction(
         scheme,
         &identity,
-        third.verifying_key().as_bytes(),
+        Some(third.verifying_key().as_bytes()),
         &[withdraw],
     );
     let next_digest = advance_vector_digest_with_fee_payer(
@@ -229,12 +229,19 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
             &stored,
         ),
     )];
-    for key in [vec![0; 40], vec![0; 42], public_key.to_vec()] {
+    // `1` then a key of the right length, or the data is malformed.
+    for (flag, key) in [
+        (1, vec![0; 40]),
+        (1, vec![0; 42]),
+        (2, public_key.to_vec()),
+        (1, public_key.to_vec()),
+    ] {
         let mut passthrough =
-            create_rotating_passthrough_instruction(&XMSS, &identity, &public_key, &[]);
+            create_rotating_passthrough_instruction(&XMSS, &identity, Some(&public_key), &[]);
         passthrough
             .data
-            .splice(1..1 + public_key.len(), key.iter().copied());
+            .splice(2..2 + public_key.len(), key.iter().copied());
+        passthrough.data[1] = flag;
         let digest = advance_vector_digest_with_fee_payer(
             &XMSS,
             &NONCE,
@@ -246,7 +253,7 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
         let signature = signer.sign(&digest).unwrap();
         let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
         let result = process_transaction(&mollusk, &[&advance, &passthrough], &accounts, &[]);
-        if key == public_key {
+        if flag == 1 && key == public_key {
             assert_eq!(result.program_result, TransactionProgramResult::Success);
             let mut expected = accounts.clone();
             expected[0].1.data = expected_advanced_data(digest, &XMSS, bump, &stored);

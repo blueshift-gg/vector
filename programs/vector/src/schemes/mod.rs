@@ -30,8 +30,14 @@ pub fn scheme(id: u8) -> Result<&'static dyn SigningScheme, ProgramError> {
         Secp256k1Ecdsa::ID => &Secp256k1Ecdsa,
         Falcon512::ID => &Falcon512,
         MlDsa44::ID => &MlDsa44,
-        Winternitz::ID => &Rotating(Winternitz),
-        Xmss::ID => &Rotating(Xmss),
+        Winternitz::ID => &Rotating {
+            scheme: Winternitz,
+            every_time: true,
+        },
+        Xmss::ID => &Rotating {
+            scheme: Xmss,
+            every_time: false,
+        },
         _ => return Err(ProgramError::InvalidInstructionData),
     })
 }

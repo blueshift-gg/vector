@@ -13,6 +13,7 @@ export const XMSS: Scheme = {
   identityLen: 32,
   storedIdentityLen: 32 + XMSS_PUBKEY_LEN,
   nextKeyLen: XMSS_PUBKEY_LEN,
+  nextKeyOptional: true,
 };
 
 /** Derive the permanent account identity. Do not recompute it on rotation. */

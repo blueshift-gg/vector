@@ -73,7 +73,7 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     let advance = vector_core::create_advance_instruction(&WINTERNITZ, &IDENTITY, &[0; 849]);
     for instruction in [
         &advance,
-        &create_rotating_passthrough_instruction(&WINTERNITZ, &IDENTITY, &[9; 41], &[]),
+        &create_rotating_passthrough_instruction(&WINTERNITZ, &IDENTITY, Some(&[9; 41]), &[]),
     ] {
         let result = mollusk.process_instruction(instruction, &[(vector, zeroed.clone())]);
         assert!(matches!(
@@ -88,7 +88,7 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     let mut foreign = account;
     foreign.owner = Address::new_unique();
     let passthrough =
-        create_rotating_passthrough_instruction(&WINTERNITZ, &IDENTITY, &[9; 41], &[]);
+        create_rotating_passthrough_instruction(&WINTERNITZ, &IDENTITY, Some(&[9; 41]), &[]);
     let result = mollusk.process_instruction(&passthrough, &[(vector, foreign)]);
     assert_eq!(
         result.program_result,

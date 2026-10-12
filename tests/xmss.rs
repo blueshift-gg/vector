@@ -32,12 +32,12 @@ fn initialize_checks_key_length_and_pda() {
     let receiver = Address::new_from_array([9; 32]);
     let withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 1234);
     let passthrough =
-        create_rotating_passthrough_instruction(&XMSS, &identity, &[7; 41], &[withdraw]);
+        create_rotating_passthrough_instruction(&XMSS, &identity, Some(&[7; 41]), &[withdraw]);
     assert_eq!(
         advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough]),
         [
-            195, 242, 216, 0, 88, 112, 118, 111, 71, 46, 59, 66, 255, 203, 249, 7, 142, 230, 165,
-            122, 33, 14, 47, 85, 96, 228, 220, 12, 180, 35, 222, 35
+            197, 9, 104, 199, 226, 33, 104, 145, 233, 107, 2, 80, 255, 243, 136, 141, 0, 5, 59,
+            232, 196, 195, 142, 155, 237, 9, 45, 63, 61, 88, 239, 234
         ],
     );
     let accounts = [
@@ -203,8 +203,7 @@ fn advance_binds_and_authorizes_withdrawal() {
         (receiver, Account::new(1_000_000, 0, &Address::default())),
     ];
     let withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 3_000_000);
-    let passthrough =
-        create_rotating_passthrough_instruction(&XMSS, &identity, &public_key, &[withdraw]);
+    let passthrough = create_rotating_passthrough_instruction(&XMSS, &identity, None, &[withdraw]);
     let digest = advance_vector_digest(
         &XMSS,
         &NONCE,
@@ -219,7 +218,7 @@ fn advance_binds_and_authorizes_withdrawal() {
     // The signature must bind the downstream action, not just the nonce.
     let changed_withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 4_000_000);
     let changed =
-        create_rotating_passthrough_instruction(&XMSS, &identity, &public_key, &[changed_withdraw]);
+        create_rotating_passthrough_instruction(&XMSS, &identity, None, &[changed_withdraw]);
     process_transaction(
         &mollusk,
         &[&advance, &changed],

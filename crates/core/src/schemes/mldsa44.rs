@@ -24,6 +24,7 @@ pub const MLDSA44: Scheme = Scheme {
     identity_len: MLDSA44_PUBKEY_LEN,
     stored_identity_len: MLDSA44_STORED_IDENTITY_LEN,
     next_key_len: 0,
+    next_key_optional: false,
 };
 
 /// Initialize an ML-DSA-44 vector account with the standard public key.

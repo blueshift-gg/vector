@@ -37,6 +37,8 @@ test("Winternitz account and rotation digest match Rust", () => {
   // The next key follows the discriminator.
   expect(Array.from(passthrough.data.subarray(0, 42))).toEqual([4, ...nextKey]);
   expect(() => createPassthroughInstruction(WINTERNITZ, identity, [])).toThrow();
+  // A Winternitz key signs once, so there is always a next key.
+  expect(() => createRotatingPassthroughInstruction(WINTERNITZ, identity, null, [])).toThrow();
   for (const length of [40, 42]) {
     expect(() =>
       createRotatingPassthroughInstruction(WINTERNITZ, identity, new Uint8Array(length), [])

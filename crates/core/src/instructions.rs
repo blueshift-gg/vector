@@ -112,21 +112,29 @@ pub fn create_passthrough_instruction(
 /// rotates. `next_public_key` is the key that signs the next transaction; it
 /// follows the discriminator and is covered by the signature like the rest.
 /// Persist that signer before authorizing this instruction. `identity` stays
-/// the SHA-256 of the first key. To keep the current key, pass it again.
+/// the SHA-256 of the first key.
+///
+/// A Winternitz key signs once, so it must be replaced every time. An XMSS
+/// key may be kept with `None` until its tree runs out.
 pub fn create_rotating_passthrough_instruction(
     scheme: &Scheme,
     identity: &[u8],
-    next_public_key: &[u8],
+    next_public_key: Option<&[u8]>,
     instructions: &[Instruction],
 ) -> Instruction {
     assert_ne!(scheme.next_key_len, 0, "this scheme's key does not rotate");
-    assert_eq!(
-        next_public_key.len(),
-        scheme.next_key_len,
-        "next key length mismatch",
-    );
+    let mut prefix = Vec::new();
+    if scheme.next_key_optional {
+        prefix.push(next_public_key.is_some() as u8);
+    } else {
+        assert!(next_public_key.is_some(), "this scheme's key signs once");
+    }
+    if let Some(key) = next_public_key {
+        assert_eq!(key.len(), scheme.next_key_len, "next key length mismatch");
+        prefix.extend_from_slice(key);
+    }
     let mut instruction = passthrough_instruction(scheme, identity, instructions);
-    instruction.data.splice(1..1, next_public_key.iter().copied());
+    instruction.data.splice(1..1, prefix);
     instruction
 }
 

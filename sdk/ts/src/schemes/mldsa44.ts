@@ -39,6 +39,7 @@ export const MLDSA44: Scheme = {
   identityLen: MLDSA44_PUBKEY_LEN,
   storedIdentityLen: MLDSA44_STORED_IDENTITY_LEN,
   nextKeyLen: 0,
+  nextKeyOptional: false,
 };
 
 /** ML-DSA-44 client identity: the public key itself, length-checked. */

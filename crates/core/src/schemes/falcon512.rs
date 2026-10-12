@@ -26,6 +26,7 @@ pub const FALCON512: Scheme = Scheme {
     identity_len: 32,
     stored_identity_len: FALCON512_STORED_IDENTITY_LEN,
     next_key_len: 0,
+    next_key_optional: false,
 };
 
 /// `sha256(wire_pubkey)` — Falcon's client-side identity (the PDA seed).

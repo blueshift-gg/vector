@@ -30,7 +30,7 @@ fn initialize_and_client_encoding() {
     let receiver = Address::new_from_array([9; 32]);
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
     let passthrough =
-        create_rotating_passthrough_instruction(&WINTERNITZ, &identity, &[7; 41], &[close]);
+        create_rotating_passthrough_instruction(&WINTERNITZ, &identity, Some(&[7; 41]), &[close]);
     assert_eq!(
         advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough]),
         [
@@ -102,8 +102,12 @@ fn signature_binds_close_and_rejects_replay() {
     let other = Address::new_unique();
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
     // Keeps the current key: the test is about the signature, not rotation.
-    let passthrough =
-        create_rotating_passthrough_instruction(&WINTERNITZ, &identity, &public_key, &[close]);
+    let passthrough = create_rotating_passthrough_instruction(
+        &WINTERNITZ,
+        &identity,
+        Some(&public_key),
+        &[close],
+    );
     let digest = advance_vector_digest(
         &WINTERNITZ,
         &NONCE,
@@ -119,7 +123,7 @@ fn signature_binds_close_and_rejects_replay() {
     let changed_action = create_rotating_passthrough_instruction(
         &WINTERNITZ,
         &identity,
-        &public_key,
+        Some(&public_key),
         &[other_close],
     );
     let mut tampered = signature;

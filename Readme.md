@@ -90,14 +90,14 @@ Both SDKs expose `WINTERNITZ` / `XMSS`, initialization helpers and `winternitz_i
 
 ### Key rotation
 
-Every `Passthrough` for a Winternitz or XMSS account starts with the key that signs next. Generate and persist a fresh signer, then authorize its public key with the current signer:
+A `Passthrough` for a Winternitz or XMSS account starts with the key that signs next. A Winternitz key signs once, so every `Passthrough` carries one. An XMSS key signs many times, so its `Passthrough` starts with `0` to keep the key, or `1` and the next key. Generate and persist a fresh signer, then authorize its public key with the current signer:
 
 ```text
 Advance(current-key signature)
 Passthrough(next_public_key, [...actions])
 ```
 
-`create_rotating_passthrough_instruction` / `createRotatingPassthroughInstruction` builds it. The key follows the discriminator, so the signature that authorizes the actions also authorizes the key. The handler stores it before running the actions, with no extra instruction or CPI. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Rotation stays within the account's signing scheme. To keep the current key, pass it again.
+`create_rotating_passthrough_instruction` / `createRotatingPassthroughInstruction` builds it. The key follows the discriminator, so the signature that authorizes the actions also authorizes the key. The handler stores it before running the actions, with no extra instruction or CPI. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Rotation stays within the account's signing scheme. For XMSS, pass no key to keep the current one.
 
 Callers manage key freshness, persistent signing state and rotation timing. The program does not track spent keys or XMSS leaves, or check that a replacement key differs. To retain control, Winternitz callers must give a fresh key in their one authorization, and an `Advance` with no `Passthrough` does not rotate; XMSS callers must rotate before exhausting the tree. Never sign different authorizations with the same Winternitz key or XMSS leaf. Failed salt sampling and abandoned authorizations consume signing attempts too.
 

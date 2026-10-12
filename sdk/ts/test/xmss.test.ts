@@ -35,7 +35,11 @@ test("XMSS account and rotation digest match Rust", () => {
     createWithdrawSubinstruction(XMSS, identity, receiver, 1234n),
   ]);
   // The next key follows the discriminator.
-  expect(Array.from(passthrough.data.subarray(0, 42))).toEqual([4, ...nextKey]);
+  // `1` and the next key follow the discriminator; `0` keeps the key.
+  expect(Array.from(passthrough.data.subarray(0, 43))).toEqual([4, 1, ...nextKey]);
+  expect(
+    Array.from(createRotatingPassthroughInstruction(XMSS, identity, null, []).data)
+  ).toEqual([4, 0, 0]);
   expect(() => createPassthroughInstruction(XMSS, identity, [])).toThrow();
   for (const length of [40, 42]) {
     expect(() =>
@@ -46,6 +50,6 @@ test("XMSS account and rotation digest match Rust", () => {
     XMSS, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "c3f2d8005870766f472e3b42ffcbf9078ee6a57a210e2f5560e4dc0cb423de23"
+    "c50968c7e2216891e96b0250fff3888d00053be8c4c38e9bed092d3f3d58efea"
   );
 });
