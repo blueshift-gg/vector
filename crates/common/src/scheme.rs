@@ -6,7 +6,7 @@
 //! account creation, nonce advancement, CPI passthrough, close/withdraw — is
 //! scheme-independent and lives in [`crate`].
 
-use pinocchio::error::ProgramError;
+use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 use solana_nostd_sha256::hash;
 
 /// Contract every signing scheme satisfies. One `impl` per scheme.
@@ -53,6 +53,17 @@ pub trait SigningScheme {
     /// init runs.
     fn pda_seed_from_payload(payload: &[u8]) -> IdentitySeed {
         IdentitySeed::default_from(payload)
+    }
+
+    /// Instructions only this scheme has: any discriminator that is not one
+    /// of the shared ones. `accounts[0]` is a vector account of this scheme.
+    /// Default: there are none.
+    fn process_other(
+        _discriminator: u8,
+        _accounts: &mut [AccountView],
+        _data: &[u8],
+    ) -> ProgramResult {
+        Err(ProgramError::InvalidInstructionData)
     }
 
     /// Verify `signature` over `digest` against the stored `identity`.

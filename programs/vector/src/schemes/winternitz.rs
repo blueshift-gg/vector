@@ -1,11 +1,14 @@
 use pinocchio::error::ProgramError;
 use solana_winternitz::{winternitz, VerifyingKey, PUBLIC_KEY_LEN};
-use vector_common::SigningScheme;
+use vector_common::{rotating::Rotating, SigningScheme};
 
-/// DKKW25 Winternitz verification for the shared rotation adapter.
-pub struct Winternitz;
+/// DKKW25 Winternitz verification with a key that can be rotated.
+pub type Winternitz = Rotating<WinternitzKey>;
 
-impl SigningScheme for Winternitz {
+/// One Winternitz key: what `Winternitz` verifies against until the next rotation.
+pub struct WinternitzKey;
+
+impl SigningScheme for WinternitzKey {
     const ID: u8 = 6;
     const SIGNATURE_LEN: usize = winternitz::SIGNATURE_LEN;
     const IDENTITY_LEN: usize = PUBLIC_KEY_LEN;

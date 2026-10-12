@@ -47,7 +47,8 @@ use pinocchio::{AccountView, Address, ProgramResult};
 /// Initialize, `2` Close, `3` Withdraw, `4` Passthrough — where `Initialize`
 /// is a strict create. The program has already chosen `S`; `data` is what
 /// follows the discriminator (and, for `Initialize`, the scheme byte). `1`
-/// Advance is the program's to route.
+/// Advance is the program's to route. Any other discriminator is the
+/// scheme's own: [`SigningScheme::process_other`].
 #[inline(always)]
 pub fn dispatch<S: SigningScheme>(
     program_id: &Address,
@@ -55,10 +56,11 @@ pub fn dispatch<S: SigningScheme>(
     discriminator: u8,
     data: &[u8],
 ) -> ProgramResult {
-    match VectorInstruction::try_from(&discriminator)? {
-        VectorInstruction::Initialize => initialize::<S>(program_id, accounts, data),
-        VectorInstruction::Close => close(program_id, accounts, data),
-        VectorInstruction::Withdraw => withdraw::<S>(program_id, accounts, data),
-        VectorInstruction::Passthrough => passthrough::<S>(program_id, accounts, data),
+    match VectorInstruction::try_from(&discriminator) {
+        Ok(VectorInstruction::Initialize) => initialize::<S>(program_id, accounts, data),
+        Ok(VectorInstruction::Close) => close(program_id, accounts, data),
+        Ok(VectorInstruction::Withdraw) => withdraw::<S>(program_id, accounts, data),
+        Ok(VectorInstruction::Passthrough) => passthrough::<S>(program_id, accounts, data),
+        Err(_) => S::process_other(discriminator, accounts, data),
     }
 }

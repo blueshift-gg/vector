@@ -1,4 +1,6 @@
-use pinocchio::error::ProgramError;
+use pinocchio::{
+    account::MAX_PERMITTED_DATA_INCREASE, error::ProgramError, AccountView, ProgramResult, Resize,
+};
 use solana_ml_dsa::ml_dsa_44::{
     PreparedVerifyingKey, Signature, VerifyingKey, PUBLIC_KEY_LEN, SIGNATURE_LEN,
 };
@@ -12,12 +14,13 @@ const PREPARED: usize = PUBLIC_KEY_LEN + 2;
 const IDENTITY_LEN: usize = PREPARED + PreparedKey::BYTE_LEN;
 const _: () = assert!((VectorAccount::HEADER_LEN + PREPARED).is_multiple_of(4));
 
+/// `6`, after the shared `0..=4` and the rotating schemes' `5`.
+const EXPAND_DISCRIMINATOR: u8 = 6;
+
 /// ML-DSA-44 with an empty FIPS 204 context and the public key as identity.
 pub struct MlDsa44;
 
 impl MlDsa44 {
-    pub const PREFIX_LEN: usize = PREPARED;
-
     /// Prepare rows that fit after growth but did not fit at `from`.
     /// The public key is immutable; account length records preparation progress.
     pub fn fill(identity: &mut [u8], from: usize) -> Result<(), ProgramError> {
@@ -66,6 +69,17 @@ impl SigningScheme for MlDsa44 {
         IdentitySeed::from_hash(&identity[..PUBLIC_KEY_LEN])
     }
 
+    fn process_other(
+        discriminator: u8,
+        accounts: &mut [AccountView],
+        data: &[u8],
+    ) -> ProgramResult {
+        if discriminator != EXPAND_DISCRIMINATOR || !data.is_empty() {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        expand(accounts)
+    }
+
     fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         let key = PreparedKey::ref_from_bytes(&identity[PREPARED..])
             .map_err(|_| ProgramError::InvalidAccountData)?;
@@ -74,4 +88,25 @@ impl SigningScheme for MlDsa44 {
         key.verify(digest, signature)
             .map_err(|_| ProgramError::MissingRequiredSignature)
     }
+}
+
+/// Grow an ML-DSA-44 account by one runtime step and fill the prepared rows
+/// that now fit. Permissionless: the content is a function of the stored
+/// key. Fails once the account is complete.
+///
+/// Accounts:
+/// 0. `[writable]` vector PDA
+fn expand(accounts: &mut [AccountView]) -> ProgramResult {
+    let [vector] = accounts else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+    let full = VectorAccount::account_len::<MlDsa44>();
+    let old = vector.data_len();
+    if old < VectorAccount::HEADER_LEN + PREPARED || old >= full {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    vector.resize(full.min(old + MAX_PERMITTED_DATA_INCREASE))?;
+    let mut data = vector.try_borrow_mut()?;
+    let (_, identity) = data.split_at_mut(VectorAccount::HEADER_LEN);
+    MlDsa44::fill(identity, old - VectorAccount::HEADER_LEN)
 }

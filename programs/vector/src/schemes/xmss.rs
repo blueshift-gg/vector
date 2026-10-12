@@ -1,11 +1,14 @@
 use pinocchio::error::ProgramError;
 use solana_winternitz::{xmss, VerifyingKey, PUBLIC_KEY_LEN};
-use vector_common::SigningScheme;
+use vector_common::{rotating::Rotating, SigningScheme};
 
-/// DKKW25 XMSS verification for the shared rotation adapter.
-pub struct Xmss;
+/// DKKW25 XMSS verification with a key that can be rotated.
+pub type Xmss = Rotating<XmssKey>;
 
-impl SigningScheme for Xmss {
+/// One Xmss key: what `Xmss` verifies against until the next rotation.
+pub struct XmssKey;
+
+impl SigningScheme for XmssKey {
     const ID: u8 = 7;
     const SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
     const IDENTITY_LEN: usize = PUBLIC_KEY_LEN;
