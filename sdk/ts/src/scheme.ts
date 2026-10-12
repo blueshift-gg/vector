@@ -18,7 +18,6 @@ export const ADVANCE_DISCRIMINATOR = 1;
 export const CLOSE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
 export const PASSTHROUGH_DISCRIMINATOR = 4;
-export const ROTATE_DISCRIMINATOR = 5;
 
 /** The Vector program: one program for every signing scheme. */
 export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
@@ -71,6 +70,11 @@ export interface Scheme {
    * prepared).
    */
   storedIdentityLen: number;
+  /**
+   * Length of the key every `passthrough` carries for a scheme whose key
+   * rotates (Winternitz, XMSS): the key that signs next. Zero otherwise.
+   */
+  nextKeyLen: number;
 }
 
 /** Total on-chain account size for a scheme. */

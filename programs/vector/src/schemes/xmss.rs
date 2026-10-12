@@ -20,23 +20,19 @@ impl SigningScheme for Xmss {
     fn identity_len(&self) -> usize {
         PUBLIC_KEY_LEN
     }
-    fn init_payload_len(&self) -> usize {
+    fn key_len(&self) -> usize {
         PUBLIC_KEY_LEN
     }
 
-    fn populate_identity(
-        &self,
-        payload: &[u8],
-        identity_out: &mut [u8],
-    ) -> Result<(), ProgramError> {
-        let public_key: &[u8; PUBLIC_KEY_LEN] = payload
+    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+        let public_key: &[u8; PUBLIC_KEY_LEN] = key
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         identity_out.copy_from_slice(public_key);
         Ok(())
     }
 
-    fn verify(
+    fn advance(
         &self,
         identity: &[u8],
         digest: &[u8; 32],

@@ -25,27 +25,23 @@ impl SigningScheme for Secp256k1Ecdsa {
     fn identity_len(&self) -> usize {
         COMPRESSED_PUBKEY_LEN
     }
-    fn init_payload_len(&self) -> usize {
+    fn key_len(&self) -> usize {
         COMPRESSED_PUBKEY_LEN
     }
 
-    fn populate_identity(
-        &self,
-        payload: &[u8],
-        identity_out: &mut [u8],
-    ) -> Result<(), ProgramError> {
-        if payload.len() != COMPRESSED_PUBKEY_LEN {
+    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+        if key.len() != COMPRESSED_PUBKEY_LEN {
             return Err(ProgramError::InvalidInstructionData);
         }
         // sec1 compressed pubkey: `0x02` (even y) or `0x03` (odd y) || x[32].
-        if payload[0] != 0x02 && payload[0] != 0x03 {
+        if key[0] != 0x02 && key[0] != 0x03 {
             return Err(ProgramError::InvalidInstructionData);
         }
-        identity_out.copy_from_slice(payload);
+        identity_out.copy_from_slice(key);
         Ok(())
     }
 
-    fn verify(
+    fn advance(
         &self,
         identity: &[u8],
         digest: &[u8; 32],

@@ -25,16 +25,12 @@ impl SigningScheme for Secp256k1Eip191 {
     fn identity_len(&self) -> usize {
         ETH_ADDRESS_LEN
     }
-    fn init_payload_len(&self) -> usize {
+    fn key_len(&self) -> usize {
         ETH_ADDRESS_LEN
     }
 
-    fn populate_identity(
-        &self,
-        payload: &[u8],
-        identity_out: &mut [u8],
-    ) -> Result<(), ProgramError> {
-        let eth_addr: &[u8; ETH_ADDRESS_LEN] = payload
+    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+        let eth_addr: &[u8; ETH_ADDRESS_LEN] = key
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         if eth_addr == &[0u8; ETH_ADDRESS_LEN] {
@@ -44,7 +40,7 @@ impl SigningScheme for Secp256k1Eip191 {
         Ok(())
     }
 
-    fn verify(
+    fn advance(
         &self,
         identity: &[u8],
         digest: &[u8; 32],

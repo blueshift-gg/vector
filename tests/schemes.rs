@@ -7,7 +7,7 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
 use vector_core::{
-    create_expand_mldsa44, create_initialize_instruction, create_passthrough_instruction,
+    create_expand_mldsa44, create_initialize_instruction, create_rotating_passthrough_instruction,
     find_vector_pda, WINTERNITZ, XMSS,
 };
 
@@ -73,7 +73,7 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     let advance = vector_core::create_advance_instruction(&WINTERNITZ, &IDENTITY, &[0; 849]);
     for instruction in [
         &advance,
-        &create_passthrough_instruction(&WINTERNITZ, &IDENTITY, &[]),
+        &create_rotating_passthrough_instruction(&WINTERNITZ, &IDENTITY, &[9; 41], &[]),
     ] {
         let result = mollusk.process_instruction(instruction, &[(vector, zeroed.clone())]);
         assert!(matches!(
@@ -87,7 +87,8 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     // An account the program does not own has no scheme to read.
     let mut foreign = account;
     foreign.owner = Address::new_unique();
-    let passthrough = create_passthrough_instruction(&WINTERNITZ, &IDENTITY, &[]);
+    let passthrough =
+        create_rotating_passthrough_instruction(&WINTERNITZ, &IDENTITY, &[9; 41], &[]);
     let result = mollusk.process_instruction(&passthrough, &[(vector, foreign)]);
     assert_eq!(
         result.program_result,

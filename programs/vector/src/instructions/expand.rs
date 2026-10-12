@@ -43,7 +43,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Expand<'a> {
 }
 
 impl<'a> Expand<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &6;
+    pub const DISCRIMINATOR: &'a u8 = &5;
 
     pub fn process(&mut self) -> ProgramResult {
         let scheme = VectorAccount::scheme(self.vector)?;

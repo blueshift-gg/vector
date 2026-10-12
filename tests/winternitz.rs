@@ -7,8 +7,8 @@ use solana_program_error::ProgramError;
 use solana_winternitz::winternitz;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
-    create_initialize_winternitz, create_passthrough_instruction, create_rotate_subinstruction,
-    find_vector_pda, winternitz_identity, PROGRAM_ID, WINTERNITZ,
+    create_initialize_winternitz, create_rotating_passthrough_instruction, find_vector_pda,
+    winternitz_identity, PROGRAM_ID, WINTERNITZ,
 };
 
 use crate::common::{
@@ -29,13 +29,13 @@ fn initialize_and_client_encoding() {
     assert_eq!(bump, 255);
     let receiver = Address::new_from_array([9; 32]);
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
-    let rotate = create_rotate_subinstruction(&WINTERNITZ, &identity, &[7; 41]);
-    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[rotate, close]);
+    let passthrough =
+        create_rotating_passthrough_instruction(&WINTERNITZ, &identity, &[7; 41], &[close]);
     assert_eq!(
         advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough]),
         [
-            48, 167, 125, 113, 41, 142, 197, 250, 128, 72, 17, 225, 199, 148, 28, 16, 108, 246,
-            101, 158, 117, 229, 208, 180, 185, 97, 169, 199, 82, 13, 246, 104
+            210, 109, 131, 65, 120, 211, 163, 87, 63, 206, 151, 127, 180, 186, 236, 239, 209, 135,
+            2, 181, 150, 1, 124, 79, 135, 90, 130, 26, 239, 219, 152, 223
         ],
     );
 
@@ -101,7 +101,9 @@ fn signature_binds_close_and_rejects_replay() {
     let receiver = Address::new_unique();
     let other = Address::new_unique();
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
-    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[close]);
+    // Keeps the current key: the test is about the signature, not rotation.
+    let passthrough =
+        create_rotating_passthrough_instruction(&WINTERNITZ, &identity, &public_key, &[close]);
     let digest = advance_vector_digest(
         &WINTERNITZ,
         &NONCE,
@@ -114,7 +116,12 @@ fn signature_binds_close_and_rejects_replay() {
     let expected = expected_advanced_data(digest, &WINTERNITZ, bump, &stored);
 
     let other_close = create_close_subinstruction(&WINTERNITZ, &identity, &other);
-    let changed_action = create_passthrough_instruction(&WINTERNITZ, &identity, &[other_close]);
+    let changed_action = create_rotating_passthrough_instruction(
+        &WINTERNITZ,
+        &identity,
+        &public_key,
+        &[other_close],
+    );
     let mut tampered = signature;
     tampered[winternitz::SIGNATURE_LEN - 1] ^= 1;
     let mut wrong_key = account.clone();

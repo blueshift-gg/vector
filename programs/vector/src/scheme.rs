@@ -4,60 +4,65 @@
 use pinocchio::error::ProgramError;
 use solana_nostd_sha256::hash;
 
-/// One signing scheme: what it stores as the signer's identity and how it
-/// verifies. Implementations live in [`crate::schemes`], one file each.
+/// One signing scheme: its sizes, and its part in each instruction.
+/// Implementations live in [`crate::schemes`], one file each. An instruction
+/// does what is the same for every scheme and calls these for the rest.
 pub trait SigningScheme {
     /// Identifies the scheme: the second header field of every account and
     /// a PDA seed. Never zero: an account anyone assigns to the program has
     /// zeroed data, and must not read as an account of some scheme.
     fn id(&self) -> u8;
 
+    /// Length of the key `Initialize` takes.
+    fn key_len(&self) -> usize;
+
+    /// Length of the identity bytes the account stores after its header.
+    /// Usually `key_len`, the key as given; Falcon-512 and ML-DSA-44 store a
+    /// prepared form, Winternitz and XMSS a hash and the current key.
+    fn identity_len(&self) -> usize;
+
     /// Length of a signature in `Advance` data.
     fn signature_len(&self) -> usize;
 
-    /// Length of the identity bytes the account stores after its header.
-    fn identity_len(&self) -> usize;
-
-    /// Length of the `Initialize` payload. Usually `identity_len` (the key
-    /// is stored as given); Falcon-512 and ML-DSA-44 store a prepared form.
-    fn init_payload_len(&self) -> usize;
-
-    /// Validate the `Initialize` payload and write the identity bytes. The
-    /// buffer is shorter than `identity_len` when the account could not be
-    /// created at full size; [`expand`](Self::expand) then finishes the job.
-    fn populate_identity(&self, payload: &[u8], identity: &mut [u8]) -> Result<(), ProgramError>;
-
-    /// The PDA seed, from the stored identity. Default: the identity itself
+    /// The PDA seed, from the key `Initialize` takes. Default: the key itself
     /// when it is at most 32 bytes, else its SHA-256.
-    fn pda_seed_from_identity(&self, identity: &[u8]) -> IdentitySeed {
+    fn seed_from_key(&self, key: &[u8]) -> IdentitySeed {
+        IdentitySeed::default_from(key)
+    }
+
+    /// The same PDA seed, from the stored identity.
+    fn seed_from_identity(&self, identity: &[u8]) -> IdentitySeed {
         IdentitySeed::default_from(identity)
     }
 
-    /// The PDA seed, from the `Initialize` payload. Must agree with
-    /// [`pda_seed_from_identity`](Self::pda_seed_from_identity).
-    fn pda_seed_from_payload(&self, payload: &[u8]) -> IdentitySeed {
-        IdentitySeed::default_from(payload)
+    /// `Initialize`: validate the key and write the identity bytes. The
+    /// buffer is shorter than `identity_len` when the account could not be
+    /// created at full size; [`expand`](Self::expand) then finishes the job.
+    fn initialize(&self, key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError>;
+
+    /// `Expand`: the account grew, and `identity` was `from` bytes long
+    /// before. Fill in what fits now. Default: the scheme's account is
+    /// created whole, so there is nothing to expand.
+    fn expand(&self, _identity: &mut [u8], _from: usize) -> Result<(), ProgramError> {
+        Err(ProgramError::InvalidInstructionData)
     }
 
-    /// Verify `signature` over `digest` against the stored `identity`.
-    fn verify(
+    /// `Advance`: verify `signature` over `digest` against the identity.
+    fn advance(
         &self,
         identity: &[u8],
         digest: &[u8; 32],
         signature: &[u8],
     ) -> Result<(), ProgramError>;
 
-    /// `Expand`: the account grew, and `identity` was `from` bytes long
-    /// before. Fill in what fits now. Only schemes whose account is too big
-    /// to create in one instruction have this.
-    fn expand(&self, _identity: &mut [u8], _from: usize) -> Result<(), ProgramError> {
-        Err(ProgramError::InvalidInstructionData)
-    }
-
-    /// `Rotate`: replace the key in `identity` with the one in `payload`.
-    /// Only schemes with a replaceable key have this.
-    fn rotate(&self, _payload: &[u8], _identity: &mut [u8]) -> Result<(), ProgramError> {
-        Err(ProgramError::InvalidInstructionData)
+    /// `Passthrough`: take what the scheme needs off the front of the data
+    /// and return the instructions after it. Default: nothing.
+    fn passthrough<'a>(
+        &self,
+        _identity: &mut [u8],
+        data: &'a [u8],
+    ) -> Result<&'a [u8], ProgramError> {
+        Ok(data)
     }
 }
 

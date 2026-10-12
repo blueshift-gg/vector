@@ -6,7 +6,7 @@ use solana_instruction::{AccountMeta, Instruction};
 
 use crate::scheme::{
     find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
-    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, ROTATE_DISCRIMINATOR,
+    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID,
     SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
 };
 
@@ -101,6 +101,40 @@ pub fn create_passthrough_instruction(
     identity: &[u8],
     instructions: &[Instruction],
 ) -> Instruction {
+    assert_eq!(
+        scheme.next_key_len, 0,
+        "this scheme's key rotates: use create_rotating_passthrough_instruction",
+    );
+    passthrough_instruction(scheme, identity, instructions)
+}
+
+/// [`create_passthrough_instruction`] for Winternitz and XMSS, whose key
+/// rotates. `next_public_key` is the key that signs the next transaction; it
+/// follows the discriminator and is covered by the signature like the rest.
+/// Persist that signer before authorizing this instruction. `identity` stays
+/// the SHA-256 of the first key. To keep the current key, pass it again.
+pub fn create_rotating_passthrough_instruction(
+    scheme: &Scheme,
+    identity: &[u8],
+    next_public_key: &[u8],
+    instructions: &[Instruction],
+) -> Instruction {
+    assert_ne!(scheme.next_key_len, 0, "this scheme's key does not rotate");
+    assert_eq!(
+        next_public_key.len(),
+        scheme.next_key_len,
+        "next key length mismatch",
+    );
+    let mut instruction = passthrough_instruction(scheme, identity, instructions);
+    instruction.data.splice(1..1, next_public_key.iter().copied());
+    instruction
+}
+
+fn passthrough_instruction(
+    scheme: &Scheme,
+    identity: &[u8],
+    instructions: &[Instruction],
+) -> Instruction {
     assert!(
         instructions.len() <= u8::MAX as usize,
         "too many sub-instructions (max {})",
@@ -171,30 +205,6 @@ pub fn create_close_subinstruction(
             AccountMeta::new(*close_to, false),
         ],
         data: vec![CLOSE_DISCRIMINATOR],
-    }
-}
-
-/// Replace the current key through Passthrough (Winternitz and XMSS only).
-/// `identity` is the fixed SHA-256 hash of the initial public key, including
-/// after rotation. Persist the fresh signer before authorizing this instruction.
-pub fn create_rotate_subinstruction(
-    scheme: &Scheme,
-    identity: &[u8; 32],
-    new_public_key: &[u8],
-) -> Instruction {
-    assert_eq!(
-        new_public_key.len(),
-        scheme.stored_identity_len - scheme.identity_len,
-        "replacement key length mismatch",
-    );
-    let (vector_pda, _) = find_vector_pda(scheme, identity);
-    let mut data = Vec::with_capacity(1 + new_public_key.len());
-    data.push(ROTATE_DISCRIMINATOR);
-    data.extend_from_slice(new_public_key);
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts: vec![AccountMeta::new(vector_pda, false)],
-        data,
     }
 }
 

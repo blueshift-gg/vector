@@ -10,9 +10,6 @@ pub use initialize::Initialize;
 pub mod expand;
 pub use expand::Expand;
 
-pub mod rotate;
-pub use rotate::Rotate;
-
 pub mod withdraw;
 pub use withdraw::Withdraw;
 

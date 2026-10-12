@@ -17,6 +17,7 @@ pub const SECP256K1: Scheme = Scheme {
     signature_len: 64,
     identity_len: SECP256K1_COMPRESSED_PUBKEY_LEN,
     stored_identity_len: SECP256K1_COMPRESSED_PUBKEY_LEN,
+    next_key_len: 0,
 };
 
 /// 33-byte sec1-compressed secp256k1 public key (the identity).

@@ -17,6 +17,7 @@ pub const WINTERNITZ: Scheme = Scheme {
     signature_len: WINTERNITZ_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: 32 + WINTERNITZ_PUBKEY_LEN,
+    next_key_len: WINTERNITZ_PUBKEY_LEN,
 };
 
 /// Derive the permanent account identity. Do not recompute it on rotation.

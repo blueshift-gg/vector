@@ -21,6 +21,7 @@ export const ED25519: Scheme = {
   signatureLen: 64,
   identityLen: 32,
   storedIdentityLen: 32,
+  nextKeyLen: 0,
 };
 
 /** Ed25519 identity (32-byte public key) for a private key seed. */

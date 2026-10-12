@@ -17,6 +17,7 @@ pub const ED25519: Scheme = Scheme {
     signature_len: 64,
     identity_len: ED25519_PUBKEY_LEN,
     stored_identity_len: ED25519_PUBKEY_LEN,
+    next_key_len: 0,
 };
 
 /// 32-byte Ed25519 public key (the identity) for a signing key.

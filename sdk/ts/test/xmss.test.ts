@@ -5,7 +5,7 @@ import {
   advanceVectorDigest,
   createInitializeXmss,
   createPassthroughInstruction,
-  createRotateSubinstruction,
+  createRotatingPassthroughInstruction,
   createWithdrawSubinstruction,
   findVectorPda,
   xmssIdentity,
@@ -30,20 +30,22 @@ test("XMSS account and rotation digest match Rust", () => {
   }
 
   expect(() => findVectorPda(XMSS, publicKey)).toThrow();
-  const rotate = createRotateSubinstruction(XMSS, identity, new Uint8Array(41).fill(7));
-  expect(Array.from(rotate.data)).toEqual([5, ...new Uint8Array(41).fill(7)]);
-  expect(rotate.keys).toEqual([{ pubkey: pda, isSigner: false, isWritable: true }]);
-  for (const length of [40, 42]) {
-    expect(() => createRotateSubinstruction(XMSS, identity, new Uint8Array(length))).toThrow();
-  }
-  const passthrough = createPassthroughInstruction(XMSS, identity, [
-    rotate,
+  const nextKey = new Uint8Array(41).fill(7);
+  const passthrough = createRotatingPassthroughInstruction(XMSS, identity, nextKey, [
     createWithdrawSubinstruction(XMSS, identity, receiver, 1234n),
   ]);
+  // The next key follows the discriminator.
+  expect(Array.from(passthrough.data.subarray(0, 42))).toEqual([4, ...nextKey]);
+  expect(() => createPassthroughInstruction(XMSS, identity, [])).toThrow();
+  for (const length of [40, 42]) {
+    expect(() =>
+      createRotatingPassthroughInstruction(XMSS, identity, new Uint8Array(length), [])
+    ).toThrow();
+  }
   const digest = advanceVectorDigest(
     XMSS, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "c0bf58d233e9e5854ea48f957d2551ad7e8e33a1c7abc08f1c328391b8862150"
+    "c3f2d8005870766f472e3b42ffcbf9078ee6a57a210e2f5560e4dc0cb423de23"
   );
 });

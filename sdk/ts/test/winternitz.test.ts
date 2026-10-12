@@ -5,7 +5,7 @@ import {
   advanceVectorDigest,
   createInitializeWinternitz,
   createPassthroughInstruction,
-  createRotateSubinstruction,
+  createRotatingPassthroughInstruction,
   createCloseSubinstruction,
   findVectorPda,
   winternitzIdentity,
@@ -30,20 +30,22 @@ test("Winternitz account and rotation digest match Rust", () => {
   }
 
   expect(() => findVectorPda(WINTERNITZ, publicKey)).toThrow();
-  const rotate = createRotateSubinstruction(WINTERNITZ, identity, new Uint8Array(41).fill(7));
-  expect(Array.from(rotate.data)).toEqual([5, ...new Uint8Array(41).fill(7)]);
-  expect(rotate.keys).toEqual([{ pubkey: pda, isSigner: false, isWritable: true }]);
-  for (const length of [40, 42]) {
-    expect(() => createRotateSubinstruction(WINTERNITZ, identity, new Uint8Array(length))).toThrow();
-  }
-  const passthrough = createPassthroughInstruction(WINTERNITZ, identity, [
-    rotate,
+  const nextKey = new Uint8Array(41).fill(7);
+  const passthrough = createRotatingPassthroughInstruction(WINTERNITZ, identity, nextKey, [
     createCloseSubinstruction(WINTERNITZ, identity, receiver),
   ]);
+  // The next key follows the discriminator.
+  expect(Array.from(passthrough.data.subarray(0, 42))).toEqual([4, ...nextKey]);
+  expect(() => createPassthroughInstruction(WINTERNITZ, identity, [])).toThrow();
+  for (const length of [40, 42]) {
+    expect(() =>
+      createRotatingPassthroughInstruction(WINTERNITZ, identity, new Uint8Array(length), [])
+    ).toThrow();
+  }
   const digest = advanceVectorDigest(
     WINTERNITZ, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "30a77d71298ec5fa804811e1c7941c106cf6659e75e5d0b4b961a9c7520df668"
+    "d26d834178d3a3573fce977fb4baecefd18702b596017c4f875a821aefdb98df"
   );
 });

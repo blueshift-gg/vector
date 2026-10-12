@@ -90,16 +90,16 @@ Both SDKs expose `WINTERNITZ` / `XMSS`, initialization helpers and `winternitz_i
 
 ### Key rotation
 
-Generate and persist a fresh signer, then authorize its public key with the current signer:
+Every `Passthrough` for a Winternitz or XMSS account starts with the key that signs next. Generate and persist a fresh signer, then authorize its public key with the current signer:
 
 ```text
 Advance(current-key signature)
-Passthrough([Rotate(next_public_key), ...actions])
+Passthrough(next_public_key, [...actions])
 ```
 
-`create_rotate_subinstruction` / `createRotateSubinstruction` builds the optional `Rotate` payload. Like `Withdraw` and `Close`, it requires the PDA's signature through Passthrough. The existing Vector digest commits to the replacement key and all actions. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Rotation stays within the account's signing scheme.
+`create_rotating_passthrough_instruction` / `createRotatingPassthroughInstruction` builds it. The key follows the discriminator, so the signature that authorizes the actions also authorizes the key. The handler stores it before running the actions, with no extra instruction or CPI. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Rotation stays within the account's signing scheme. To keep the current key, pass it again.
 
-Callers manage key freshness, persistent signing state and rotation timing. The program does not track spent keys or XMSS leaves, require rotation, or check that a replacement key differs. To retain control, Winternitz callers must include a fresh replacement key in their one authorization; XMSS callers must rotate before exhausting the tree. Never sign different authorizations with the same Winternitz key or XMSS leaf. Failed salt sampling and abandoned authorizations consume signing attempts too.
+Callers manage key freshness, persistent signing state and rotation timing. The program does not track spent keys or XMSS leaves, or check that a replacement key differs. To retain control, Winternitz callers must give a fresh key in their one authorization, and an `Advance` with no `Passthrough` does not rotate; XMSS callers must rotate before exhausting the tree. Never sign different authorizations with the same Winternitz key or XMSS leaf. Failed salt sampling and abandoned authorizations consume signing attempts too.
 
 Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
 
@@ -130,7 +130,7 @@ The program verifies one signature per account, taking each signature's length f
 A one-time key (Winternitz, XMSS) should sign last: its signature only lands if every other signer's does, and it must not be used for a second message.
 
 ## Instruction Set
-Every scheme has instructions 0–4. Winternitz and XMSS also have `Rotate` (5); ML-DSA-44 also has `Expand` (6). Each instruction starts with its discriminator byte.
+Every scheme has instructions 0–4. ML-DSA-44 also has `Expand` (5). Each instruction starts with its discriminator byte.
 
 | Disc | Name        | Top-Level Callable? | Authorisation                                |
 |------|-------------|---------------------|----------------------------------------------|
@@ -139,8 +139,7 @@ Every scheme has instructions 0–4. Winternitz and XMSS also have `Rotate` (5);
 | `2`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
 | `3`  | Withdraw    | only via Passthrough reentry | inherited from the authorising Advance       |
 | `4`  | Passthrough | **only** top-level (CPI guarded) | a sibling Advance for the same vector PDA earlier in the same transaction |
-| `5`  | Rotate | only via Passthrough reentry | current-key authorization; Winternitz/XMSS only |
-| `6`  | Expand | yes | none: grows the account by one 10,240-byte step and fills it from the stored key; ML-DSA-44 only |
+| `5`  | Expand | yes | none: grows the account by one 10,240-byte step and fills it from the stored key; ML-DSA-44 only |
 
 `Advance` carries only signatures, one per account — its handler verifies each, installs the digest as the next nonce, and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler scans the instructions sysvar and refuses to run unless a prior `Advance` for the same vector PDA appears earlier in the transaction. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
 
@@ -263,13 +262,12 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes `PROGRAM_ID` and a `Scheme` descriptor (`id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
-- `create_rotate_subinstruction(&scheme, &identity, new_public_key)` — authorize a Winternitz/XMSS key replacement through Passthrough.
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", [scheme], identity_seed]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; `create_expand_mldsa44(public_key)` builds ML-DSA-44's two follow-up instructions.
 - `create_initialize_instruction(payer, &scheme, identity, init_payload)` — generic init-instruction builder.
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
 - `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature. `create_multi_advance_instruction(&[(&scheme, identity, signature)])` does the same for several signers.
-- `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it.
+- `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. For Winternitz and XMSS use `create_rotating_passthrough_instruction(&scheme, identity, next_public_key, sub_ixs)`.
 - `advance_vector_digest(&scheme, nonce, identity, pre, post)` / `advance_vector_digest_with_fee_payer(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify. With several signers, compute `advance_message(&[(&scheme, identity)], pre, post, fee_payer)` once, then `signer_digest(&message, nonce, &vector)` for each.
 - `sign_advance_instruction_ed25519(signing_key, nonce, pre, post, fee_payer)` — sign with Ed25519.
 - `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post, fee_payer)` — sign with EIP-191 (envelope, 65-byte sig).
@@ -283,14 +281,13 @@ Falcon-512 and ML-DSA-44 signing are intentionally left to the caller (`solana-f
 
 The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`):
 
-- `createRotateSubinstruction(scheme, identity, newPublicKey)` — authorize a Winternitz/XMSS key replacement through Passthrough.
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
 - `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 34-byte header.
 - `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` / `createInitializeMlDsa44(payer, publicKey)` — convenience wrappers; `createExpandMlDsa44(publicKey)` and `createRegisterMlDsa44Instructions(payer, publicKey)` build ML-DSA-44's three-instruction registration.
 - `createInitializeInstruction(payer, scheme, identity, initPayload)` — generic init builder.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.
 - `createAdvanceInstruction(scheme, identity, signature)` — assemble from precomputed signature (signature only, no embedded payload). `createMultiAdvanceInstruction([{ scheme, identity, signature }])` does the same for several signers.
-- `createPassthroughInstruction(scheme, identity, subIxs)` — assemble the passthrough instruction that replays `subIxs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it.
+- `createPassthroughInstruction(scheme, identity, subIxs)` — assemble the passthrough instruction that replays `subIxs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. For Winternitz and XMSS use `createRotatingPassthroughInstruction(scheme, identity, nextPublicKey, subIxs)`.
 - `advanceVectorDigest(scheme, nonce, identity, pre, post, feePayer?)` — recompute the digest. With several signers, `advanceMessage([{ scheme, identity }], pre, post, feePayer?)` once, then `signerDigest(message, nonce, vector)` for each.
 - `signAdvanceInstructionEd25519(signingKey, nonce, pre, post, feePayer?)` — sign with Ed25519.
 - `signAdvanceInstructionEip191(privateKey, nonce, pre, post, feePayer?)` — sign with EIP-191 secp256k1.

@@ -70,12 +70,12 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
             return Err(ProgramError::InvalidInstructionData);
         };
         let scheme = schemes::scheme(*scheme)?;
-        if key.len() != scheme.init_payload_len() {
+        if key.len() != scheme.key_len() {
             return Err(ProgramError::InvalidInstructionData);
         }
 
         // Account Checks
-        let identity_seed = scheme.pda_seed_from_payload(key);
+        let identity_seed = scheme.seed_from_key(key);
         let (address, bump) = Address::find_program_address(
             &[VECTOR_SEED, &[scheme.id()], identity_seed.as_slice()],
             &crate::ID,
@@ -137,7 +137,7 @@ impl<'a> Initialize<'a> {
         account.nonce = nonce;
         account.scheme = scheme.id();
         account.bump = self.bump;
-        scheme.populate_identity(self.key, identity)
+        scheme.initialize(self.key, identity)
     }
 }
 

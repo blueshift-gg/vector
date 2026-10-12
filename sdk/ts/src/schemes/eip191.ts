@@ -23,6 +23,7 @@ export const EIP191: Scheme = {
   signatureLen: 65,
   identityLen: 20,
   storedIdentityLen: 20,
+  nextKeyLen: 0,
 };
 
 /** Derive the 20-byte Ethereum address from a 32-byte secp256k1 private key. */

@@ -3,9 +3,9 @@ use solana_nostd_sha256::hash;
 
 use crate::scheme::{IdentitySeed, SigningScheme};
 
-/// `S` with a key that can be replaced. The identity is
+/// `S` with a key that is replaced as the account is used. The identity is
 /// `sha256(first_key) || current_key`: the hash names the account for good,
-/// and `Rotate` replaces the key after it.
+/// and every `Passthrough` sets the key that signs next.
 pub struct Rotating<S>(pub S);
 
 impl<S: SigningScheme> SigningScheme for Rotating<S> {
@@ -13,49 +13,52 @@ impl<S: SigningScheme> SigningScheme for Rotating<S> {
         self.0.id()
     }
 
-    fn signature_len(&self) -> usize {
-        self.0.signature_len()
+    fn key_len(&self) -> usize {
+        self.0.key_len()
     }
 
     fn identity_len(&self) -> usize {
         32 + self.0.identity_len()
     }
 
-    fn init_payload_len(&self) -> usize {
-        self.0.init_payload_len()
+    fn signature_len(&self) -> usize {
+        self.0.signature_len()
     }
 
-    fn populate_identity(&self, payload: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
-        identity[..32].copy_from_slice(&hash(payload));
-        self.0.populate_identity(payload, &mut identity[32..])
+    fn seed_from_key(&self, key: &[u8]) -> IdentitySeed {
+        IdentitySeed::from_hash(key)
     }
 
-    fn pda_seed_from_identity(&self, identity: &[u8]) -> IdentitySeed {
+    fn seed_from_identity(&self, identity: &[u8]) -> IdentitySeed {
         IdentitySeed::copy_from(&identity[..32])
     }
 
-    fn pda_seed_from_payload(&self, payload: &[u8]) -> IdentitySeed {
-        IdentitySeed::from_hash(payload)
+    fn initialize(&self, key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
+        identity[..32].copy_from_slice(&hash(key));
+        self.0.initialize(key, &mut identity[32..])
     }
 
-    fn verify(
+    fn advance(
         &self,
         identity: &[u8],
         digest: &[u8; 32],
         signature: &[u8],
     ) -> Result<(), ProgramError> {
-        self.0.verify(&identity[32..], digest, signature)
+        self.0.advance(&identity[32..], digest, signature)
     }
 
-    /// Only the stored key changes; the seed and the nonce stay. Callers
-    /// manage key freshness and signing capacity.
-    fn rotate(&self, payload: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
-        if payload.len() != self.init_payload_len() {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        if identity.len() != self.identity_len() {
-            return Err(ProgramError::InvalidAccountData);
-        }
-        self.0.populate_identity(payload, &mut identity[32..])
+    /// The data starts with the key that signs next. The owner signed the
+    /// whole transaction, this key included. To keep the current key, pass
+    /// it again: the program does not track which keys were used.
+    fn passthrough<'a>(
+        &self,
+        identity: &mut [u8],
+        data: &'a [u8],
+    ) -> Result<&'a [u8], ProgramError> {
+        let (key, instructions) = data
+            .split_at_checked(self.key_len())
+            .ok_or(ProgramError::InvalidInstructionData)?;
+        self.0.initialize(key, &mut identity[32..])?;
+        Ok(instructions)
     }
 }

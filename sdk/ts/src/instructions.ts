@@ -21,7 +21,6 @@ import {
   ADVANCE_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
-  ROTATE_DISCRIMINATOR,
   WITHDRAW_DISCRIMINATOR,
 } from "./scheme.js";
 
@@ -123,6 +122,43 @@ export function createMultiAdvanceInstruction(
  * {num_accounts(u8), data_len(u16 LE), data}...]`.
  */
 export function createPassthroughInstruction(
+  scheme: Scheme,
+  identity: Uint8Array,
+  subInstructions: TransactionInstruction[]
+): TransactionInstruction {
+  if (scheme.nextKeyLen !== 0) {
+    throw new Error(
+      "This scheme's key rotates: use createRotatingPassthroughInstruction"
+    );
+  }
+  return passthroughInstruction(scheme, identity, subInstructions);
+}
+
+/**
+ * {@link createPassthroughInstruction} for Winternitz and XMSS, whose key
+ * rotates. `nextPublicKey` is the key that signs the next transaction; it
+ * follows the discriminator and is covered by the signature like the rest.
+ * Persist that signer before authorizing this instruction. `identity` stays
+ * the SHA-256 of the first key. To keep the current key, pass it again.
+ */
+export function createRotatingPassthroughInstruction(
+  scheme: Scheme,
+  identity: Uint8Array,
+  nextPublicKey: Uint8Array,
+  subInstructions: TransactionInstruction[]
+): TransactionInstruction {
+  if (scheme.nextKeyLen === 0 || nextPublicKey.length !== scheme.nextKeyLen) {
+    throw new Error(`Next key must be ${scheme.nextKeyLen} bytes`);
+  }
+  const ix = passthroughInstruction(scheme, identity, subInstructions);
+  return new TransactionInstruction({
+    programId: ix.programId,
+    keys: ix.keys,
+    data: Buffer.concat([ix.data.subarray(0, 1), nextPublicKey, ix.data.subarray(1)]),
+  });
+}
+
+function passthroughInstruction(
   scheme: Scheme,
   identity: Uint8Array,
   subInstructions: TransactionInstruction[]
@@ -238,27 +274,6 @@ export function createWithdrawSubinstruction(
       { pubkey: receiver, isSigner: false, isWritable: true },
     ],
     data: Buffer.from(data),
-  });
-}
-
-/**
- * Replace the current key through Passthrough (Winternitz and XMSS only).
- * Keep using the initial key's identity after rotation. Persist the fresh
- * signer before authorizing this instruction.
- */
-export function createRotateSubinstruction(
-  scheme: Scheme,
-  identity: Uint8Array,
-  newPublicKey: Uint8Array
-): TransactionInstruction {
-  if (newPublicKey.length !== scheme.storedIdentityLen - scheme.identityLen) {
-    throw new Error("Replacement key length mismatch");
-  }
-  const [vectorPda] = findVectorPda(scheme, identity);
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [{ pubkey: vectorPda, isSigner: false, isWritable: true }],
-    data: Buffer.from([ROTATE_DISCRIMINATOR, ...newPublicKey]),
   });
 }
 

@@ -7,8 +7,8 @@ use solana_program_error::ProgramError;
 use solana_winternitz::xmss;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_initialize_xmss,
-    create_passthrough_instruction, create_rotate_subinstruction, create_withdraw_subinstruction,
-    find_vector_pda, xmss_identity, PROGRAM_ID, XMSS,
+    create_rotating_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
+    xmss_identity, PROGRAM_ID, XMSS,
 };
 
 use crate::common::{
@@ -31,13 +31,13 @@ fn initialize_checks_key_length_and_pda() {
     assert_eq!(bump, 255);
     let receiver = Address::new_from_array([9; 32]);
     let withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 1234);
-    let rotate = create_rotate_subinstruction(&XMSS, &identity, &[7; 41]);
-    let passthrough = create_passthrough_instruction(&XMSS, &identity, &[rotate, withdraw]);
+    let passthrough =
+        create_rotating_passthrough_instruction(&XMSS, &identity, &[7; 41], &[withdraw]);
     assert_eq!(
         advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough]),
         [
-            192, 191, 88, 210, 51, 233, 229, 133, 78, 164, 143, 149, 125, 37, 81, 173, 126, 142,
-            51, 161, 199, 171, 192, 143, 28, 50, 131, 145, 184, 134, 33, 80
+            195, 242, 216, 0, 88, 112, 118, 111, 71, 46, 59, 66, 255, 203, 249, 7, 142, 230, 165,
+            122, 33, 14, 47, 85, 96, 228, 220, 12, 180, 35, 222, 35
         ],
     );
     let accounts = [
@@ -203,7 +203,8 @@ fn advance_binds_and_authorizes_withdrawal() {
         (receiver, Account::new(1_000_000, 0, &Address::default())),
     ];
     let withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 3_000_000);
-    let passthrough = create_passthrough_instruction(&XMSS, &identity, &[withdraw]);
+    let passthrough =
+        create_rotating_passthrough_instruction(&XMSS, &identity, &public_key, &[withdraw]);
     let digest = advance_vector_digest(
         &XMSS,
         &NONCE,
@@ -217,7 +218,8 @@ fn advance_binds_and_authorizes_withdrawal() {
 
     // The signature must bind the downstream action, not just the nonce.
     let changed_withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 4_000_000);
-    let changed = create_passthrough_instruction(&XMSS, &identity, &[changed_withdraw]);
+    let changed =
+        create_rotating_passthrough_instruction(&XMSS, &identity, &public_key, &[changed_withdraw]);
     process_transaction(
         &mollusk,
         &[&advance, &changed],

@@ -17,7 +17,7 @@ use crate::{
 ///
 /// Run instructions as the account: each is invoked with the account as a
 /// signer. This is how the account moves funds, uses another program, or
-/// calls `Withdraw`, `Close` and `Rotate` on itself.
+/// calls `Withdraw` and `Close` on itself.
 ///
 /// It checks no signature. It requires an earlier `Advance` in the same
 /// transaction that lists the account. `Advance` verifies a signature for
@@ -25,6 +25,7 @@ use crate::{
 /// this instruction included.
 ///
 /// > Find an earlier `Advance` that lists the account
+/// > Let the scheme take its part: a rotating scheme sets its next key
 /// > Invoke each instruction, signing as the account
 ///
 /// Accounts:
@@ -35,6 +36,7 @@ use crate::{
 ///
 /// Parameters:
 ///
+/// - for Winternitz and XMSS, the key that signs next
 /// - num_instructions: u8
 /// - for each instruction: num_accounts: u8, data_len: u16, data
 ///
@@ -42,9 +44,10 @@ use crate::{
 /// - Vector: owned by the program, complete, listed in an earlier `Advance`
 /// - InstructionsSysvar: the instructions sysvar
 pub struct Passthrough<'a> {
-    vector: &'a AccountView,
+    vector: &'a mut AccountView,
     instructions_sysvar: &'a AccountView,
     remaining: &'a [AccountView],
+    /// What the scheme takes, if anything, then the instructions.
     instructions: &'a [u8],
 }
 
@@ -79,24 +82,26 @@ impl<'a> Passthrough<'a> {
     pub const DISCRIMINATOR: &'a u8 = &4;
 
     pub fn process(&mut self) -> ProgramResult {
-        let vector = self.vector;
-        let scheme = VectorAccount::scheme(vector)?;
+        let scheme = VectorAccount::scheme(self.vector)?;
+        self.check_advanced()?;
+
+        let mut data = self.vector.try_borrow_mut()?;
+        let (account, identity) = VectorAccount::split(&mut data)?;
+        let identity = identity
+            .get_mut(..scheme.identity_len())
+            .ok_or(ProgramError::AccountDataTooSmall)?;
 
         // The seeds come from the account itself, so the signature below can
         // only ever be the account's own.
-        let (identity_seed, bump) = {
-            let data = vector.try_borrow()?;
-            let identity = data
-                .get(VectorAccount::HEADER_LEN..VectorAccount::len(scheme))
-                .ok_or(ProgramError::AccountDataTooSmall)?;
-            (scheme.pda_seed_from_identity(identity), [data[33]])
-        };
+        let (scheme_id, bump) = ([scheme.id()], [account.bump]);
+        let identity_seed = scheme.seed_from_identity(identity);
+        let seeds = signer_seeds(&scheme_id, &identity_seed, &bump);
 
-        self.check_advanced()?;
+        // A rotating scheme takes its next key off the front of the data.
+        let instructions = scheme.passthrough(identity, self.instructions)?;
+        drop(data);
 
-        let scheme = [scheme.id()];
-        let seeds = signer_seeds(&scheme, &identity_seed, &bump);
-        self.invoke(&[Signer::from(&seeds)])
+        self.invoke(instructions, &[Signer::from(&seeds)])
     }
 
     /// An earlier instruction of this transaction is an `Advance` that lists
@@ -120,9 +125,8 @@ impl<'a> Passthrough<'a> {
 
     /// Invoke each instruction in the data, taking its program and accounts
     /// from the remaining accounts in order. All of both must be used.
-    fn invoke(&self, signers: &[Signer]) -> ProgramResult {
+    fn invoke(&self, mut data: &[u8], signers: &[Signer]) -> ProgramResult {
         let vector = self.vector.address();
-        let mut data = self.instructions;
         let mut accounts = self.remaining;
 
         for _ in 0..read::<1>(&mut data)?[0] {

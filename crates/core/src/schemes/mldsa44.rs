@@ -15,7 +15,7 @@ pub const MLDSA44_STORED_IDENTITY_LEN: usize =
     MLDSA44_PUBKEY_LEN + 2 + PreparedVerifyingKey::<false>::BYTE_LEN;
 /// `expand` instructions after `initialize` to reach the full account.
 pub const MLDSA44_EXPAND_STEPS: usize = 2;
-pub const MLDSA44_EXPAND_DISCRIMINATOR: u8 = 6;
+pub const MLDSA44_EXPAND_DISCRIMINATOR: u8 = 5;
 
 /// The public key is the client identity; the account also holds its prepared form.
 pub const MLDSA44: Scheme = Scheme {
@@ -23,6 +23,7 @@ pub const MLDSA44: Scheme = Scheme {
     signature_len: MLDSA44_SIGNATURE_LEN,
     identity_len: MLDSA44_PUBKEY_LEN,
     stored_identity_len: MLDSA44_STORED_IDENTITY_LEN,
+    next_key_len: 0,
 };
 
 /// Initialize an ML-DSA-44 vector account with the standard public key.

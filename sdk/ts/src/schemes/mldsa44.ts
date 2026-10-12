@@ -27,7 +27,7 @@ export const MLDSA44_SECRET_KEY_LEN = 2560;
 /** `expand` instructions after `initialize` to reach the full account. */
 export const MLDSA44_EXPAND_STEPS = 2;
 /** Discriminator of the program's one extra instruction. */
-export const MLDSA44_EXPAND_DISCRIMINATOR = 6;
+export const MLDSA44_EXPAND_DISCRIMINATOR = 5;
 /** `pk[1312] || pad[2] || prepared[20544]`. */
 export const MLDSA44_STORED_IDENTITY_LEN =
   MLDSA44_PUBKEY_LEN + 2 + MLDSA44_PREPARED_KEY_LEN;
@@ -38,6 +38,7 @@ export const MLDSA44: Scheme = {
   signatureLen: MLDSA44_SIGNATURE_LEN,
   identityLen: MLDSA44_PUBKEY_LEN,
   storedIdentityLen: MLDSA44_STORED_IDENTITY_LEN,
+  nextKeyLen: 0,
 };
 
 /** ML-DSA-44 client identity: the public key itself, length-checked. */

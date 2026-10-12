@@ -17,6 +17,7 @@ pub const XMSS: Scheme = Scheme {
     signature_len: XMSS_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: 32 + XMSS_PUBKEY_LEN,
+    next_key_len: XMSS_PUBKEY_LEN,
 };
 
 /// Derive the permanent account identity. Do not recompute it on rotation.

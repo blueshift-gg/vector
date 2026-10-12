@@ -10,8 +10,8 @@ use solana_winternitz::{
 };
 use vector_core::{
     advance_vector_digest_with_fee_payer, create_advance_instruction,
-    create_passthrough_instruction, create_rotate_subinstruction, create_withdraw_subinstruction,
-    find_vector_pda, pda_seed_from_identity, Scheme, WINTERNITZ, XMSS,
+    create_rotating_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
+    pda_seed_from_identity, Scheme, WINTERNITZ, XMSS,
 };
 
 use crate::common::{
@@ -48,11 +48,14 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         ),
         (receiver, Account::new(1_000_000, 0, &Address::default())),
     ];
-    let rotate = create_rotate_subinstruction(scheme, &identity, second.verifying_key().as_bytes());
     let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, 3_000_000);
-    // Rotation first also exercises CPI signer seeds after the key changes.
-    let passthrough =
-        create_passthrough_instruction(scheme, &identity, &[rotate.clone(), withdraw.clone()]);
+    // The key changes before the CPI, which still signs as the same account.
+    let passthrough = create_rotating_passthrough_instruction(
+        scheme,
+        &identity,
+        second.verifying_key().as_bytes(),
+        std::slice::from_ref(&withdraw),
+    );
     let digest = advance_vector_digest_with_fee_payer(
         scheme,
         &NONCE,
@@ -64,24 +67,20 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let signature = wire(first.sign(&digest).unwrap());
     let advance = create_advance_instruction(scheme, &identity, &signature);
 
-    for unauthorized in [&rotate, &passthrough] {
-        let result = process_transaction(
-            &mollusk,
-            &std::slice::from_ref(unauthorized)
-                .iter()
-                .collect::<Vec<_>>(),
-            &accounts,
-            &[],
-        );
-        assert_eq!(
-            result.program_result,
-            TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
-        );
-        assert_eq!(result.resulting_accounts, accounts);
-    }
-    let changed_key =
-        create_rotate_subinstruction(scheme, &identity, third.verifying_key().as_bytes());
-    let changed = create_passthrough_instruction(scheme, &identity, &[changed_key, withdraw]);
+    // Without an `Advance`, nothing rotates and nothing moves.
+    let result = process_transaction(&mollusk, &[&passthrough], &accounts, &[]);
+    assert_eq!(
+        result.program_result,
+        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+    );
+    assert_eq!(result.resulting_accounts, accounts);
+    // The signature covers the next key: another one does not verify.
+    let changed = create_rotating_passthrough_instruction(
+        scheme,
+        &identity,
+        third.verifying_key().as_bytes(),
+        &[withdraw],
+    );
     let result = process_transaction(&mollusk, &[&advance.clone(), &changed], &accounts, &[]);
     assert_eq!(
         result.program_result,
@@ -129,9 +128,13 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
 
     // The next key signs exactly once. A failed action must roll back both
     // the new key and nonce, allowing these exact bytes to be retried.
-    let rotate = create_rotate_subinstruction(scheme, &identity, third.verifying_key().as_bytes());
     let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, 3_000_000);
-    let passthrough = create_passthrough_instruction(scheme, &identity, &[rotate, withdraw]);
+    let passthrough = create_rotating_passthrough_instruction(
+        scheme,
+        &identity,
+        third.verifying_key().as_bytes(),
+        &[withdraw],
+    );
     let next_digest = advance_vector_digest_with_fee_payer(
         scheme,
         &digest,
@@ -227,10 +230,11 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
         ),
     )];
     for key in [vec![0; 40], vec![0; 42], public_key.to_vec()] {
-        let mut rotate = create_rotate_subinstruction(&XMSS, &identity, &public_key);
-        rotate.data.truncate(1);
-        rotate.data.extend_from_slice(&key);
-        let passthrough = create_passthrough_instruction(&XMSS, &identity, &[rotate]);
+        let mut passthrough =
+            create_rotating_passthrough_instruction(&XMSS, &identity, &public_key, &[]);
+        passthrough
+            .data
+            .splice(1..1 + public_key.len(), key.iter().copied());
         let digest = advance_vector_digest_with_fee_payer(
             &XMSS,
             &NONCE,

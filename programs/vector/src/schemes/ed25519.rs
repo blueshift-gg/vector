@@ -22,16 +22,12 @@ impl SigningScheme for Ed25519 {
     fn identity_len(&self) -> usize {
         32
     }
-    fn init_payload_len(&self) -> usize {
+    fn key_len(&self) -> usize {
         32
     }
 
-    fn populate_identity(
-        &self,
-        payload: &[u8],
-        identity_out: &mut [u8],
-    ) -> Result<(), ProgramError> {
-        let pubkey: &[u8; 32] = payload
+    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+        let pubkey: &[u8; 32] = key
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         if !bytes_are_curve_point(pubkey) {
@@ -41,7 +37,7 @@ impl SigningScheme for Ed25519 {
         Ok(())
     }
 
-    fn verify(
+    fn advance(
         &self,
         identity: &[u8],
         digest: &[u8; 32],

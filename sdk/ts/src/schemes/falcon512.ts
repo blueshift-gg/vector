@@ -43,6 +43,7 @@ export const FALCON512: Scheme = {
   signatureLen: FALCON_SIGNATURE_LEN,
   identityLen: 32,
   storedIdentityLen: 32 + FALCON_PREPARED_PUBKEY_LEN,
+  nextKeyLen: 0,
 };
 
 /** Falcon-512 client identity: `sha256(wire_pubkey)` (32 bytes). */

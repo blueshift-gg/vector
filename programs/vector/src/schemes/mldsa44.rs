@@ -61,16 +61,12 @@ impl SigningScheme for MlDsa44 {
     fn identity_len(&self) -> usize {
         IDENTITY_LEN
     }
-    fn init_payload_len(&self) -> usize {
+    fn key_len(&self) -> usize {
         PUBLIC_KEY_LEN
     }
 
-    fn populate_identity(
-        &self,
-        payload: &[u8],
-        identity_out: &mut [u8],
-    ) -> Result<(), ProgramError> {
-        let public_key = VerifyingKey::<false>::ref_from_bytes(payload)
+    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+        let public_key = VerifyingKey::<false>::ref_from_bytes(key)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         if identity_out.len() < PREPARED {
             return Err(ProgramError::AccountDataTooSmall);
@@ -80,7 +76,7 @@ impl SigningScheme for MlDsa44 {
         Self::fill(identity_out, 0)
     }
 
-    fn pda_seed_from_identity(&self, identity: &[u8]) -> IdentitySeed {
+    fn seed_from_identity(&self, identity: &[u8]) -> IdentitySeed {
         IdentitySeed::from_hash(&identity[..PUBLIC_KEY_LEN])
     }
 
@@ -92,7 +88,7 @@ impl SigningScheme for MlDsa44 {
         Self::fill(identity, from)
     }
 
-    fn verify(
+    fn advance(
         &self,
         identity: &[u8],
         digest: &[u8; 32],

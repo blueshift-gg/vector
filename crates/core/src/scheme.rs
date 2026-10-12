@@ -16,7 +16,6 @@ pub const ADVANCE_DISCRIMINATOR: u8 = 1;
 pub const CLOSE_DISCRIMINATOR: u8 = 2;
 pub const WITHDRAW_DISCRIMINATOR: u8 = 3;
 pub const PASSTHROUGH_DISCRIMINATOR: u8 = 4;
-pub const ROTATE_DISCRIMINATOR: u8 = 5;
 
 pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 
@@ -38,6 +37,9 @@ pub struct Scheme {
     /// `identity_len` for schemes that store the pubkey verbatim; larger for
     /// schemes that store an expanded form (Falcon: 32 + 1024).
     pub stored_identity_len: usize,
+    /// Length of the key every `passthrough` carries for a scheme whose key
+    /// rotates (Winternitz, XMSS): the key that signs next. Zero otherwise.
+    pub next_key_len: usize,
 }
 
 impl Scheme {

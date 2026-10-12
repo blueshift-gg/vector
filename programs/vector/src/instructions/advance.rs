@@ -89,7 +89,7 @@ impl<'a> Advance<'a> {
             // The message is the same for every signer. The nonce and the
             // address make the digest this account's own.
             let digest = hashv(&[&message, &account.nonce, &address]);
-            scheme.verify(identity, &digest, signature)?;
+            scheme.advance(identity, &digest, signature)?;
             account.nonce = digest;
         }
 

@@ -21,6 +21,7 @@ export const SECP256K1: Scheme = {
   signatureLen: 64,
   identityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
   storedIdentityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
+  nextKeyLen: 0,
 };
 
 /** 33-byte sec1-compressed secp256k1 public key. */

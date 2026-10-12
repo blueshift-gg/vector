@@ -12,6 +12,7 @@ export const WINTERNITZ: Scheme = {
   signatureLen: WINTERNITZ_SIGNATURE_LEN,
   identityLen: 32,
   storedIdentityLen: 32 + WINTERNITZ_PUBKEY_LEN,
+  nextKeyLen: WINTERNITZ_PUBKEY_LEN,
 };
 
 /** Derive the permanent account identity. Do not recompute it on rotation. */
