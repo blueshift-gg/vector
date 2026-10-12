@@ -1,6 +1,5 @@
-//! secp256k1 + EIP-191 scheme: identity is the 20-byte Ethereum address;
-//! the digest is wrapped in the EIP-191 personal-sign envelope before
-//! signing/recovery.
+//! secp256k1 + EIP-191. The identity is the 20-byte Ethereum address, and
+//! what is signed is the digest in a personal-sign envelope.
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as Secp256k1SigningKey};
 use sha3::{Digest as Sha3Digest, Keccak256};
@@ -55,10 +54,8 @@ pub fn create_initialize_secp256k1_eip191(
     create_initialize_instruction(payer, &EIP191, eth_address)
 }
 
-/// `keccak256("\x19Ethereum Signed Message:\n32" || digest)` — the EIP-191
-/// personal-sign envelope the on-chain program reproduces before
-/// `secp256k1_recover`. Public so external signers (HSMs, wallets exposing
-/// raw-prehash APIs) can be handed the exact prehash they expect.
+/// `keccak256("\x19Ethereum Signed Message:\n32" || digest)`: what an EIP-191
+/// signer actually signs. Public for signers that take a prehash.
 pub fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Keccak256::new();
     hasher.update(b"\x19Ethereum Signed Message:\n32");
@@ -66,13 +63,9 @@ pub fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Sign the advance digest with an EIP-191 secp256k1 key, returning the
-/// advance ix alone. Any CPI passthrough must be built separately via
-/// [`crate::instructions::create_passthrough_instruction`] and included
-/// among `pre_instructions` or `post_instructions` so the digest commits
-/// to its bytes. Pass the transaction's `fee_payer` whenever it is also an
-/// account of one of those instructions: the runtime then records it as a
-/// writable signer there, and the signature must commit to that.
+/// Sign an advance with an EIP-191 secp256k1 key. Put any passthrough among
+/// `pre_instructions` or `post_instructions`, so the signature covers it.
+/// Pass `fee_payer` when it is also an account of one of those instructions.
 pub fn sign_advance_instruction_secp256k1_eip191(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],
@@ -99,14 +92,9 @@ pub fn sign_advance_instruction_secp256k1_eip191(
     create_advance_instruction(&EIP191, &identity, &sig_bytes)
 }
 
-/// Sign an inert advance — a revocation — with an EIP-191 secp256k1 key:
-/// [`sign_advance_instruction_secp256k1_eip191`] with empty pre/post
-/// instructions. Landing it only bumps the nonce, orphaning everything
-/// pre-signed against it. The digest
-/// ([`crate::digest::revocation_digest`]) commits to the broadcasting
-/// transaction containing ONLY this instruction; verify with
-/// [`crate::verify::verify_advance_signature_secp256k1_eip191`] over empty
-/// pre/post slices.
+/// Sign an advance with nothing around it. Landing it only moves the nonce,
+/// which cancels everything signed against the old one. It must be the only
+/// instruction of its transaction.
 pub fn sign_revocation_instruction_secp256k1_eip191(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],

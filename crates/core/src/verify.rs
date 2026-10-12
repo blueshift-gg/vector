@@ -1,24 +1,12 @@
-//! Offline verification of `advance` signatures. Each function recomputes
-//! the canonical digest via
-//! [`advance_vector_digest_with_fee_payer`](crate::digest::advance_vector_digest_with_fee_payer)
-//! and checks the signature the way the on-chain program will, so a PASS
-//! here means the transaction will verify on-chain against the same nonce.
-//! On success each function returns the digest — which **is** the account's
-//! next nonce, so chains of dependent transactions can be pre-signed by
-//! feeding each digest into the next signing call.
+//! Check an `advance` signature offline, the way the program will. Each
+//! function returns the digest, which is the account's next nonce.
 //!
-//! One caveat: ed25519 is checked with `ed25519-dalek` offline while the
-//! on-chain program uses `brine-ed25519`, so adversarially malformed
-//! signatures (non-canonical scalars, small-order points) may be judged
-//! differently by the two implementations. Honestly-generated signatures
-//! verify identically.
+//! Ed25519 is checked with `ed25519-dalek` here and `brine-ed25519` on chain.
+//! The two can only disagree on deliberately malformed signatures.
 //!
-//! `fee_payer` participates in **message-level flag promotion only**: the
-//! live sysvar the on-chain program hashes carries message-level account
-//! flags, and the fee payer is always a writable signer at the message
-//! level. The digest is therefore independent of the fee payer **unless**
-//! its key appears among the committed instructions' accounts, in which
-//! case promotion folds it in and the signature is bound to that fee payer.
+//! Pass `fee_payer` when it is also an account of one of the instructions:
+//! the runtime then marks it a writable signer there, and the digest covers
+//! that flag.
 
 use ed25519_dalek::Verifier as _;
 use k256::ecdsa::signature::hazmat::PrehashVerifier as _;
@@ -44,12 +32,11 @@ use crate::schemes::{
 /// parse-stage variants carry a static reason so the `Display` output is
 /// self-explaining at call sites.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why an offline check failed.
 pub enum VerifyError {
-    /// The signature bytes are unusable before any curve math runs (wrong
-    /// length, out-of-range scalar, invalid recovery byte).
+    /// The signature bytes are unusable: wrong length, or out of range.
     MalformedSignature(&'static str),
-    /// The key material and the identity disagree (invalid public key
-    /// bytes, or an EIP-191 recovery yielding a different address).
+    /// The identity is not a valid key, or not the key that signed.
     IdentityMismatch(&'static str),
     /// The signature does not verify over the recomputed digest.
     SignatureInvalid,
@@ -71,14 +58,7 @@ impl core::fmt::Display for VerifyError {
 
 impl std::error::Error for VerifyError {}
 
-/// Verify an Ed25519 `advance` signature offline. `pubkey` is the 32-byte
-/// identity, `signature` the 64-byte wire signature (the advance ix data
-/// after the 1-byte discriminator). Returns the recomputed digest — the
-/// account's next nonce — on success.
-///
-/// Offline verification uses `ed25519-dalek` while the on-chain program
-/// uses `brine-ed25519`; see the module docs for the (adversarial-only)
-/// gap between the two.
+/// Verify an Ed25519 advance signature. `pubkey` is the identity.
 pub fn verify_advance_signature_ed25519(
     pubkey: &[u8; ED25519_PUBKEY_LEN],
     nonce: &[u8; 32],
@@ -108,13 +88,8 @@ pub fn verify_advance_signature_ed25519(
     Ok(digest)
 }
 
-/// Verify a plain-secp256k1 ECDSA `advance` signature offline.
-/// `compressed_pubkey` is the 33-byte sec1 identity, `signature` the
-/// 64-byte `r || s` wire form. Returns the recomputed digest on success.
-///
-/// High-S signatures are normalized before checking: the on-chain
-/// `solana-secp256k1-ecdsa` verifier accepts both `s` normalizations, so
-/// the offline check must too or PASS/FAIL would diverge.
+/// Verify a plain secp256k1 advance signature. A high-S signature is
+/// accepted, as it is on chain.
 pub fn verify_advance_signature_secp256k1_ecdsa(
     compressed_pubkey: &[u8; SECP256K1_COMPRESSED_PUBKEY_LEN],
     nonce: &[u8; 32],
@@ -149,20 +124,11 @@ pub fn verify_advance_signature_secp256k1_ecdsa(
     Ok(digest)
 }
 
-/// Verify an EIP-191 `advance` signature offline. `eth_address` is the
-/// 20-byte identity, `signature` the 65-byte `r || s || v` wire form with
-/// `v` the raw recovery id (`0..=3`). Returns the recomputed digest on
-/// success.
+/// Verify an EIP-191 advance signature against an Ethereum address. A high-S
+/// signature is accepted, as it is on chain.
 ///
-/// The key is recovered from the EIP-191 envelope of the digest
-/// ([`eip191_envelope_hash`]) and its derived Ethereum address compared to
-/// the identity. The Ethereum legacy `v = 27/28` form is **rejected**: the
-/// on-chain program passes `v` straight to `sol_secp256k1_recover`, which
-/// errors on recovery ids above 3, so a legacy-form signature would pass
-/// offline yet fail on-chain — subtract 27 at assembly time. High-S
-/// signatures are normalized (with the recovery id's parity flipped to
-/// keep recovering the same key), since `sol_secp256k1_recover` accepts
-/// them.
+/// `v` is the raw recovery id, 0 or 1. The program rejects Ethereum's 27/28
+/// form, so this does too: subtract 27 when assembling the signature.
 pub fn verify_advance_signature_secp256k1_eip191(
     eth_address: &[u8; EIP191_ETH_ADDRESS_LEN],
     nonce: &[u8; 32],
@@ -217,12 +183,8 @@ pub fn verify_advance_signature_secp256k1_eip191(
     Ok(digest)
 }
 
-/// Verify a Falcon-512 `advance` signature offline, given the 897-byte wire
-/// pubkey, which is the identity.
-/// `signature` is the 666-byte zero-padded wire form. Verification runs
-/// `solana-falcon512`'s host-callable verifier over the raw digest — the
-/// same code path the on-chain program executes. Returns the recomputed
-/// digest on success.
+/// Verify a Falcon-512 advance signature with the verifier the program uses.
+/// `signature` is the 666-byte zero-padded form.
 pub fn verify_advance_signature_falcon512(
     wire_pubkey: &[u8; FALCON512_WIRE_PUBKEY_LEN],
     nonce: &[u8; 32],
@@ -253,11 +215,8 @@ pub fn verify_advance_signature_falcon512(
     }
 }
 
-/// Verify an ML-DSA-44 `advance` signature offline. `public_key` is the
-/// standard 1312-byte key, `signature` the 2420-byte signature (the advance
-/// ix data after the 1-byte discriminator). Runs the same verifier the
-/// on-chain program uses (`solana-ml-dsa`), with an empty FIPS 204 context.
-/// Returns the recomputed digest — the account's next nonce — on success.
+/// Verify an ML-DSA-44 advance signature with the verifier the program uses,
+/// with an empty context.
 pub fn verify_advance_signature_mldsa44(
     public_key: &[u8; MLDSA44_PUBKEY_LEN],
     nonce: &[u8; 32],

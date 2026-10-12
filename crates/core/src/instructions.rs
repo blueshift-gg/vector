@@ -1,5 +1,5 @@
-//! Generic instruction builders, scheme-independent. Per-scheme convenience
-//! wrappers (e.g. `create_initialize_ed25519`) live in [`crate::schemes`].
+//! Instruction builders for every scheme. Each scheme's own helpers, such as
+//! `create_initialize_ed25519`, are in [`crate::schemes`].
 
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
@@ -43,9 +43,8 @@ pub fn create_initialize_instruction(
     }
 }
 
-/// Build an `advance` instruction for one signer — verify the signature and
-/// install the digest as the next nonce. No CPI passthrough; pair with
-/// [`create_passthrough_instruction`] in the same tx for that.
+/// Build an `advance` for one signer. It verifies the signature and moves the
+/// nonce; pair it with [`create_passthrough_instruction`] to act.
 pub fn create_advance_instruction(
     scheme: &Scheme,
     identity: &[u8],
@@ -54,13 +53,13 @@ pub fn create_advance_instruction(
     create_multi_advance_instruction(&[(scheme, identity, advance_vector_signature)])
 }
 
-/// Build an `advance` instruction for several signers, each a
-/// `(scheme, identity, signature)`. Every signer signs its own
+/// Build an `advance` for several signers, each a `(scheme, identity,
+/// signature)`. Every signer signs its own
 /// [`signer_digest`](crate::signer_digest) of the one
 /// [`advance_message`](crate::advance_message).
 ///
-/// Accounts: `[vector_pda(writable)..., instructions_sysvar]`.
-/// Data: `[ADVANCE_DISCRIMINATOR, signature...]`.
+/// Accounts: `[vector_pda(writable)..., instructions_sysvar]`. Data:
+/// `[ADVANCE_DISCRIMINATOR, signature...]`.
 pub fn create_multi_advance_instruction(signers: &[(&Scheme, &[u8], &[u8])]) -> Instruction {
     let mut accounts = Vec::with_capacity(signers.len() + 1);
     let mut data = vec![ADVANCE_DISCRIMINATOR];

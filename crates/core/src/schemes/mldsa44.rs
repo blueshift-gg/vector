@@ -24,9 +24,9 @@ pub const MLDSA44: Scheme = Scheme {
     next_key_optional: false,
 };
 
-/// Initialize an ML-DSA-44 vector account with the standard public key.
-/// Creates the first 10,240 bytes; follow with [`MLDSA44_EXPAND_STEPS`]
-/// [`create_expand_mldsa44`] instructions, in the same transaction or later.
+/// Create an ML-DSA-44 account. It is created short: follow with
+/// [`MLDSA44_EXPAND_STEPS`] [`create_expand_mldsa44`] instructions, in the
+/// same transaction or later.
 pub fn create_initialize_mldsa44(
     payer: &Address,
     public_key: &[u8; MLDSA44_PUBKEY_LEN],
@@ -34,10 +34,8 @@ pub fn create_initialize_mldsa44(
     create_initialize_instruction(payer, &MLDSA44, public_key)
 }
 
-/// Grow the vector account by one 10,240-byte step and expand the rows that
-/// fit. Permissionless and deterministic; fails once the account is complete.
-///
-/// Accounts: `[vector_pda(writable)]`. Data: `[MLDSA44_EXPAND_DISCRIMINATOR, scheme]`.
+/// Grow the account by one step. Anyone can send it; it fails once the
+/// account is complete.
 pub fn create_expand_mldsa44(public_key: &[u8; MLDSA44_PUBKEY_LEN]) -> Instruction {
     let (vector, _bump) = find_vector_pda(&MLDSA44, public_key);
     Instruction {

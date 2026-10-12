@@ -40,13 +40,9 @@ pub fn create_initialize_secp256k1_ecdsa(
     create_initialize_instruction(payer, &SECP256K1, compressed_pubkey)
 }
 
-/// Sign the advance digest with a plain secp256k1 ECDSA key, returning the
-/// advance ix alone. Any CPI passthrough must be built separately via
-/// [`crate::instructions::create_passthrough_instruction`] and included
-/// among `pre_instructions` or `post_instructions` so the digest commits
-/// to its bytes. Pass the transaction's `fee_payer` whenever it is also an
-/// account of one of those instructions: the runtime then records it as a
-/// writable signer there, and the signature must commit to that.
+/// Sign an advance with a plain secp256k1 key. Put any passthrough among
+/// `pre_instructions` or `post_instructions`, so the signature covers it.
+/// Pass `fee_payer` when it is also an account of one of those instructions.
 pub fn sign_advance_instruction_secp256k1_ecdsa(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],
@@ -70,14 +66,9 @@ pub fn sign_advance_instruction_secp256k1_ecdsa(
     create_advance_instruction(&SECP256K1, &identity, &sig_bytes)
 }
 
-/// Sign an inert advance — a revocation — with a plain secp256k1 ECDSA key:
-/// [`sign_advance_instruction_secp256k1_ecdsa`] with empty pre/post
-/// instructions. Landing it only bumps the nonce, orphaning everything
-/// pre-signed against it. The digest
-/// ([`crate::digest::revocation_digest`]) commits to the broadcasting
-/// transaction containing ONLY this instruction; verify with
-/// [`crate::verify::verify_advance_signature_secp256k1_ecdsa`] over empty
-/// pre/post slices.
+/// Sign an advance with nothing around it. Landing it only moves the nonce,
+/// which cancels everything signed against the old one. It must be the only
+/// instruction of its transaction.
 pub fn sign_revocation_instruction_secp256k1_ecdsa(
     signing_key: &Secp256k1SigningKey,
     nonce: &[u8; 32],

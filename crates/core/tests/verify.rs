@@ -97,8 +97,15 @@ fn secp256k1_round_trip_and_high_s_twin() {
         .expect("round trip must verify");
 
     let high_s = malleate_high_s(&k256::ecdsa::Signature::from_slice(wire).unwrap());
-    verify_advance_signature_secp256k1_ecdsa(&pubkey, &NONCE, &pre, &post, None, &high_s.to_bytes())
-        .expect("high-S twin must verify offline, matching on-chain acceptance");
+    verify_advance_signature_secp256k1_ecdsa(
+        &pubkey,
+        &NONCE,
+        &pre,
+        &post,
+        None,
+        &high_s.to_bytes(),
+    )
+    .expect("high-S twin must verify offline, matching on-chain acceptance");
 }
 
 #[test]
@@ -161,7 +168,6 @@ fn falcon512_round_trip() {
         Err(VerifyError::SignatureInvalid),
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // Tamper detection

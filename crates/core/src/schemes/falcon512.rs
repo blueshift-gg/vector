@@ -1,6 +1,5 @@
-//! Falcon-512 (post-quantum) scheme. Verify-side library only; signing is
-//! left to the caller (pair with `pqcrypto-falcon` or another Falcon
-//! signer). The identity is the wire public key.
+//! Falcon-512. The identity is the 897-byte wire public key. Signing is left
+//! to the caller, with `pqcrypto-falcon` or another Falcon signer.
 
 use solana_address::Address;
 use solana_falcon512::{FALCON_512_PUBKEY_LEN, FALCON_512_SIGNATURE_LEN};

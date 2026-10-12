@@ -34,13 +34,9 @@ pub fn create_initialize_ed25519(
     create_initialize_instruction(payer, &ED25519, pubkey)
 }
 
-/// Sign the advance digest with an Ed25519 key, returning the advance ix
-/// alone. Any CPI passthrough must be built separately via
-/// [`crate::instructions::create_passthrough_instruction`] and included
-/// among `pre_instructions` or `post_instructions` so the digest commits
-/// to its bytes. Pass the transaction's `fee_payer` whenever it is also an
-/// account of one of those instructions: the runtime then records it as a
-/// writable signer there, and the signature must commit to that.
+/// Sign an advance with an Ed25519 key. Put any passthrough among
+/// `pre_instructions` or `post_instructions`, so the signature covers it.
+/// Pass `fee_payer` when it is also an account of one of those instructions.
 pub fn sign_advance_instruction_ed25519(
     signing_key: &SigningKey,
     nonce: &[u8; 32],
@@ -61,13 +57,9 @@ pub fn sign_advance_instruction_ed25519(
     create_advance_instruction(&ED25519, &identity, &signature)
 }
 
-/// Sign an inert advance — a revocation — with an Ed25519 key:
-/// [`sign_advance_instruction_ed25519`] with empty pre/post instructions.
-/// Landing it only bumps the nonce, orphaning everything pre-signed against
-/// it. The digest ([`crate::digest::revocation_digest`]) commits to the
-/// broadcasting transaction containing ONLY this instruction; verify with
-/// [`crate::verify::verify_advance_signature_ed25519`] over empty pre/post
-/// slices.
+/// Sign an advance with nothing around it. Landing it only moves the nonce,
+/// which cancels everything signed against the old one. It must be the only
+/// instruction of its transaction.
 pub fn sign_revocation_instruction_ed25519(
     signing_key: &SigningKey,
     nonce: &[u8; 32],

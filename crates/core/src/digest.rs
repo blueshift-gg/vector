@@ -1,5 +1,5 @@
-//! The canonical `advance` digest the client signs and the on-chain program
-//! recomputes from the instructions sysvar.
+//! What a vector account signs: a digest of the transaction, which the
+//! program recomputes from the instructions sysvar.
 
 use std::collections::HashMap;
 
@@ -11,13 +11,9 @@ use solana_instructions_sysvar::construct_instructions_data;
 use crate::instructions::create_multi_advance_instruction;
 use crate::scheme::{find_vector_pda, Scheme};
 
-/// Promote instruction-level account flags to message-level flags, matching
-/// what the Solana runtime writes into the live instructions sysvar: each
-/// unique account's `is_signer`/`is_writable` are OR-ed across every
-/// top-level instruction, and the transaction's fee payer (always a writable
-/// signer at the message level) is folded in when supplied.
-///
-/// Mirrors `promoteToMessageFlags` in `sdk/ts/src/digest.ts`.
+/// Set each account's flags to what the runtime writes in the instructions
+/// sysvar: signer or writable if any instruction says so, and the fee payer
+/// always both.
 fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<&Address>) {
     let mut flags: HashMap<Address, (bool, bool)> = HashMap::new();
     if let Some(payer) = fee_payer {
@@ -39,27 +35,15 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
     }
 }
 
-/// The message every signer of one `advance` approves, **exactly as the
-/// on-chain program recomputes it from the live instructions sysvar**: the
-/// SHA-256 of the sysvar with the signatures cut off the end of the advance's
-/// data. Mirrors `advanceMessage` in `sdk/ts/src/digest.ts`.
+/// The message every signer of one advance approves: the SHA-256 of the
+/// instructions sysvar without the advance's signatures.
 ///
 /// `signers` are the advance's `(scheme, identity)` pairs, in order. The
-/// advance is inserted at `pre_instructions.len()`; a sibling `passthrough`
-/// is just another pre/post instruction, and the message covers all of it.
+/// advance goes after `pre_instructions`. A passthrough is one of the pre or
+/// post instructions, so the message covers it.
 ///
-/// Two runtime behaviours are reproduced before hashing:
-///
-/// 1. **Message-level flag promotion** — the live sysvar serializes each
-///    account's *message-level* `is_signer`/`is_writable` (OR-ed across all
-///    top-level instructions), not the per-instruction flags. `fee_payer`,
-///    when supplied, participates in this promotion only (it is always a
-///    writable signer at the message level): the message is independent of
-///    the fee payer **unless** the fee payer's key appears among the
-///    committed instructions' accounts, in which case promotion folds it in.
-/// 2. **Sysvar index footer** — the buffer's trailing two bytes hold the
-///    runtime's `current_instruction_index`, i.e. the advance's own index
-///    (`pre_instructions.len()`), not zero.
+/// `fee_payer` only matters when it is also an account of one of the
+/// instructions: the sysvar then shows it as a writable signer there.
 pub fn advance_message(
     signers: &[(&Scheme, &[u8])],
     pre_instructions: &[Instruction],
@@ -122,11 +106,9 @@ pub fn advance_message(
     hasher.finalize().into()
 }
 
-/// What one signer signs: `SHA256(message || nonce || vector)`, with
-/// `message` from [`advance_message`] and `vector` the signer's account
-/// address. The message is shared by every signer of the advance; the nonce
-/// and address make the digest this signer's own. It is also the account's
-/// next nonce. Mirrors `signerDigest` in `sdk/ts/src/digest.ts`.
+/// What one signer signs, and the account's next nonce: `SHA256(message ||
+/// nonce || vector)`, with `message` from [`advance_message`] and `vector`
+/// the signer's account address.
 pub fn signer_digest(message: &[u8; 32], nonce: &[u8; 32], vector: &Address) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(message);
@@ -135,8 +117,7 @@ pub fn signer_digest(message: &[u8; 32], nonce: &[u8; 32], vector: &Address) -> 
     hasher.finalize().into()
 }
 
-/// [`signer_digest`] for an advance with one signer. Mirrors
-/// `advanceVectorDigest` in `sdk/ts/src/digest.ts`.
+/// [`signer_digest`] for an advance with one signer.
 pub fn advance_vector_digest_with_fee_payer(
     scheme: &Scheme,
     nonce: &[u8; 32],
@@ -154,10 +135,8 @@ pub fn advance_vector_digest_with_fee_payer(
     signer_digest(&message, nonce, &find_vector_pda(scheme, identity).0)
 }
 
-/// [`advance_vector_digest_with_fee_payer`] for a fee payer that is not among
-/// the committed instructions' accounts, where it has no effect on the
-/// digest. Mirrors `advanceVectorDigest` without `feePayer` in
-/// `sdk/ts/src/digest.ts`.
+/// [`advance_vector_digest_with_fee_payer`] without a fee payer: use it when
+/// the fee payer is not an account of any instruction.
 pub fn advance_vector_digest(
     scheme: &Scheme,
     nonce: &[u8; 32],
@@ -175,18 +154,9 @@ pub fn advance_vector_digest(
     )
 }
 
-/// The digest a pre-signed revocation commits to: [`advance_vector_digest`]
-/// with empty pre/post instructions. The resulting advance is an inert
-/// transition — landing it only installs the next nonce, orphaning every
-/// signature pre-signed against `nonce` (a kill-switch).
-///
-/// This digest commits to the instructions sysvar of the broadcasting
-/// transaction, so a pre-signed revocation must be broadcast as a
-/// transaction containing ONLY the advance instruction. ed25519 / eip191 /
-/// secp256k1 inert advances fit the default compute budget (~13k / ~26k /
-/// ~72k CUs); for Falcon-512, sign via the advance signer with a
-/// compute-budget pre-instruction committed at sign time (its ~184k CU
-/// verify leaves no headroom under the 200k default).
+/// The digest of an advance with nothing around it. Landing that advance only
+/// moves the nonce, which cancels everything signed against the old one. It
+/// must be the only instruction of its transaction.
 pub fn revocation_digest(scheme: &Scheme, nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {
     advance_vector_digest(scheme, nonce, identity, &[], &[])
 }

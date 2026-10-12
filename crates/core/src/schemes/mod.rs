@@ -1,10 +1,5 @@
-//! One module per signing scheme. Each owns its `Scheme`
-//! constant, identity derivation, an `initialize` builder, and (where a
-//! Rust signer exists) a `sign_advance_instruction_*` helper.
-//!
-//! Falcon-512 is verify-only on-chain; its signing is left to the caller
-//! (pair with an external signer and feed the wire-format signature to
-//! [`crate::instructions::create_advance_instruction`]).
+//! One module per signing scheme: its `Scheme` constant, an `initialize`
+//! builder, and a signer where this crate has one.
 
 pub mod ed25519;
 pub mod eip191;
