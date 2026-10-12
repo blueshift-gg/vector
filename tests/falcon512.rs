@@ -1,9 +1,8 @@
 //! Falcon-512 tests.
 //!
-//! The client identity is `sha256(wire_pubkey)` (32 bytes) — the PDA seed.
-//! The on-chain account stores that
-//! hash followed by the 1024-byte prepared pubkey (1056 bytes total), which
-//! the test reconstructs off-chain via `solana-falcon512`.
+//! The identity is the 897-byte wire public key. The account stores its
+//! 1024-byte prepared form, which the test reconstructs off-chain via
+//! `solana-falcon512`.
 
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use pqcrypto_falcon::falcon512;

@@ -218,7 +218,7 @@ pub fn verify_advance_signature_secp256k1_eip191(
 }
 
 /// Verify a Falcon-512 `advance` signature offline, given the 897-byte wire
-/// pubkey (the identity, `sha256(wire_pubkey)`, is derived from it).
+/// pubkey, which is the identity.
 /// `signature` is the 666-byte zero-padded wire form. Verification runs
 /// `solana-falcon512`'s host-callable verifier over the raw digest — the
 /// same code path the on-chain program executes. Returns the recomputed

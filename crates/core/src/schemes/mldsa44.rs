@@ -31,7 +31,7 @@ pub fn create_initialize_mldsa44(
     payer: &Address,
     public_key: &[u8; MLDSA44_PUBKEY_LEN],
 ) -> Instruction {
-    create_initialize_instruction(payer, &MLDSA44, public_key, public_key)
+    create_initialize_instruction(payer, &MLDSA44, public_key)
 }
 
 /// Grow the vector account by one 10,240-byte step and expand the rows that

@@ -27,23 +27,23 @@ import {
 // ── Initialize ───────────────────────────────────────────────────────
 
 /**
- * Build an `initialize` instruction. `initPayload` shape is scheme-defined.
+ * Build an `initialize` instruction for `identity`, the key the account is
+ * created with.
  *
  * Accounts: `[payer, vector_pda, system_program]`.
- * Data: `[INITIALIZE_DISCRIMINATOR, scheme, ...initPayload]`.
+ * Data: `[INITIALIZE_DISCRIMINATOR, scheme, ...identity]`.
  */
 export function createInitializeInstruction(
   payer: Address,
   scheme: Scheme,
-  identity: Uint8Array,
-  initPayload: Uint8Array
+  identity: Uint8Array
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
 
-  const data = new Uint8Array(2 + initPayload.length);
+  const data = new Uint8Array(2 + identity.length);
   data[0] = INITIALIZE_DISCRIMINATOR;
   data[1] = scheme.id;
-  data.set(initPayload, 2);
+  data.set(identity, 2);
 
   return new TransactionInstruction({
     programId: PROGRAM_ID,
@@ -107,18 +107,15 @@ export function createMultiAdvanceInstruction(
 // ── Passthrough ──────────────────────────────────────────────────────
 
 /**
- * Build a `passthrough` instruction — replays a batch of CPIs under the
- * vector PDA's signer seeds. Must be paired with a sibling `advance` ix
- * earlier in the same tx: the on-chain handler scans the instructions
- * sysvar and refuses if it can't find a prior `advance` for the same
- * vector PDA. The sibling advance's signature digest commits to the
- * entire sysvar buffer (minus its sig bytes), so the passthrough's data
- * and account layout are authenticated end-to-end without a second
+ * Build a `passthrough` instruction: run `subInstructions` as the vector
+ * account, which signs each of them. It needs an `advance` for the same
+ * account earlier in the transaction. That advance's signature covers the
+ * whole transaction, this instruction included, so there is no second
  * signature here.
  *
  * Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
  * ...sub_ix accounts...]` repeated per sub-instruction.
- * Data: `[PASSTHROUGH_DISCRIMINATOR, scheme, num_ixs(u8),
+ * Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
  * {num_accounts(u8), data_len(u16 LE), data}...]`.
  */
 export function createPassthroughInstruction(

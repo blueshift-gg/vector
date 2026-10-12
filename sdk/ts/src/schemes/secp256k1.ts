@@ -48,12 +48,7 @@ export function createInitializeSecp256k1(
       `compressed pubkey must be ${SECP256K1_COMPRESSED_PUBKEY_LEN} bytes, got ${compressedPubkey.length}`
     );
   }
-  return createInitializeInstruction(
-    payer,
-    SECP256K1,
-    compressedPubkey,
-    compressedPubkey
-  );
+  return createInitializeInstruction(payer, SECP256K1, compressedPubkey);
 }
 
 /**

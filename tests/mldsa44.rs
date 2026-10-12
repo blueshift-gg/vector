@@ -1,8 +1,8 @@
 //! ML-DSA-44 tests.
 //!
-//! The identity is the 1,312-byte public key, hashed for the PDA seed. The account stores it and the
+//! The identity is the 1,312-byte public key. The account stores it and the
 //! key's 20,544-byte expanded form. Registration is `initialize` (10,240
-//! bytes: key, row 0) then two `expand` (20,480: rows 1, 2; 21,892: row 3,
+//! bytes: key, row 0) then two `expand` (20,480: rows 1, 2; 21,924: row 3,
 //! `tr`), all three in one transaction.
 
 use fips204::ml_dsa_44;

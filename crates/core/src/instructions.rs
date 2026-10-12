@@ -10,20 +10,17 @@ use crate::scheme::{
     WITHDRAW_DISCRIMINATOR,
 };
 
-/// Build an `initialize` instruction. `init_payload`'s shape is
-/// scheme-defined.
+/// Build an `initialize` instruction for `identity`, the key the account is
+/// created with.
 ///
-/// Accounts: `[payer, vector_pda, system_program]`. `system_program` is
-/// required — Solana resolves the pinocchio `CreateAccount` CPI by looking
-/// up System in the parent program's account_infos (built-in programs are
-/// NOT auto-loaded for CPI dispatch).
+/// Accounts: `[payer, vector_pda, system_program]`. The program creates the
+/// account through the System program, so it has to be passed.
 ///
-/// Data: `[INITIALIZE_DISCRIMINATOR, scheme, ...init_payload]`.
+/// Data: `[INITIALIZE_DISCRIMINATOR, scheme, ...identity]`.
 pub fn create_initialize_instruction(
     payer: &Address,
     scheme: &Scheme,
     identity: &[u8],
-    init_payload: &[u8],
 ) -> Instruction {
     assert_eq!(
         identity.len(),
@@ -32,10 +29,8 @@ pub fn create_initialize_instruction(
     );
     let (vector, _bump) = find_vector_pda(scheme, identity);
 
-    let mut data = Vec::with_capacity(1 + init_payload.len());
-    data.push(INITIALIZE_DISCRIMINATOR);
-    data.push(scheme.id);
-    data.extend_from_slice(init_payload);
+    let mut data = vec![INITIALIZE_DISCRIMINATOR, scheme.id];
+    data.extend_from_slice(identity);
 
     Instruction {
         program_id: PROGRAM_ID,
@@ -83,14 +78,11 @@ pub fn create_multi_advance_instruction(signers: &[(&Scheme, &[u8], &[u8])]) -> 
     }
 }
 
-/// Build a `passthrough` instruction — replay a batch of CPIs under the
-/// vector PDA's signer seeds. Must be paired with a sibling
-/// [`create_advance_instruction`] earlier in the same transaction: the
-/// on-chain handler scans the instructions sysvar and refuses if it
-/// can't find a prior `advance` for the same vector PDA. The sibling
-/// advance's signature digest commits to the entire sysvar buffer (minus
-/// the sig bytes), so this passthrough's data + account layout are
-/// authenticated end-to-end without a second signature here.
+/// Build a `passthrough` instruction: run `instructions` as the vector
+/// account, which signs each of them. It needs an `advance` for the same
+/// account earlier in the transaction ([`create_advance_instruction`]). That
+/// advance's signature covers the whole transaction, this instruction
+/// included, so there is no second signature here.
 ///
 /// Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
 /// ...sub_ix accounts...]` repeated per sub-instruction.
@@ -112,7 +104,7 @@ pub fn create_passthrough_instruction(
 /// rotates. `next_public_key` is the key that signs the next transaction; it
 /// follows the discriminator and is covered by the signature like the rest.
 /// Persist that signer before authorizing this instruction. `identity` stays
-/// the SHA-256 of the first key.
+/// the first key.
 ///
 /// A Winternitz key signs once, so it must be replaced every time. An XMSS
 /// key may be kept with `None` until its tree runs out.
@@ -197,9 +189,9 @@ fn passthrough_instruction(
     }
 }
 
-/// Build a `close` sub-instruction for inclusion in a
-/// [`create_passthrough_instruction`] payload. Direct top-level invocation
-/// fails the `vector.is_signer()` gate.
+/// Build a `close` instruction to run inside a
+/// [`create_passthrough_instruction`]. On its own it fails: only a
+/// passthrough makes the vector account a signer.
 pub fn create_close_subinstruction(
     scheme: &Scheme,
     identity: &[u8],
@@ -216,9 +208,8 @@ pub fn create_close_subinstruction(
     }
 }
 
-/// Build a `withdraw` sub-instruction for inclusion in a
-/// [`create_passthrough_instruction`] payload. Same authorisation model as
-/// [`create_close_subinstruction`].
+/// Build a `withdraw` instruction to run inside a
+/// [`create_passthrough_instruction`], like [`create_close_subinstruction`].
 pub fn create_withdraw_subinstruction(
     scheme: &Scheme,
     identity: &[u8],

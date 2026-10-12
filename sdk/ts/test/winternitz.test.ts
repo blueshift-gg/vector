@@ -8,14 +8,13 @@ import {
   createRotatingPassthroughInstruction,
   createCloseSubinstruction,
   findVectorPda,
-  winternitzIdentity,
   vectorAccountLen,
 } from "../src/index.js";
 
 test("Winternitz account and rotation digest match Rust", () => {
   // Shared with tests/winternitz.rs; pins the 849-byte signature.
   const publicKey = Uint8Array.from({ length: 41 }, (_, i) => i);
-  const identity = winternitzIdentity(publicKey);
+  const identity = publicKey;
   const receiver = new Address(new Uint8Array(32).fill(9));
   const [pda, bump] = findVectorPda(WINTERNITZ, identity);
   expect(pda.toString()).toBe("Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y");

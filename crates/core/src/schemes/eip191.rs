@@ -52,7 +52,7 @@ pub fn create_initialize_secp256k1_eip191(
     payer: &Address,
     eth_address: &[u8; EIP191_ETH_ADDRESS_LEN],
 ) -> Instruction {
-    create_initialize_instruction(payer, &EIP191, eth_address, eth_address)
+    create_initialize_instruction(payer, &EIP191, eth_address)
 }
 
 /// `keccak256("\x19Ethereum Signed Message:\n32" || digest)` — the EIP-191

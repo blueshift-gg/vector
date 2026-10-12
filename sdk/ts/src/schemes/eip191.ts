@@ -44,7 +44,7 @@ export function createInitializeEip191(
   payer: Address,
   ethAddress: Uint8Array
 ): TransactionInstruction {
-  return createInitializeInstruction(payer, EIP191, ethAddress, ethAddress);
+  return createInitializeInstruction(payer, EIP191, ethAddress);
 }
 
 const EIP191_PREFIX = new TextEncoder().encode(

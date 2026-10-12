@@ -35,7 +35,7 @@ export function createInitializeEd25519(
   payer: Address,
   pubkey: Uint8Array
 ): TransactionInstruction {
-  return createInitializeInstruction(payer, ED25519, pubkey, pubkey);
+  return createInitializeInstruction(payer, ED25519, pubkey);
 }
 
 /**

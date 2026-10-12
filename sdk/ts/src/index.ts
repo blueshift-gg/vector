@@ -2,12 +2,11 @@
  * Off-chain helpers for constructing Vector program instructions and
  * computing the digests the on-chain program verifies.
  *
- * One program serves every signing scheme. A scheme byte says which
- * account belongs to which: the account header is
- * `nonce[32] || scheme[1] || bump[1]` (34 bytes), and PDA seeds are
- * `["vector", [scheme], identity_seed]`. A {@link Scheme} bundles what a
- * client needs to use a scheme: its scheme byte, wire signature length, and
- * identity/stored-identity lengths.
+ * One program serves every signing scheme. An account is named by its
+ * scheme and its identity, the key it was created with: the PDA seeds are
+ * `["vector", [scheme], sha256(identity)]`. A {@link Scheme} bundles what a
+ * client needs to use one scheme: its scheme byte and the lengths of its
+ * signature, identity and stored identity.
  *
  * # Layout
  *
@@ -56,7 +55,6 @@ export * from "./schemes/xmss.js";
 export {
   FALCON512,
   FALCON_SECRET_KEY_LEN,
-  falcon512Identity,
   falcon512Keygen,
   falcon512PublicKey,
   createInitializeFalcon512,

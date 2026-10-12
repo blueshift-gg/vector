@@ -3475,7 +3475,6 @@ dependencies = [
  "mollusk-svm-programs-token",
  "pqcrypto-falcon",
  "pqcrypto-traits",
- "sha3",
  "solana-account",
  "solana-address 2.9.0",
  "solana-falcon512",

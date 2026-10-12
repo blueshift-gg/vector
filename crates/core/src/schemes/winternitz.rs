@@ -26,5 +26,5 @@ pub fn create_initialize_winternitz(
     payer: &Address,
     public_key: &[u8; WINTERNITZ_PUBKEY_LEN],
 ) -> Instruction {
-    create_initialize_instruction(payer, &WINTERNITZ, public_key, public_key)
+    create_initialize_instruction(payer, &WINTERNITZ, public_key)
 }

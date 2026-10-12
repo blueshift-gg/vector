@@ -31,7 +31,7 @@ fn initialize_derives_the_address_from_the_scheme_it_is_given() {
     let (system_program, system_program_account) = keyed_account_for_system_program();
     let payer = Address::new_unique();
     // The Winternitz address for this key, with an instruction saying XMSS.
-    let mut initialize = create_initialize_instruction(&payer, &WINTERNITZ, &KEY, &KEY);
+    let mut initialize = create_initialize_instruction(&payer, &WINTERNITZ, &KEY);
     let vector = initialize.accounts[1].pubkey;
     let accounts = [
         (payer, Account::new(1_000_000_000, 0, &system_program)),

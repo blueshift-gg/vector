@@ -84,7 +84,7 @@ export function createInitializeMlDsa44(
   publicKey: Uint8Array
 ): TransactionInstruction {
   const identity = mldsa44Identity(publicKey);
-  return createInitializeInstruction(payer, MLDSA44, identity, identity);
+  return createInitializeInstruction(payer, MLDSA44, identity);
 }
 
 /**

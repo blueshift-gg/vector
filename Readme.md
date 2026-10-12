@@ -34,7 +34,7 @@ Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving ev
 | Winternitz | `6` | 41-byte first public key | 849 bytes | 41 B current key | SHA-256 |
 | XMSS | `7` | 41-byte first public key | 1,037 bytes | 41 B current key | SHA-256 |
 
-The scheme byte is a field of the account header and a PDA seed. The program reads it from the account and routes to that scheme, so an account is always handled by the scheme that created it. Only `Initialize`, which has no account yet, takes the byte in its instruction data. Zero is not a scheme, so a zeroed account that someone assigns to the program belongs to none. The previous BSM and Schnorr schemes have been removed.
+The scheme byte is a field of the account header and a PDA seed. The program reads it from the account and routes to that scheme, so an account is always handled by the scheme that created it. Only `Initialize`, which has no account yet, takes the byte in its instruction data. Zero is not a scheme, so a zeroed account that someone assigns to the program belongs to none.
 
 ### Ed25519
 The signer's 32-byte Ed25519 public key is stored directly in the account. The 64-byte `(r, s)` signature is verified directly over the SHA-256 digest. Verification uses [`brine-ed25519`](https://github.com/zfedoran/brine-ed25519) with its `fast-sha512` feature, which keeps Ed25519 advance under ~14k CUs.
@@ -228,9 +228,9 @@ The seed is the SHA-256 of the key given to `Initialize`, for every scheme. It i
 Two schemes cannot share a PDA: the scheme byte is one of the seeds, so the same identity bytes derive a different address under each scheme. The header's scheme byte is what the program routes on.
 
 ## Initialization
-A Vector account is created via the `initialize` instruction, which allocates the `66 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...init_payload]` (the only instruction that carries the scheme byte), where `init_payload` is scheme-defined:
+A Vector account is created via the `initialize` instruction, which allocates the `66 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...key]` (the only instruction that carries the scheme byte), where `key` is the identity:
 
-| Scheme      | `init_payload`            | Stored Identity                              |
+| Scheme      | `key`                     | Stored Identity                              |
 |-------------|---------------------------|----------------------------------------------|
 | Ed25519     | 32-byte pubkey            | the pubkey verbatim                          |
 | EIP-191     | 20-byte ETH address       | the address verbatim                        |
@@ -265,7 +265,7 @@ The `vector-core` crate provides off-chain helpers for constructing Vector trans
 
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", [scheme], sha256(identity)]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; `create_expand_mldsa44(public_key)` builds ML-DSA-44's two follow-up instructions.
-- `create_initialize_instruction(payer, &scheme, identity, init_payload)` — generic init-instruction builder.
+- `create_initialize_instruction(payer, &scheme, identity)` — generic init-instruction builder.
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
 - `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature. `create_multi_advance_instruction(&[(&scheme, identity, signature)])` does the same for several signers.
 - `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. For Winternitz and XMSS use `create_rotating_passthrough_instruction(&scheme, identity, next_public_key, sub_ixs)`.
@@ -285,7 +285,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
 - `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 66-byte header.
 - `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` / `createInitializeMlDsa44(payer, publicKey)` — convenience wrappers; `createExpandMlDsa44(publicKey)` and `createRegisterMlDsa44Instructions(payer, publicKey)` build ML-DSA-44's three-instruction registration.
-- `createInitializeInstruction(payer, scheme, identity, initPayload)` — generic init builder.
+- `createInitializeInstruction(payer, scheme, identity)` — generic init builder.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.
 - `createAdvanceInstruction(scheme, identity, signature)` — assemble from precomputed signature (signature only, no embedded payload). `createMultiAdvanceInstruction([{ scheme, identity, signature }])` does the same for several signers.
 - `createPassthroughInstruction(scheme, identity, subIxs)` — assemble the passthrough instruction that replays `subIxs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. For Winternitz and XMSS use `createRotatingPassthroughInstruction(scheme, identity, nextPublicKey, subIxs)`.
@@ -296,7 +296,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer?)` — sign with Falcon-512 (post-quantum) via [`@noble/post-quantum/falcon.js`](https://github.com/paulmillr/noble-post-quantum); plus `falcon512Keygen`, `falcon512PublicKey`.
 - `signAdvanceInstructionMlDsa44(keypair, nonce, pre, post, feePayer?)` — sign with ML-DSA-44 (FIPS 204, post-quantum) via `@noble/post-quantum/ml-dsa.js`, empty context; plus `mldsa44Keygen`, `mldsa44PublicKey`.
 - `verifyAdvanceSignatureEd25519(pubkey, nonce, pre, post, signature, feePayer?)` / `verifyAdvanceSignatureSecp256k1(...)` / `verifyAdvanceSignatureEip191(...)` / `verifyAdvanceSignatureFalcon512(wirePubkey, ...)` / `verifyAdvanceSignatureMlDsa44(publicKey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
-- `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `falcon512Identity(wirePubkey)` / `mldsa44Identity(publicKey)` / `secp256k1CompressedPubkey` / `ethAddressFromPrivateKey` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
+- `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `mldsa44Identity(publicKey)` / `secp256k1CompressedPubkey` / `ethAddressFromPrivateKey` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
 The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1, Falcon-512 and ML-DSA-44. Winternitz and XMSS signing are supplied by the caller. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
 

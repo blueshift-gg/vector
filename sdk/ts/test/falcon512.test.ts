@@ -14,7 +14,6 @@ import {
 import {
   FALCON512,
   falcon512Keygen,
-  falcon512Identity,
   findVectorPda,
   fetchVectorAccount,
   createInitializeFalcon512,
@@ -37,7 +36,7 @@ import {
 const FALCON_SEED = new Uint8Array(48);
 FALCON_SEED[47] = 0x01;
 const FALCON_KP = falcon512Keygen(FALCON_SEED);
-const FALCON_IDENTITY = falcon512Identity(FALCON_KP.publicKey);
+const FALCON_IDENTITY = FALCON_KP.publicKey;
 
 describe("vector-falcon512", () => {
   let connection: Connection;

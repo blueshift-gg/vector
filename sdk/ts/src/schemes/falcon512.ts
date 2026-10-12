@@ -46,16 +46,6 @@ export const FALCON512: Scheme = {
   nextKeyOptional: false,
 };
 
-/** Falcon-512 identity: the wire public key. */
-export function falcon512Identity(wirePubkey: Uint8Array): Uint8Array {
-  if (wirePubkey.length !== FALCON_PUBKEY_LEN) {
-    throw new Error(
-      `Falcon-512 wire pubkey must be ${FALCON_PUBKEY_LEN} bytes, got ${wirePubkey.length}`
-    );
-  }
-  return wirePubkey;
-}
-
 /** Falcon-512 keypair: 1281-byte secret + 897-byte wire pubkey. */
 export interface Falcon512Keypair {
   secretKey: Uint8Array;
@@ -84,8 +74,7 @@ export function createInitializeFalcon512(
   payer: Address,
   wirePubkey: Uint8Array
 ): TransactionInstruction {
-  const identity = falcon512Identity(wirePubkey);
-  return createInitializeInstruction(payer, FALCON512, identity, wirePubkey);
+  return createInitializeInstruction(payer, FALCON512, wirePubkey);
 }
 
 /**
@@ -101,7 +90,7 @@ export function signAdvanceInstructionFalcon512(
   postInstructions: TransactionInstruction[],
   feePayer?: Address
 ): TransactionInstruction {
-  const identity = falcon512Identity(keypair.publicKey);
+  const identity = keypair.publicKey;
   const digest = advanceVectorDigest(
     FALCON512,
     nonce,

@@ -99,17 +99,15 @@ pub fn expected_advanced_data(
     .concat()
 }
 
-/// Drive the SPL mint-authority round-trip flow against any program.
+/// Drive the SPL mint-authority round-trip flow for any scheme.
 ///
-/// `identity` is the client identity (PDA seed + digest input;
-/// `scheme.identity_len`); `stored_identity` is what the account holds
-/// (`scheme.stored_identity_len`) — these differ only for Falcon.
+/// `identity` is the key the account was created with
+/// (`scheme.identity_len`); `stored_identity` is what the account holds
+/// (`scheme.stored_identity_len`). They differ for Falcon-512 and ML-DSA-44.
 ///
-/// `sign_advance(nonce, pre, post)` returns just the `advance`
-/// `Instruction` signed over the canonical digest. Sub-instruction CPIs
-/// (the mint-authority handoff here) live in a separate `passthrough`
-/// ix that this helper builds and threads through `post`, so the closure
-/// stays signer-only.
+/// `sign_advance(nonce, pre, post)` returns the signed `advance`. The
+/// helper builds the `passthrough` that hands the mint authority over and
+/// passes it in `post`, so the closure only signs.
 pub fn run_round_trip_spl<F>(
     scheme: &Scheme,
     identity: &[u8],
@@ -182,10 +180,9 @@ pub fn run_round_trip_spl<F>(
     )
     .unwrap();
 
-    // Build the passthrough that runs the mint-authority handoff CPI
-    // under vector_pda's signer seeds. Order in the tx is
-    // `[advance, passthrough, mint_to, eoa_to_pda]`; advance's digest
-    // commits to all three post-instructions.
+    // The passthrough hands the mint authority over, signing as the account.
+    // The transaction is `[advance, passthrough, mint_to, eoa_to_pda]`, and
+    // the advance's signature covers all of it.
     let passthrough_ix = create_passthrough_instruction(scheme, identity, &[pda_to_eoa_ix]);
     let post_ixs = [
         passthrough_ix.clone(),

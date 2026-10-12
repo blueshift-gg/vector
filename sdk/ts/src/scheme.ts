@@ -52,23 +52,22 @@ export const SECP256K1_COMPRESSED_PUBKEY_LEN = 33;
  */
 export interface Scheme {
   /**
-   * The scheme byte: the second header field of every account, a PDA
-   * seed, and what `initialize` takes after its discriminator.
+   * The scheme byte: a header field of every account, a PDA seed, and
+   * what `initialize` takes after its discriminator.
    */
   id: number;
   /** Wire signature length carried in `advance` instruction data. */
   signatureLen: number;
   /**
-   * Client identity length — the bytes hashed into the advance digest and
-   * used to derive the PDA. The pubkey/address itself for most schemes; for
-   * Falcon it's `sha256(wire_pubkey)` (32). Winternitz/XMSS keep
-   * `sha256(initial_pubkey)` across rotations.
+   * Length of the identity: the key the account is created with, as
+   * `initialize` takes it. It names the account for good, also after a
+   * Winternitz or XMSS key rotates.
    */
   identityLen: number;
   /**
-   * Bytes the on-chain account stores after the 34-byte header. Equals
-   * `identityLen` for verbatim-pubkey schemes; larger for Falcon (32 + 1024
-   * prepared).
+   * Bytes the on-chain account stores after its header: the key in the
+   * form the scheme verifies against. Equals `identityLen` for schemes that
+   * store the key as given; Falcon-512 and ML-DSA-44 prepare it.
    */
   storedIdentityLen: number;
   /**

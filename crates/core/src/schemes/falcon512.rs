@@ -29,5 +29,5 @@ pub fn create_initialize_falcon512(
     payer: &Address,
     wire_pubkey: &[u8; FALCON512_WIRE_PUBKEY_LEN],
 ) -> Instruction {
-    create_initialize_instruction(payer, &FALCON512, wire_pubkey, wire_pubkey)
+    create_initialize_instruction(payer, &FALCON512, wire_pubkey)
 }

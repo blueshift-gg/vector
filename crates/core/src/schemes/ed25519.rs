@@ -31,7 +31,7 @@ pub fn create_initialize_ed25519(
     payer: &Address,
     pubkey: &[u8; ED25519_PUBKEY_LEN],
 ) -> Instruction {
-    create_initialize_instruction(payer, &ED25519, pubkey, pubkey)
+    create_initialize_instruction(payer, &ED25519, pubkey)
 }
 
 /// Sign the advance digest with an Ed25519 key, returning the advance ix

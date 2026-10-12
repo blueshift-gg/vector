@@ -37,7 +37,7 @@ pub fn create_initialize_secp256k1_ecdsa(
     payer: &Address,
     compressed_pubkey: &[u8; SECP256K1_COMPRESSED_PUBKEY_LEN],
 ) -> Instruction {
-    create_initialize_instruction(payer, &SECP256K1, compressed_pubkey, compressed_pubkey)
+    create_initialize_instruction(payer, &SECP256K1, compressed_pubkey)
 }
 
 /// Sign the advance digest with a plain secp256k1 ECDSA key, returning the

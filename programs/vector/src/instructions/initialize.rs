@@ -23,8 +23,9 @@ use crate::{
 /// key's owner can use the account afterwards.
 ///
 /// The address is derived from the scheme and the SHA-256 of the key. The
-/// first nonce is derived from that hash and the latest slot hash, so an account that is
-/// closed and created again in a later slot starts somewhere new.
+/// first nonce is derived from that hash and the latest slot hash, so an
+/// account that is closed and created again in a later slot starts somewhere
+/// new.
 ///
 /// > Create the account at the address for this scheme and key
 /// > Fund it for its full size

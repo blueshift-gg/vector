@@ -16,21 +16,10 @@ export const WINTERNITZ: Scheme = {
   nextKeyOptional: false,
 };
 
-/**
- * The permanent account identity: the first public key. Keep using it after
- * the key rotates.
- */
-export function winternitzIdentity(initialPublicKey: Uint8Array): Uint8Array {
-  if (initialPublicKey.length !== WINTERNITZ_PUBKEY_LEN) {
-    throw new Error(`Winternitz public key must be ${WINTERNITZ_PUBKEY_LEN} bytes`);
-  }
-  return initialPublicKey;
-}
-
 /** Initialize a stable account with its first signing key. */
 export function createInitializeWinternitz(
   payer: Address,
   publicKey: Uint8Array
 ): TransactionInstruction {
-  return createInitializeInstruction(payer, WINTERNITZ, winternitzIdentity(publicKey), publicKey);
+  return createInitializeInstruction(payer, WINTERNITZ, publicKey);
 }

@@ -16,21 +16,10 @@ export const XMSS: Scheme = {
   nextKeyOptional: true,
 };
 
-/**
- * The permanent account identity: the first public key. Keep using it after
- * the key rotates.
- */
-export function xmssIdentity(initialPublicKey: Uint8Array): Uint8Array {
-  if (initialPublicKey.length !== XMSS_PUBKEY_LEN) {
-    throw new Error(`XMSS public key must be ${XMSS_PUBKEY_LEN} bytes`);
-  }
-  return initialPublicKey;
-}
-
 /** Initialize a stable account with its first signing key. */
 export function createInitializeXmss(
   payer: Address,
   publicKey: Uint8Array
 ): TransactionInstruction {
-  return createInitializeInstruction(payer, XMSS, xmssIdentity(publicKey), publicKey);
+  return createInitializeInstruction(payer, XMSS, publicKey);
 }

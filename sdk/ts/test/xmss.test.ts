@@ -8,14 +8,13 @@ import {
   createRotatingPassthroughInstruction,
   createWithdrawSubinstruction,
   findVectorPda,
-  xmssIdentity,
   vectorAccountLen,
 } from "../src/index.js";
 
 test("XMSS account and rotation digest match Rust", () => {
   // Shared with tests/xmss.rs; pins the 41-byte key and 1037-byte signature.
   const publicKey = Uint8Array.from({ length: 41 }, (_, i) => i);
-  const identity = xmssIdentity(publicKey);
+  const identity = publicKey;
   const receiver = new Address(new Uint8Array(32).fill(9));
   const [pda, bump] = findVectorPda(XMSS, identity);
   expect(pda.toString()).toBe("4kd7ArVtukusWaCpQgEZsqabWcnQbB4KjjwYnHVExk7c");

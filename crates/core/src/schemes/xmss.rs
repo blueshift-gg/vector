@@ -23,5 +23,5 @@ pub const XMSS: Scheme = Scheme {
 
 /// Initialize a stable account with its first signing key.
 pub fn create_initialize_xmss(payer: &Address, public_key: &[u8; XMSS_PUBKEY_LEN]) -> Instruction {
-    create_initialize_instruction(payer, &XMSS, public_key, public_key)
+    create_initialize_instruction(payer, &XMSS, public_key)
 }
