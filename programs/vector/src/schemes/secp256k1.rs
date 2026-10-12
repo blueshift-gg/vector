@@ -1,7 +1,7 @@
+use crate::scheme::SigningScheme;
 use pinocchio::error::ProgramError;
 use solana_secp256k1::{CompressedPoint, Secp256k1Point};
 use solana_secp256k1_ecdsa::{hash::Secp256k1EcdsaHash, Secp256k1EcdsaSignature};
-use vector_common::SigningScheme;
 
 const COMPRESSED_PUBKEY_LEN: usize = CompressedPoint::SIZE;
 
@@ -10,13 +10,30 @@ const COMPRESSED_PUBKEY_LEN: usize = CompressedPoint::SIZE;
 /// recovery).
 pub struct Secp256k1Ecdsa;
 
-impl SigningScheme for Secp256k1Ecdsa {
-    const ID: u8 = 3;
-    const SIGNATURE_LEN: usize = 64;
-    const IDENTITY_LEN: usize = COMPRESSED_PUBKEY_LEN;
-    const INIT_PAYLOAD_LEN: usize = COMPRESSED_PUBKEY_LEN;
+impl Secp256k1Ecdsa {
+    pub const ID: u8 = 3;
+}
 
-    fn populate_identity(payload: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+impl SigningScheme for Secp256k1Ecdsa {
+    fn id(&self) -> u8 {
+        Self::ID
+    }
+
+    fn signature_len(&self) -> usize {
+        64
+    }
+    fn identity_len(&self) -> usize {
+        COMPRESSED_PUBKEY_LEN
+    }
+    fn init_payload_len(&self) -> usize {
+        COMPRESSED_PUBKEY_LEN
+    }
+
+    fn populate_identity(
+        &self,
+        payload: &[u8],
+        identity_out: &mut [u8],
+    ) -> Result<(), ProgramError> {
         if payload.len() != COMPRESSED_PUBKEY_LEN {
             return Err(ProgramError::InvalidInstructionData);
         }
@@ -28,7 +45,12 @@ impl SigningScheme for Secp256k1Ecdsa {
         Ok(())
     }
 
-    fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn verify(
+        &self,
+        identity: &[u8],
+        digest: &[u8; 32],
+        signature: &[u8],
+    ) -> Result<(), ProgramError> {
         let sig_bytes: [u8; 64] = signature
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;

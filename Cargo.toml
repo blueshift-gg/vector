@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/common",
     "programs/vector",
     "crates/core",
     "tests",
@@ -13,7 +12,6 @@ members = [
 # Build the program with `cargo build-sbf --manifest-path
 # programs/vector/Cargo.toml`.
 default-members = [
-    "crates/common",
     "programs/vector",
     "crates/core",
 ]

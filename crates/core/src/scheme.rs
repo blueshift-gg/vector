@@ -88,7 +88,7 @@ impl VectorAccount {
 
 /// 32-byte PDA-seed input derived from a scheme's identity: identity bytes
 /// themselves when `identity.len() <= 32`, `sha256(identity)` otherwise.
-/// Off-chain mirror of `IdentitySeed::default_from` in `vector-common`.
+/// Off-chain mirror of `IdentitySeed::default_from` in the program.
 pub fn pda_seed_from_identity(identity: &[u8]) -> [u8; 32] {
     if identity.len() <= 32 {
         let mut out = [0u8; 32];

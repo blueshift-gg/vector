@@ -1,20 +1,34 @@
+use crate::scheme::SigningScheme;
 use pinocchio::error::ProgramError;
 use solana_winternitz::{xmss, VerifyingKey, PUBLIC_KEY_LEN};
-use vector_common::{rotating::Rotating, SigningScheme};
 
-/// DKKW25 XMSS verification with a key that can be rotated.
-pub type Xmss = Rotating<XmssKey>;
+/// DKKW25 XMSS verification. The lookup wraps it in `Rotating`.
+pub struct Xmss;
 
-/// One Xmss key: what `Xmss` verifies against until the next rotation.
-pub struct XmssKey;
+impl Xmss {
+    pub const ID: u8 = 7;
+}
 
-impl SigningScheme for XmssKey {
-    const ID: u8 = 7;
-    const SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
-    const IDENTITY_LEN: usize = PUBLIC_KEY_LEN;
-    const INIT_PAYLOAD_LEN: usize = PUBLIC_KEY_LEN;
+impl SigningScheme for Xmss {
+    fn id(&self) -> u8 {
+        Self::ID
+    }
 
-    fn populate_identity(payload: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+    fn signature_len(&self) -> usize {
+        xmss::SIGNATURE_LEN
+    }
+    fn identity_len(&self) -> usize {
+        PUBLIC_KEY_LEN
+    }
+    fn init_payload_len(&self) -> usize {
+        PUBLIC_KEY_LEN
+    }
+
+    fn populate_identity(
+        &self,
+        payload: &[u8],
+        identity_out: &mut [u8],
+    ) -> Result<(), ProgramError> {
         let public_key: &[u8; PUBLIC_KEY_LEN] = payload
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
@@ -22,7 +36,12 @@ impl SigningScheme for XmssKey {
         Ok(())
     }
 
-    fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn verify(
+        &self,
+        identity: &[u8],
+        digest: &[u8; 32],
+        signature: &[u8],
+    ) -> Result<(), ProgramError> {
         let public_key =
             VerifyingKey::ref_from_bytes(identity).map_err(|_| ProgramError::InvalidAccountData)?;
         let signature = xmss::Signature::ref_from_bytes(signature)

@@ -12,8 +12,8 @@ crate-type = ["cdylib", "lib"]
 no-entrypoint = []
 
 [dependencies]
-vector-common = { path = "../../crates/common" }
 pinocchio = { workspace = true, features = ["account-resize"] }
+pinocchio-system = { workspace = true, features = ["account-resize"] }
 solana-address = { workspace = true, features = ["curve25519"] }
 brine-ed25519 = { workspace = true }
 solana-falcon512 = { workspace = true }

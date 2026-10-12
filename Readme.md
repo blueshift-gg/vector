@@ -22,7 +22,7 @@ The fee payer or relayer is therefore not entrusted with authority over transact
 
 ## Multi-Scheme Support
 
-Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving every signing scheme. The instruction set, account header, nonce progression and CPI passthrough are implemented in the [`vector-common`](crates/common/) crate; each scheme is one `SigningScheme` impl in [`programs/vector/src/schemes`](programs/vector/src/schemes/), and the program routes to it by a scheme byte via `vector_common::dispatch::<Scheme>`. Adding a scheme is a new module with an unused scheme byte and one arm in the router.
+Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving every signing scheme. It lives in [`programs/vector`](programs/vector/): one file per instruction in [`src/instructions`](programs/vector/src/instructions/), and one file per scheme in [`src/schemes`](programs/vector/src/schemes/). A scheme is one `SigningScheme` impl: what it stores as the signer's identity and how it verifies. The instructions are the same for every scheme and reach a scheme only through that trait. Adding a scheme is a new file and one line in `schemes::scheme`.
 
 | Scheme | Scheme byte | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
 |--------|------------|----------|-----------|---------------------------|------------------|

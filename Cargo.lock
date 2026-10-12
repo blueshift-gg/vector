@@ -3434,6 +3434,7 @@ version = "0.1.0"
 dependencies = [
  "brine-ed25519",
  "pinocchio",
+ "pinocchio-system",
  "solana-address 2.9.0",
  "solana-falcon512",
  "solana-ml-dsa",
@@ -3442,17 +3443,6 @@ dependencies = [
  "solana-secp256k1",
  "solana-secp256k1-ecdsa",
  "solana-winternitz",
- "vector-common",
-]
-
-[[package]]
-name = "vector-common"
-version = "0.1.0"
-dependencies = [
- "pinocchio",
- "pinocchio-system",
- "solana-address 2.9.0",
- "solana-nostd-sha256",
 ]
 
 [[package]]

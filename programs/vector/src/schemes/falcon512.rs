@@ -1,10 +1,13 @@
+use crate::{
+    scheme::{IdentitySeed, SigningScheme},
+    state::VectorAccount,
+};
 use pinocchio::error::ProgramError;
 use solana_falcon512::{
     Falcon512PreparedPubkey, Falcon512Pubkey, Falcon512Signature, FALCON_512_PREPARED_PUBKEY_LEN,
     FALCON_512_PUBKEY_LEN, FALCON_512_SIGNATURE_LEN,
 };
 use solana_nostd_sha256::hash;
-use vector_common::{IdentitySeed, SigningScheme, VectorAccount};
 
 /// Falcon's on-chain identity layout: `sha256(wire_pubkey)[32] ||
 /// prepared_pubkey[1024]`.
@@ -30,13 +33,30 @@ const PREPARED_ALIGNED: () =
 /// init); signatures are 666-byte zero-padded compressed Falcon.
 pub struct Falcon512;
 
-impl SigningScheme for Falcon512 {
-    const ID: u8 = 4;
-    const SIGNATURE_LEN: usize = FALCON_512_SIGNATURE_LEN;
-    const IDENTITY_LEN: usize = FALCON_IDENTITY_LEN;
-    const INIT_PAYLOAD_LEN: usize = FALCON_512_PUBKEY_LEN;
+impl Falcon512 {
+    pub const ID: u8 = 4;
+}
 
-    fn populate_identity(payload: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
+impl SigningScheme for Falcon512 {
+    fn id(&self) -> u8 {
+        Self::ID
+    }
+
+    fn signature_len(&self) -> usize {
+        FALCON_512_SIGNATURE_LEN
+    }
+    fn identity_len(&self) -> usize {
+        FALCON_IDENTITY_LEN
+    }
+    fn init_payload_len(&self) -> usize {
+        FALCON_512_PUBKEY_LEN
+    }
+
+    fn populate_identity(
+        &self,
+        payload: &[u8],
+        identity_out: &mut [u8],
+    ) -> Result<(), ProgramError> {
         let () = PREPARED_ALIGNED;
         let pubkey = Falcon512Pubkey::try_from_slice(payload)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
@@ -53,18 +73,23 @@ impl SigningScheme for Falcon512 {
     /// Falcon stores `sha256(wire_pubkey)` as the first 32 bytes of identity
     /// — exactly the PDA seed off-chain clients compute from a wire pubkey,
     /// so we just slice it out.
-    fn pda_seed_from_identity(identity: &[u8]) -> IdentitySeed {
+    fn pda_seed_from_identity(&self, identity: &[u8]) -> IdentitySeed {
         IdentitySeed::copy_from(&identity[..HASH_LEN])
     }
 
     /// At init time we have the wire pubkey (payload), not the populated
     /// identity. The PDA seed is `sha256(wire_pubkey)` — the same hash
     /// `populate_identity` writes to the front of the identity buffer.
-    fn pda_seed_from_payload(payload: &[u8]) -> IdentitySeed {
+    fn pda_seed_from_payload(&self, payload: &[u8]) -> IdentitySeed {
         IdentitySeed::copy_from(&hash(payload))
     }
 
-    fn verify(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn verify(
+        &self,
+        identity: &[u8],
+        digest: &[u8; 32],
+        signature: &[u8],
+    ) -> Result<(), ProgramError> {
         // Zero-copy borrow of the prepared pubkey straight out of the
         // account (a 1024-byte stack copy would overflow the BPF frame);
         // `PREPARED_ALIGNED` guarantees a 2-byte-aligned offset.
