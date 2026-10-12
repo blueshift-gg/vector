@@ -6,8 +6,8 @@ use solana_instruction::{AccountMeta, Instruction};
 
 use crate::scheme::{
     find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
-    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID,
-    SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
+    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, SYSTEM_PROGRAM_ID,
+    WITHDRAW_DISCRIMINATOR,
 };
 
 /// Build an `initialize` instruction. `init_payload`'s shape is

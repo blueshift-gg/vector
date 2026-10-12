@@ -11,10 +11,6 @@ use crate::scheme::Scheme;
 
 pub const FALCON512_WIRE_PUBKEY_LEN: usize = FALCON_512_PUBKEY_LEN;
 pub const FALCON512_SIGNATURE_LEN: usize = FALCON_512_SIGNATURE_LEN;
-/// Falcon-512 prepared pubkey (`N * 2`, `N = 512`).
-pub const FALCON512_PREPARED_PUBKEY_LEN: usize = 1024;
-/// What the account stores: the prepared public key.
-pub const FALCON512_STORED_IDENTITY_LEN: usize = FALCON512_PREPARED_PUBKEY_LEN;
 
 /// Falcon-512. The identity is the 897-byte wire public key; the account
 /// stores its 1024-byte prepared form.
@@ -22,7 +18,7 @@ pub const FALCON512: Scheme = Scheme {
     id: 4,
     signature_len: FALCON512_SIGNATURE_LEN,
     identity_len: FALCON512_WIRE_PUBKEY_LEN,
-    stored_identity_len: FALCON512_STORED_IDENTITY_LEN,
+    stored_identity_len: size_of::<vector::schemes::falcon512::Falcon512>(),
     next_key_len: 0,
     next_key_optional: false,
 };

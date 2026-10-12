@@ -16,7 +16,7 @@ pub const XMSS: Scheme = Scheme {
     id: 7,
     signature_len: XMSS_SIGNATURE_LEN,
     identity_len: XMSS_PUBKEY_LEN,
-    stored_identity_len: XMSS_PUBKEY_LEN,
+    stored_identity_len: size_of::<vector::schemes::xmss::Xmss>(),
     next_key_len: XMSS_PUBKEY_LEN,
     next_key_optional: true,
 };

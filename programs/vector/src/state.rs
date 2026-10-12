@@ -22,6 +22,7 @@ pub const VECTOR_SEED: &[u8] = b"vector";
 /// bump:   u8        // offset 65 — PDA bump seed
 /// ```
 #[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VectorAccount {
     pub nonce: [u8; 32],
     pub seed: [u8; 32],

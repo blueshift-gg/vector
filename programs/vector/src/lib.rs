@@ -7,9 +7,7 @@
 
 extern crate alloc;
 
-use pinocchio::{
-    entrypoint, error::ProgramError, nostd_panic_handler, AccountView, Address, ProgramResult,
-};
+use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use solana_address::declare_id;
 
 pub mod instructions;
@@ -20,12 +18,15 @@ pub mod schemes;
 pub mod state;
 pub mod transaction;
 
-entrypoint!(process_instruction);
-nostd_panic_handler!();
+// The clients use this crate as a library, for its types and constants.
+#[cfg(not(feature = "no-entrypoint"))]
+pinocchio::entrypoint!(process_instruction);
+#[cfg(not(feature = "no-entrypoint"))]
+pinocchio::nostd_panic_handler!();
 
 declare_id!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
-fn process_instruction(
+pub fn process_instruction(
     _program_id: &Address,
     accounts: &mut [AccountView],
     instruction_data: &[u8],

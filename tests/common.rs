@@ -16,7 +16,7 @@ use spl_token_interface::{
 };
 use vector_core::{
     advance_vector_digest, create_passthrough_instruction, find_vector_pda, vector_seed, Scheme,
-    VectorAccount, PROGRAM_ID,
+    PROGRAM_ID,
 };
 
 /// Initial nonce used for advance/close digests across the suite.
@@ -60,14 +60,9 @@ pub fn process_transaction(
 }
 
 /// The account header for `identity` at `nonce`.
-fn header(nonce: [u8; 32], scheme: &Scheme, identity: &[u8]) -> [u8; VectorAccount::HEADER_LEN] {
-    VectorAccount {
-        nonce,
-        seed: vector_seed(identity),
-        scheme: scheme.id,
-        bump: find_vector_pda(scheme, identity).1,
-    }
-    .header_bytes()
+fn header(nonce: [u8; 32], scheme: &Scheme, identity: &[u8]) -> Vec<u8> {
+    let (_, bump) = find_vector_pda(scheme, identity);
+    [&nonce[..], &vector_seed(identity), &[scheme.id, bump]].concat()
 }
 
 /// Build a fully-populated vector account for `identity`. `stored_identity`
@@ -97,7 +92,11 @@ pub fn expected_advanced_data(
     identity: &[u8],
     stored_identity: &[u8],
 ) -> Vec<u8> {
-    [&header(next_nonce, scheme, identity), stored_identity].concat()
+    [
+        header(next_nonce, scheme, identity),
+        stored_identity.to_vec(),
+    ]
+    .concat()
 }
 
 /// Drive the SPL mint-authority round-trip flow against any program.

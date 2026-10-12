@@ -3461,6 +3461,7 @@ dependencies = [
  "solana-instructions-sysvar 3.0.0",
  "solana-ml-dsa",
  "solana-winternitz",
+ "vector",
 ]
 
 [[package]]

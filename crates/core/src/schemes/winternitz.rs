@@ -16,7 +16,7 @@ pub const WINTERNITZ: Scheme = Scheme {
     id: 6,
     signature_len: WINTERNITZ_SIGNATURE_LEN,
     identity_len: WINTERNITZ_PUBKEY_LEN,
-    stored_identity_len: WINTERNITZ_PUBKEY_LEN,
+    stored_identity_len: size_of::<vector::schemes::winternitz::Winternitz>(),
     next_key_len: WINTERNITZ_PUBKEY_LEN,
     next_key_optional: false,
 };
@@ -26,10 +26,5 @@ pub fn create_initialize_winternitz(
     payer: &Address,
     public_key: &[u8; WINTERNITZ_PUBKEY_LEN],
 ) -> Instruction {
-    create_initialize_instruction(
-        payer,
-        &WINTERNITZ,
-        public_key,
-        public_key,
-    )
+    create_initialize_instruction(payer, &WINTERNITZ, public_key, public_key)
 }

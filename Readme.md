@@ -261,7 +261,7 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 ### Rust (`vector-core`)
 
-The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It exposes `PROGRAM_ID` and a `Scheme` descriptor (`id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
+The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It depends on the program crate itself, so the program ID, the account header, the discriminators and each scheme's stored size come from the program and cannot drift. It exposes `PROGRAM_ID` and a `Scheme` descriptor (`id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", [scheme], sha256(identity)]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; `create_expand_mldsa44(public_key)` builds ML-DSA-44's two follow-up instructions.

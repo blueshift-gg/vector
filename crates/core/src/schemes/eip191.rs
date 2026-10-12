@@ -18,7 +18,7 @@ pub const EIP191: Scheme = Scheme {
     id: 2,
     signature_len: 65,
     identity_len: EIP191_ETH_ADDRESS_LEN,
-    stored_identity_len: EIP191_ETH_ADDRESS_LEN,
+    stored_identity_len: size_of::<vector::schemes::eip191::Eip191>(),
     next_key_len: 0,
     next_key_optional: false,
 };

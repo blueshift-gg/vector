@@ -143,14 +143,7 @@ fn falcon512_round_trip() {
     wire.copy_from_slice(pk.as_bytes());
     let (pre, post) = fixed_ix_lists();
 
-    let digest = advance_vector_digest_with_fee_payer(
-        &FALCON512,
-        &NONCE,
-        &wire,
-        &pre,
-        &post,
-        None,
-    );
+    let digest = advance_vector_digest_with_fee_payer(&FALCON512, &NONCE, &wire, &pre, &post, None);
     // Zero-pad the variable-length detached signature to the 666-byte wire.
     let detached = pq_falcon::detached_sign(&digest, &sk);
     let mut signature = [0u8; FALCON512_SIGNATURE_LEN];

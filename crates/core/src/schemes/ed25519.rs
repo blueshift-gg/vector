@@ -16,7 +16,7 @@ pub const ED25519: Scheme = Scheme {
     id: 1,
     signature_len: 64,
     identity_len: ED25519_PUBKEY_LEN,
-    stored_identity_len: ED25519_PUBKEY_LEN,
+    stored_identity_len: size_of::<vector::schemes::ed25519::Ed25519>(),
     next_key_len: 0,
     next_key_optional: false,
 };

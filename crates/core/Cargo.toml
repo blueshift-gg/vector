@@ -6,6 +6,9 @@ license.workspace = true
 description = "Client-side helpers for building Vector program instructions"
 
 [dependencies]
+# The program itself, as a library: its ID, header, discriminators and each
+# scheme's stored identity.
+vector = { path = "../../programs/vector", features = ["no-entrypoint"] }
 solana-address = { workspace = true, features = ["curve25519", "decode"] }
 solana-instruction = { workspace = true }
 solana-instructions-sysvar = "3.0.0"
