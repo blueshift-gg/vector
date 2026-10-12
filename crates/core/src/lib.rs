@@ -1,5 +1,5 @@
 //! Off-chain helpers for constructing Vector program instructions and
-//! computing the digests the on-chain programs verify.
+//! computing the digests the on-chain program verifies.
 //!
 //! One on-chain program, [`PROGRAM_ID`], serves every signing scheme. A
 //! scheme byte says which account belongs to which: the account header is
@@ -19,8 +19,8 @@
 //! - [`verify`] — per-scheme offline verification of `advance` signatures
 //!   ([`verify_advance_signature_ed25519`] and friends), returning the
 //!   digest (= next nonce) on success.
-//! - [`schemes`] — one module per program (`ed25519`, `eip191`, `falcon512`,
-//!   `mldsa44`, `secp256k1`, `winternitz`, `xmss`): its `Scheme`/program-ID const, identity derivation, an
+//! - [`schemes`] — one module per scheme (`ed25519`, `eip191`, `falcon512`,
+//!   `mldsa44`, `secp256k1`, `winternitz`, `xmss`): its `Scheme` const, identity derivation, an
 //!   `initialize` builder, and a signer where one exists.
 //!
 //! Everything is re-exported flat at the crate root, so either style works:

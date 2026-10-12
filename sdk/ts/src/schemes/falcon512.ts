@@ -1,5 +1,5 @@
 /**
- * Falcon-512 (post-quantum) program: client identity is
+ * Falcon-512 (post-quantum) scheme: client identity is
  * `sha256(wire_pubkey)`; the on-chain account stores that hash plus the
  * 1024-byte prepared form of the wire pubkey.
  *
@@ -39,7 +39,7 @@ export const FALCON_SECRET_KEY_LEN = 1281;
 
 /** Falcon-512 — client identity is `sha256(wire_pubkey)` (32 bytes). */
 export const FALCON512: Scheme = {
-  id: 3,
+  id: 4,
   signatureLen: FALCON_SIGNATURE_LEN,
   identityLen: 32,
   storedIdentityLen: 32 + FALCON_PREPARED_PUBKEY_LEN,

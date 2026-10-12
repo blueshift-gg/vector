@@ -31,9 +31,9 @@ mod state;
 pub use scheme::{IdentitySeed, SigningScheme};
 pub use state::{signer_seeds, VectorAccount};
 
-/// Shared instruction handlers. Each is a plain function a program routes to
-/// from its own discriminator match; `close` is scheme-independent, the rest
-/// are generic over the program's [`SigningScheme`].
+/// Shared instruction handlers. Each is a plain function the program routes
+/// to; `close` is scheme-independent, the rest are generic over the
+/// account's [`SigningScheme`].
 pub use instructions::{
     advance::message as advance_message, advance::process as advance, close::process as close,
     initialize::process as initialize, passthrough::process as passthrough,

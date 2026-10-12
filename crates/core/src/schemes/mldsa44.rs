@@ -19,7 +19,7 @@ pub const MLDSA44_EXPAND_DISCRIMINATOR: u8 = 6;
 
 /// The public key is the client identity; the account also holds its prepared form.
 pub const MLDSA44: Scheme = Scheme {
-    id: 4,
+    id: 5,
     signature_len: MLDSA44_SIGNATURE_LEN,
     identity_len: MLDSA44_PUBKEY_LEN,
     stored_identity_len: MLDSA44_STORED_IDENTITY_LEN,

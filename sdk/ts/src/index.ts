@@ -1,6 +1,6 @@
 /**
  * Off-chain helpers for constructing Vector program instructions and
- * computing the digests the on-chain programs verify.
+ * computing the digests the on-chain program verifies.
  *
  * One program serves every signing scheme. A scheme byte says which
  * account belongs to which: the account header is
@@ -19,8 +19,8 @@
  * - `./verify.js` — per-scheme offline verification of `advance` signatures
  *   ({@link verifyAdvanceSignatureEd25519} and friends), returning the
  *   digest (= next nonce) on success.
- * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
- *   `falcon512`, `mldsa44`, `secp256k1`, `winternitz`, `xmss`): its `Scheme`/program-ID const,
+ * - `./schemes/*.js` — one module per scheme (`ed25519`, `eip191`,
+ *   `falcon512`, `mldsa44`, `secp256k1`, `winternitz`, `xmss`): its `Scheme` const,
  *   identity derivation, an `initialize` builder, and a signer where one
  *   exists.
  *

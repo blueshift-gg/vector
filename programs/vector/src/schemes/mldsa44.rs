@@ -46,7 +46,7 @@ impl MlDsa44 {
 }
 
 impl SigningScheme for MlDsa44 {
-    const ID: u8 = 4;
+    const ID: u8 = 5;
     const SIGNATURE_LEN: usize = SIGNATURE_LEN;
     const IDENTITY_LEN: usize = IDENTITY_LEN;
     const INIT_PAYLOAD_LEN: usize = PUBLIC_KEY_LEN;

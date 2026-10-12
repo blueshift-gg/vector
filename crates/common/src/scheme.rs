@@ -1,4 +1,4 @@
-//! The single contract a Vector program must satisfy.
+//! The single contract a signing scheme must satisfy.
 //!
 //! A scheme decides three things: how big its wire signature is, what bytes
 //! it stores on-chain as the signer's "identity" (a pubkey or address), and
@@ -9,11 +9,14 @@
 use pinocchio::error::ProgramError;
 use solana_nostd_sha256::hash;
 
-/// Contract every signing scheme satisfies. One `impl` per program.
+/// Contract every signing scheme satisfies. One `impl` per scheme.
 pub trait SigningScheme {
     /// Identifies the scheme: the second header field of every account and
     /// a PDA seed. The program picks the scheme for an account from that
     /// header field.
+    ///
+    /// Never zero: an account anyone assigns to the program has zeroed data,
+    /// and must not read as an account of some scheme.
     const ID: u8;
 
     /// Wire signature length carried in the `advance` instruction data.
@@ -28,7 +31,7 @@ pub trait SigningScheme {
     /// `initialize` payload length (after the instruction discriminator).
     /// Usually equals `IDENTITY_LEN` (the pubkey is stored verbatim), but
     /// may differ for schemes that expand or compress on-chain: Falcon-512
-    /// takes a 897-byte wire pubkey and expands it into the 1057-byte
+    /// takes a 897-byte wire pubkey and expands it into the 1056-byte
     /// stored identity.
     const INIT_PAYLOAD_LEN: usize;
 

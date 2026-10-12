@@ -33,7 +33,7 @@ pub const ADVANCE_DISCRIMINATOR: u8 = 1;
 /// CPI is rejected via [`cpi_guard`]: the sysvar scan is only meaningful
 /// at top-level, where the sysvar reflects the actual tx layout.
 ///
-/// Instruction data (after the discriminator stripped by [`crate::dispatch`]):
+/// Instruction data (after the discriminator):
 ///
 /// ```text
 /// [0]  num_instructions: u8

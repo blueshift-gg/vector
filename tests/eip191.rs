@@ -1,4 +1,4 @@
-//! EIP-191 (Ethereum-style secp256k1) program tests.
+//! EIP-191 (Ethereum-style secp256k1) tests.
 
 use k256::ecdsa::SigningKey as Secp256k1SigningKey;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};

@@ -22,7 +22,6 @@ pub mod withdraw;
 pub enum VectorInstruction {
     /// Create the vector account at the canonical PDA, derive the initial
     /// nonce on-chain, and write the header + the scheme's identity prefix.
-    /// Every scheme completes registration in this one call.
     Initialize = 0,
     Close = 2,
     Withdraw = 3,

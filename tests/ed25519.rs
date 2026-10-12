@@ -1,4 +1,4 @@
-//! Ed25519 program tests.
+//! Ed25519 tests.
 
 use ed25519_dalek::SigningKey;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};

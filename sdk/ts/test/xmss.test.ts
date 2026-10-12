@@ -13,12 +13,12 @@ import {
 } from "../src/index.js";
 
 test("XMSS account and rotation digest match Rust", () => {
-  // Shared with tests/xmss.rs; pins the 41-byte identity and 1037-byte carve-out.
+  // Shared with tests/xmss.rs; pins the 41-byte key and 1037-byte signature.
   const publicKey = Uint8Array.from({ length: 41 }, (_, i) => i);
   const identity = xmssIdentity(publicKey);
   const receiver = new Address(new Uint8Array(32).fill(9));
   const [pda, bump] = findVectorPda(XMSS, identity);
-  expect(pda.toString()).toBe("Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y");
+  expect(pda.toString()).toBe("4kd7ArVtukusWaCpQgEZsqabWcnQbB4KjjwYnHVExk7c");
   expect(bump).toBe(255);
   expect(vectorAccountLen(XMSS)).toBe(107);
 
@@ -44,6 +44,6 @@ test("XMSS account and rotation digest match Rust", () => {
     XMSS, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "8d65ff44dca8a074d4f703314c98b5374e8f4977773682d0b08227a831040336"
+    "c0bf58d233e9e5854ea48f957d2551ad7e8e33a1c7abc08f1c328391b8862150"
   );
 });

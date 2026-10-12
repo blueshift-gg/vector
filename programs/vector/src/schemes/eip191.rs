@@ -6,12 +6,12 @@ const ETH_ADDRESS_LEN: usize = 20;
 
 /// secp256k1 ECDSA + EIP-191 ("Ethereum Signed Message") envelope. Identity
 /// is the 20-byte Ethereum address; signatures are 65 bytes `(r, s, v)`. The
-/// recovery id `v` rides in the signature carve-out so it is excluded from
-/// the digest the client signs.
+/// recovery id `v` is part of the signature, so it is outside the message
+/// the client signs.
 pub struct Secp256k1Eip191;
 
 impl SigningScheme for Secp256k1Eip191 {
-    const ID: u8 = 1;
+    const ID: u8 = 2;
     const SIGNATURE_LEN: usize = 65;
     const IDENTITY_LEN: usize = ETH_ADDRESS_LEN;
     const INIT_PAYLOAD_LEN: usize = ETH_ADDRESS_LEN;

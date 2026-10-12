@@ -13,7 +13,7 @@ pub const XMSS_SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
 
 /// The initial key hash is the permanent identity; the current key follows it.
 pub const XMSS: Scheme = Scheme {
-    id: 6,
+    id: 7,
     signature_len: XMSS_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: 32 + XMSS_PUBKEY_LEN,

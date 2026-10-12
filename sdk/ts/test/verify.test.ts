@@ -191,11 +191,11 @@ describe("sign → verify round trips", () => {
       expect(expand.keys[0].isWritable).toBe(true);
     }
 
-    // Shared with tests/mldsa44.rs: identity, PDA and signature carve-out.
+    // Shared with tests/mldsa44.rs: identity, PDA and digest.
     const publicKey = new Uint8Array(1312).fill(0x44);
     const [pda, bump] = findVectorPda(MLDSA44, publicKey);
-    expect(pda.toString()).toBe("BFQ39c9TJoj2JeVUNse2GEtpa2za4VR8TPq3mVNaCQGo");
-    expect(bump).toBe(255);
+    expect(pda.toString()).toBe("DSMGfPwdpxKeB7ai2vYrRSzTLPDTXKTFujjBMeGkKfMc");
+    expect(bump).toBe(254);
     const passthrough = createPassthroughInstruction(MLDSA44, publicKey, [
       createWithdrawSubinstruction(MLDSA44, publicKey, addr(9), 1234n),
     ]);
@@ -203,7 +203,7 @@ describe("sign → verify round trips", () => {
       MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
     );
     expect(Buffer.from(pinned).toString("hex")).toBe(
-      "b00b7ab4073f5ff2b4b85d3cbca8c4ba00833a8dcac09c25d7b94b2dbd31edb1"
+      "8739c20085e9bdf92341ea40e3b4a362b03af7f2e79a55e5af4544b53ce969d7"
     );
   });
 });
@@ -296,7 +296,7 @@ describe("eip191 recovery byte", () => {
  * index footer), its half of the pin breaks.
  */
 const PINNED_DIGEST_HEX =
-  "8738e7628a5b6920f962f55a85edb651cad5d40ba7b7650a6f9c8c3282be7580";
+  "87416dcb688293806e1334963743bb644582e234f7e2cc426b49ae3f7da256f3";
 
 describe("cross-language digest pin", () => {
   test("digest matches the constant pinned by the Rust suite", () => {
@@ -323,7 +323,7 @@ describe("cross-language digest pin", () => {
  * implementation drifts, its half of the pin breaks.
  */
 const PINNED_REVOCATION_DIGEST_HEX =
-  "1a8c0ec847dc499887a920ef2c0646b3de331a2313476837f2b78c3701f5c9ec";
+  "750352ab886465b25b03cfc4c6c8b34e57c5671f00457ed790afda11084ef046";
 
 describe("revocation (inert advance)", () => {
   test("round trip + cross-language pin", () => {

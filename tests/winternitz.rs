@@ -24,9 +24,9 @@ fn initialize_and_client_encoding() {
     // Shared with sdk/ts/test/winternitz.test.ts.
     assert_eq!(
         vector.to_string(),
-        "4jz8wWkhoSx61KwwaycijTBceNkZ7GCiv9QHiZkvjB3n"
+        "Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y"
     );
-    assert_eq!(bump, 254);
+    assert_eq!(bump, 255);
     let receiver = Address::new_from_array([9; 32]);
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
     let rotate = create_rotate_subinstruction(&WINTERNITZ, &identity, &[7; 41]);
@@ -34,8 +34,8 @@ fn initialize_and_client_encoding() {
     assert_eq!(
         advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough]),
         [
-            101, 87, 230, 44, 110, 240, 118, 250, 10, 44, 132, 162, 159, 90, 167, 127, 176, 56,
-            100, 167, 27, 4, 16, 254, 79, 243, 97, 28, 212, 174, 1, 13
+            48, 167, 125, 113, 41, 142, 197, 250, 128, 72, 17, 225, 199, 148, 28, 16, 108, 246,
+            101, 158, 117, 229, 208, 180, 185, 97, 169, 199, 82, 13, 246, 104
         ],
     );
 

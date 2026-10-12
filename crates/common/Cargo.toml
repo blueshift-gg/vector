@@ -3,7 +3,7 @@ name = "vector-common"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shared on-chain logic for the per-scheme Vector programs"
+description = "Shared on-chain logic for the Vector program"
 
 [lib]
 crate-type = ["lib"]
@@ -14,8 +14,7 @@ crate-type = ["lib"]
 pinocchio = { workspace = true, features = ["account-resize"] }
 pinocchio-system = { workspace = true, features = ["account-resize"] }
 # `curve25519` provides `Address::find_program_address` (PDA derivation,
-# syscall-backed on the SBF target). Required by every program, so it lives
-# here rather than in each program crate.
+# syscall-backed on the SBF target).
 solana-address = { workspace = true, features = ["curve25519"] }
 solana-nostd-sha256 = { workspace = true }
 

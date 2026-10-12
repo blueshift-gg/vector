@@ -20,14 +20,11 @@ pub const ROTATE_DISCRIMINATOR: u8 = 5;
 
 pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 
-/// Everything a client needs to address one Vector program. Each on-chain
-/// scheme is a separate program; this is the off-chain mirror of "which
-/// program + how big its signature/identity are". The four concrete
-/// instances live in [`crate::schemes`] (`ED25519`, `EIP191`, `FALCON512`,
-/// `SECP256K1`).
+/// Everything a client needs to use one signing scheme: its scheme byte and
+/// how big its signature and identity are. The concrete instances live in
+/// [`crate::schemes`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scheme {
-    /// On-chain program ID. Must match the program's `declare_id!`.
     /// The scheme byte: the second header field of every account, a PDA
     /// seed, and what `initialize` takes after its discriminator.
     pub id: u8,

@@ -1,4 +1,4 @@
-//! Plain secp256k1 ECDSA program: identity is the 33-byte sec1-compressed
+//! Plain secp256k1 ECDSA scheme: identity is the 33-byte sec1-compressed
 //! pubkey, verified via standard ECDSA (no envelope, no recovery byte).
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as Secp256k1SigningKey};
@@ -13,7 +13,7 @@ pub const SECP256K1_COMPRESSED_PUBKEY_LEN: usize = 33;
 
 /// Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey.
 pub const SECP256K1: Scheme = Scheme {
-    id: 2,
+    id: 3,
     signature_len: 64,
     identity_len: SECP256K1_COMPRESSED_PUBKEY_LEN,
     stored_identity_len: SECP256K1_COMPRESSED_PUBKEY_LEN,

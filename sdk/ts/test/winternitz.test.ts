@@ -13,13 +13,13 @@ import {
 } from "../src/index.js";
 
 test("Winternitz account and rotation digest match Rust", () => {
-  // Shared with tests/winternitz.rs; pins the 849-byte signature carve-out.
+  // Shared with tests/winternitz.rs; pins the 849-byte signature.
   const publicKey = Uint8Array.from({ length: 41 }, (_, i) => i);
   const identity = winternitzIdentity(publicKey);
   const receiver = new Address(new Uint8Array(32).fill(9));
   const [pda, bump] = findVectorPda(WINTERNITZ, identity);
-  expect(pda.toString()).toBe("4jz8wWkhoSx61KwwaycijTBceNkZ7GCiv9QHiZkvjB3n");
-  expect(bump).toBe(254);
+  expect(pda.toString()).toBe("Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y");
+  expect(bump).toBe(255);
   expect(vectorAccountLen(WINTERNITZ)).toBe(107);
 
   const initialize = createInitializeWinternitz(receiver, publicKey);
@@ -44,6 +44,6 @@ test("Winternitz account and rotation digest match Rust", () => {
     WINTERNITZ, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "6557e62c6ef076fa0a2c84a29f5aa77fb03864a71b0410fe4ff3611cd4ae010d"
+    "30a77d71298ec5fa804811e1c7941c106cf6659e75e5d0b4b961a9c7520df668"
   );
 });

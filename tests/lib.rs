@@ -1,5 +1,5 @@
-//! Mollusk-SBF integration tests for the per-scheme Vector programs. One
-//! module per program; shared helpers live in [`common`].
+//! Mollusk-SBF integration tests for the Vector program. One module per
+//! scheme; shared helpers live in [`common`].
 
 #[cfg(test)]
 mod common;

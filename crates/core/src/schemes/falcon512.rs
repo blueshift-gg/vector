@@ -1,4 +1,4 @@
-//! Falcon-512 (post-quantum) program. Verify-side library only; signing is
+//! Falcon-512 (post-quantum) scheme. Verify-side library only; signing is
 //! left to the caller (pair with `pqcrypto-falcon` or another Falcon
 //! signer). The client identity is `sha256(wire_pubkey)`.
 
@@ -21,15 +21,14 @@ pub const FALCON512_STORED_IDENTITY_LEN: usize = 32 + FALCON512_PREPARED_PUBKEY_
 /// Falcon-512 — the client identity is `sha256(wire_pubkey)` (32 bytes); the
 /// account stores that hash plus the 1024-byte prepared pubkey.
 pub const FALCON512: Scheme = Scheme {
-    id: 3,
+    id: 4,
     signature_len: FALCON512_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: FALCON512_STORED_IDENTITY_LEN,
 };
 
-/// `sha256(wire_pubkey)` — Falcon's client-side identity (PDA seed + the
-/// bytes folded into the advance digest). Mirrors the first 32 bytes the
-/// on-chain program stores.
+/// `sha256(wire_pubkey)` — Falcon's client-side identity (the PDA seed).
+/// Mirrors the first 32 bytes the on-chain program stores.
 pub fn falcon512_identity(wire_pubkey: &[u8; FALCON512_WIRE_PUBKEY_LEN]) -> [u8; 32] {
     Sha256::digest(wire_pubkey).into()
 }

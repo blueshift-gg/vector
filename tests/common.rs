@@ -1,4 +1,4 @@
-//! Shared constants and helpers used by every program's test module.
+//! Shared constants and helpers used by every scheme's test module.
 
 use mollusk_svm::{
     result::{types::TransactionResult, Check},

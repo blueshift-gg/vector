@@ -66,7 +66,7 @@ export function createInitializeInstruction(
  * authorise CPIs under the vector PDA's signer seeds.
  *
  * Accounts: `[vector_pda(writable), instructions_sysvar]`.
- * Data: `[ADVANCE_DISCRIMINATOR, scheme, ...signature]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, ...signature]`.
  */
 export function createAdvanceInstruction(
   scheme: Scheme,

@@ -31,7 +31,7 @@ const PREPARED_ALIGNED: () =
 pub struct Falcon512;
 
 impl SigningScheme for Falcon512 {
-    const ID: u8 = 3;
+    const ID: u8 = 4;
     const SIGNATURE_LEN: usize = FALCON_512_SIGNATURE_LEN;
     const IDENTITY_LEN: usize = FALCON_IDENTITY_LEN;
     const INIT_PAYLOAD_LEN: usize = FALCON_512_PUBKEY_LEN;

@@ -1,8 +1,7 @@
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 
-/// Empty the vector PDA lamports into `receiver`. The runtime zeroes account
-/// data and reassigns ownership to System once lamports hit zero at the
-/// instruction boundary.
+/// Empty the vector PDA lamports into `receiver`. The runtime removes an
+/// account with no lamports at the end of the transaction.
 ///
 /// Top-level invocation is rejected: the `is_signer()` gate only passes
 /// when this instruction is reached as a CPI from `passthrough` (which

@@ -1,7 +1,7 @@
-//! Falcon-512 program tests.
+//! Falcon-512 tests.
 //!
-//! The client identity is `sha256(wire_pubkey)` (32 bytes) — the PDA seed and
-//! the bytes folded into the advance digest. The on-chain account stores that
+//! The client identity is `sha256(wire_pubkey)` (32 bytes) — the PDA seed.
+//! The on-chain account stores that
 //! hash followed by the 1024-byte prepared pubkey (1056 bytes total), which
 //! the test reconstructs off-chain via `solana-falcon512`.
 

@@ -13,7 +13,7 @@ pub const WINTERNITZ_SIGNATURE_LEN: usize = winternitz::SIGNATURE_LEN;
 
 /// The initial key hash is the permanent identity; the current key follows it.
 pub const WINTERNITZ: Scheme = Scheme {
-    id: 5,
+    id: 6,
     signature_len: WINTERNITZ_SIGNATURE_LEN,
     identity_len: 32,
     stored_identity_len: 32 + WINTERNITZ_PUBKEY_LEN,

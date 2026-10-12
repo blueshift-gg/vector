@@ -1,5 +1,5 @@
 /**
- * secp256k1 + EIP-191 program: identity is the 20-byte Ethereum address;
+ * secp256k1 + EIP-191 scheme: identity is the 20-byte Ethereum address;
  * the digest is wrapped in the EIP-191 personal-sign envelope before
  * signing/recovery.
  *
@@ -19,7 +19,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
 export const EIP191: Scheme = {
-  id: 1,
+  id: 2,
   signatureLen: 65,
   identityLen: 20,
   storedIdentityLen: 20,

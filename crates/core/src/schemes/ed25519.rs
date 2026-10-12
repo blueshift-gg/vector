@@ -1,4 +1,4 @@
-//! Ed25519 program: identity is the 32-byte public key, verified directly
+//! Ed25519 scheme: identity is the 32-byte public key, verified directly
 //! over the advance digest.
 
 use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
@@ -13,7 +13,7 @@ pub const ED25519_PUBKEY_LEN: usize = 32;
 
 /// Ed25519 — identity is the 32-byte public key.
 pub const ED25519: Scheme = Scheme {
-    id: 0,
+    id: 1,
     signature_len: 64,
     identity_len: ED25519_PUBKEY_LEN,
     stored_identity_len: ED25519_PUBKEY_LEN,

@@ -39,7 +39,8 @@ fn initialize_derives_the_address_from_the_scheme_it_is_given() {
     ];
     for (scheme, error) in [
         (XMSS.id, ProgramError::InvalidAccountData),
-        (7, ProgramError::InvalidInstructionData),
+        (0, ProgramError::InvalidInstructionData),
+        (8, ProgramError::InvalidInstructionData),
     ] {
         initialize.data[1] = scheme;
         let result = mollusk.process_instruction(&initialize, &accounts);
@@ -61,6 +62,27 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
         result.program_result,
         ProgramResult::Failure(ProgramError::InvalidInstructionData)
     );
+
+    // Anyone can assign a zeroed account to the program. It belongs to no
+    // scheme, so nothing runs on it.
+    let zeroed = Account::new(
+        10_000_000,
+        WINTERNITZ.account_len(),
+        &vector_core::PROGRAM_ID,
+    );
+    let advance = vector_core::create_advance_instruction(&WINTERNITZ, &IDENTITY, &[0; 849]);
+    for instruction in [
+        &advance,
+        &create_passthrough_instruction(&WINTERNITZ, &IDENTITY, &[]),
+    ] {
+        let result = mollusk.process_instruction(instruction, &[(vector, zeroed.clone())]);
+        assert!(matches!(
+            result.program_result,
+            ProgramResult::Failure(
+                ProgramError::InvalidAccountData | ProgramError::InvalidInstructionData
+            )
+        ));
+    }
 
     // An account the program does not own has no scheme to read.
     let mut foreign = account;

@@ -1,5 +1,5 @@
 /**
- * Plain secp256k1 ECDSA program: identity is the 33-byte sec1-compressed
+ * Plain secp256k1 ECDSA scheme: identity is the 33-byte sec1-compressed
  * pubkey, verified via standard ECDSA (no envelope, no recovery byte).
  *
  * Mirrors `crates/core/src/schemes/secp256k1.rs`. Pulls in only
@@ -17,7 +17,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey. */
 export const SECP256K1: Scheme = {
-  id: 2,
+  id: 3,
   signatureLen: 64,
   identityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
   storedIdentityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,

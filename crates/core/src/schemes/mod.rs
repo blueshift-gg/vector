@@ -1,4 +1,4 @@
-//! One module per Vector program. Each owns its `Scheme`/program-ID
+//! One module per signing scheme. Each owns its `Scheme`
 //! constant, identity derivation, an `initialize` builder, and (where a
 //! Rust signer exists) a `sign_advance_instruction_*` helper.
 //!

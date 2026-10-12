@@ -1,5 +1,5 @@
 /**
- * Ed25519 program: identity is the 32-byte public key, verified directly
+ * Ed25519 scheme: identity is the 32-byte public key, verified directly
  * over the advance digest.
  *
  * Mirrors `crates/core/src/schemes/ed25519.rs`. Pulls in only
@@ -17,7 +17,7 @@ import { advanceVectorDigest } from "../digest.js";
 
 /** Ed25519 — identity is the 32-byte public key. */
 export const ED25519: Scheme = {
-  id: 0,
+  id: 1,
   signatureLen: 64,
   identityLen: 32,
   storedIdentityLen: 32,

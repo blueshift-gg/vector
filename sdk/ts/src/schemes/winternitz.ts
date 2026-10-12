@@ -8,7 +8,7 @@ export const WINTERNITZ_PUBKEY_LEN = 41;
 export const WINTERNITZ_SIGNATURE_LEN = 849;
 
 export const WINTERNITZ: Scheme = {
-  id: 5,
+  id: 6,
   signatureLen: WINTERNITZ_SIGNATURE_LEN,
   identityLen: 32,
   storedIdentityLen: 32 + WINTERNITZ_PUBKEY_LEN,

@@ -34,7 +34,7 @@ export const MLDSA44_STORED_IDENTITY_LEN =
 
 /** ML-DSA-44 — the identity is the public key (1,312 bytes). */
 export const MLDSA44: Scheme = {
-  id: 4,
+  id: 5,
   signatureLen: MLDSA44_SIGNATURE_LEN,
   identityLen: MLDSA44_PUBKEY_LEN,
   storedIdentityLen: MLDSA44_STORED_IDENTITY_LEN,

@@ -6,7 +6,7 @@ use vector_common::SigningScheme;
 pub struct Xmss;
 
 impl SigningScheme for Xmss {
-    const ID: u8 = 6;
+    const ID: u8 = 7;
     const SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
     const IDENTITY_LEN: usize = PUBLIC_KEY_LEN;
     const INIT_PAYLOAD_LEN: usize = PUBLIC_KEY_LEN;

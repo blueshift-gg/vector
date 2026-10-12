@@ -6,7 +6,7 @@ use vector_common::SigningScheme;
 pub struct Winternitz;
 
 impl SigningScheme for Winternitz {
-    const ID: u8 = 5;
+    const ID: u8 = 6;
     const SIGNATURE_LEN: usize = winternitz::SIGNATURE_LEN;
     const IDENTITY_LEN: usize = PUBLIC_KEY_LEN;
     const INIT_PAYLOAD_LEN: usize = PUBLIC_KEY_LEN;

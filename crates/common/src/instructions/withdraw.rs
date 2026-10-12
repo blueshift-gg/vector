@@ -40,8 +40,7 @@ pub fn process<S: SigningScheme>(
         .map_err(|_| ProgramError::InvalidInstructionData)?;
     let lamports = u64::from_le_bytes(amount_bytes);
 
-    // Account length is fixed for a single-scheme program — no header read
-    // needed to size the rent floor.
+    // The rent floor is for the scheme's full account length.
     let rent_min = Rent::get()?.try_minimum_balance(VectorAccount::account_len::<S>())?;
 
     let new_vector_lamports = vector

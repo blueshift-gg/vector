@@ -1,4 +1,4 @@
-//! Plain secp256k1 ECDSA program tests.
+//! Plain secp256k1 ECDSA tests.
 
 use k256::ecdsa::SigningKey as Secp256k1SigningKey;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};

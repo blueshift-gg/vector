@@ -47,8 +47,7 @@ export const SECP256K1_COMPRESSED_PUBKEY_LEN = 33;
 // ── Schemes ──────────────────────────────────────────────────────────
 
 /**
- * Everything a client needs to address one Vector program. Each on-chain
- * scheme is a separate program. Mirrors the `Scheme` struct in the Rust
+ * Everything a client needs to use one signing scheme. Mirrors the `Scheme` struct in the Rust
  * `vector-core` crate.
  */
 export interface Scheme {

@@ -1,7 +1,6 @@
-//! ML-DSA-44 program tests.
+//! ML-DSA-44 tests.
 //!
-//! The identity is the 1,312-byte public key: the bytes folded into the
-//! advance digest, and (hashed) the PDA seed. The account stores it and the
+//! The identity is the 1,312-byte public key, hashed for the PDA seed. The account stores it and the
 //! key's 20,544-byte expanded form. Registration is `initialize` (10,240
 //! bytes: key, row 0) then two `expand` (20,480: rows 1, 2; 21,892: row 3,
 //! `tr`), all three in one transaction.
@@ -225,9 +224,9 @@ fn client_encoding_matches_typescript() {
     let (pda, bump) = find_vector_pda(&MLDSA44, &pk);
     assert_eq!(
         pda.to_string(),
-        "BFQ39c9TJoj2JeVUNse2GEtpa2za4VR8TPq3mVNaCQGo"
+        "DSMGfPwdpxKeB7ai2vYrRSzTLPDTXKTFujjBMeGkKfMc"
     );
-    assert_eq!(bump, 255);
+    assert_eq!(bump, 254);
     let post = create_passthrough_instruction(
         &MLDSA44,
         &pk,
@@ -239,8 +238,8 @@ fn client_encoding_matches_typescript() {
     assert_eq!(
         digest,
         [
-            176, 11, 122, 180, 7, 63, 95, 242, 180, 184, 93, 60, 188, 168, 196, 186, 0, 131, 58,
-            141, 202, 192, 156, 37, 215, 185, 75, 45, 189, 49, 237, 177
+            135, 57, 194, 0, 133, 233, 189, 249, 35, 65, 234, 64, 227, 180, 163, 98, 176, 58, 247,
+            242, 231, 154, 85, 229, 175, 69, 68, 181, 60, 233, 105, 215
         ]
     );
 }
