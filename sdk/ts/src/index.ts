@@ -1,40 +1,18 @@
 /**
- * Off-chain helpers for constructing Vector program instructions and
- * computing the digests the on-chain program verifies.
+ * Client helpers for the Vector program: build its instructions and compute
+ * the digests it verifies.
  *
- * One program serves every signing scheme. An account is named by its
- * scheme and its identity, the key it was created with: the PDA seeds are
- * `["vector", [scheme], sha256(identity)]`. A {@link Scheme} bundles what a
- * client needs to use one scheme: its scheme byte and the lengths of its
- * signature, identity and stored identity.
+ * One program serves every signing scheme. An account is named by its scheme
+ * and its identity, the key it was created with: the PDA seeds are
+ * `["vector", [scheme], sha256(identity)]`.
  *
- * # Layout
- *
- * - `./scheme.js` — the {@link Scheme} descriptor, {@link VectorAccount}
- *   header mirror, canonical PDA derivation, and shared byte helpers.
- * - `./instructions.js` — generic builders (initialize/advance/passthrough/
- *   close/withdraw, instructions-sysvar serialization).
- * - `./digest.js` — {@link advanceVectorDigest}, the value clients sign.
- * - `./verify.js` — per-scheme offline verification of `advance` signatures
- *   ({@link verifyAdvanceSignatureEd25519} and friends), returning the
- *   digest (= next nonce) on success.
- * - `./schemes/*.js` — one module per scheme (`ed25519`, `eip191`,
- *   `falcon512`, `mldsa44`, `secp256k1`, `winternitz`, `xmss`): its `Scheme` const,
- *   identity derivation, an `initialize` builder, and a signer where one
- *   exists.
- *
- * Everything is re-exported flat here, so either style works:
+ * Everything is exported here. Each scheme can also be imported on its own,
+ * which pulls in only that scheme's crypto:
  *
  * ```ts
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk";          // flat
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";  // per-scheme
+ * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk";
+ * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";
  * ```
- *
- * The Falcon wire-size constants are owned by `./scheme.js` and re-exported
- * flat from there. `./schemes/falcon512.js` also re-exports them for its
- * standalone subpath entrypoint; to keep the flat API unambiguous they are
- * NOT glob-exported here from that module (only the symbols unique to the
- * scheme module are).
  */
 
 export * from "./scheme.js";

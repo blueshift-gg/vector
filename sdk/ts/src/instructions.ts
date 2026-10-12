@@ -1,8 +1,6 @@
 /**
- * Generic, scheme-independent instruction builders. Per-scheme convenience
- * wrappers (e.g. `createInitializeEd25519`) live in `./schemes/*`.
- *
- * Mirrors `crates/core/src/instructions.rs`.
+ * Instruction builders for every scheme. Each scheme's own helpers, such as
+ * `createInitializeEd25519`, are in `./schemes/*`.
  */
 import {
   Address,
@@ -59,13 +57,8 @@ export function createInitializeInstruction(
 // ── Advance ──────────────────────────────────────────────────────────
 
 /**
- * Build an `advance` instruction — verifies the signature and installs the
- * digest as the next nonce. No CPI passthrough: pair this with
- * {@link createPassthroughInstruction} in the same tx if you need to
- * authorise CPIs under the vector PDA's signer seeds.
- *
- * Accounts: `[vector_pda(writable), instructions_sysvar]`.
- * Data: `[ADVANCE_DISCRIMINATOR, ...signature]`.
+ * Build an `advance` for one signer. It verifies the signature and moves the
+ * nonce; pair it with {@link createPassthroughInstruction} to act.
  */
 export function createAdvanceInstruction(
   scheme: Scheme,
@@ -107,16 +100,10 @@ export function createMultiAdvanceInstruction(
 // ── Passthrough ──────────────────────────────────────────────────────
 
 /**
- * Build a `passthrough` instruction: run `subInstructions` as the vector
- * account, which signs each of them. It needs an `advance` for the same
- * account earlier in the transaction. That advance's signature covers the
- * whole transaction, this instruction included, so there is no second
- * signature here.
- *
- * Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
- * ...sub_ix accounts...]` repeated per sub-instruction.
- * Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
- * {num_accounts(u8), data_len(u16 LE), data}...]`.
+ * Build a `passthrough`: run `subInstructions` as the vector account, which
+ * signs each of them. It needs an `advance` for the same account earlier in
+ * the transaction. That advance's signature covers the whole transaction, so
+ * there is no second signature here.
  */
 export function createPassthroughInstruction(
   scheme: Scheme,
@@ -133,13 +120,12 @@ export function createPassthroughInstruction(
 
 /**
  * {@link createPassthroughInstruction} for Winternitz and XMSS, whose key
- * rotates. `nextPublicKey` is the key that signs the next transaction; it
- * follows the discriminator and is covered by the signature like the rest.
- * Persist that signer before authorizing this instruction. `identity` stays
- * the SHA-256 of the first key.
+ * rotates. `nextPublicKey` is the key that signs the next transaction, and
+ * the signature covers it. Persist that signer first. `identity` stays the
+ * first key.
  *
- * A Winternitz key signs once, so it must be replaced every time. An XMSS
- * key may be kept with `null` until its tree runs out.
+ * A Winternitz key signs once, so it must be replaced every time. An XMSS key
+ * may be kept with `null` until its tree runs out.
  */
 export function createRotatingPassthroughInstruction(
   scheme: Scheme,
@@ -238,12 +224,8 @@ function passthroughInstruction(
 // ── Close / Withdraw subinstructions ──────────────────────────────────
 
 /**
- * Build a `close` sub-instruction for use inside a `passthrough` ix. Direct
- * top-level invocation fails the `vector.is_signer()` gate; close is only
- * reachable as a CPI from passthrough (which promotes the vector PDA to a
- * signer via `invoke_signed`).
- *
- * Accounts: `[vector_pda, close_to]`. Data: `[CLOSE_DISCRIMINATOR, scheme]`.
+ * Build a `close` to run inside a `passthrough`. On its own it fails: only a
+ * passthrough makes the vector account a signer.
  */
 export function createCloseSubinstruction(
   scheme: Scheme,
@@ -262,11 +244,8 @@ export function createCloseSubinstruction(
 }
 
 /**
- * Build a `withdraw` sub-instruction. Same authorisation model as
- * {@link createCloseSubinstruction}.
- *
- * Accounts: `[vector_pda, receiver]`.
- * Data: `[WITHDRAW_DISCRIMINATOR, scheme, lamports: u64 LE]`.
+ * Build a `withdraw` to run inside a `passthrough`, like {@link
+ * createCloseSubinstruction}.
  */
 export function createWithdrawSubinstruction(
   scheme: Scheme,

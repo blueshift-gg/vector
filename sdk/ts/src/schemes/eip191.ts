@@ -1,10 +1,6 @@
 /**
- * secp256k1 + EIP-191 scheme: identity is the 20-byte Ethereum address;
- * the digest is wrapped in the EIP-191 personal-sign envelope before
- * signing/recovery.
- *
- * Mirrors `crates/core/src/schemes/eip191.rs`. Pulls in only
- * `@noble/curves/secp256k1` + `@noble/hashes/sha3` (keccak).
+ * secp256k1 + EIP-191. The identity is the 20-byte Ethereum address, and what
+ * is signed is the digest in a personal-sign envelope.
  */
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
@@ -52,10 +48,8 @@ const EIP191_PREFIX = new TextEncoder().encode(
 );
 
 /**
- * `keccak256("\x19Ethereum Signed Message:\n32" || digest)` — the EIP-191
- * personal-sign envelope the on-chain program reproduces before
- * `secp256k1_recover`. Exported so external signers (HSMs, wallets exposing
- * raw-prehash APIs) can be handed the exact prehash they expect.
+ * `keccak256("\x19Ethereum Signed Message:\n32" || digest)`: what an EIP-191
+ * signer actually signs. Exported for signers that take a prehash.
  */
 export function eip191EnvelopeHash(digest: Uint8Array): Uint8Array {
   const buf = new Uint8Array(EIP191_PREFIX.length + digest.length);
@@ -96,12 +90,9 @@ export function signAdvanceInstructionEip191(
 }
 
 /**
- * Sign an inert advance — a revocation — with an EIP-191 secp256k1 key:
- * {@link signAdvanceInstructionEip191} with empty pre/post instructions.
- * Landing it only bumps the nonce, orphaning everything pre-signed against
- * it. The digest (`revocationDigest`) commits to the broadcasting
- * transaction containing ONLY this instruction; verify with
- * `verifyAdvanceSignatureEip191` over empty pre/post arrays.
+ * Sign an advance with nothing around it. Landing it only moves the nonce,
+ * which cancels everything signed against the old one. It must be the only
+ * instruction of its transaction.
  */
 export function signRevocationInstructionEip191(
   privateKey: Uint8Array,

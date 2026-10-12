@@ -1,10 +1,4 @@
-/**
- * Plain secp256k1 ECDSA scheme: identity is the 33-byte sec1-compressed
- * pubkey, verified via standard ECDSA (no envelope, no recovery byte).
- *
- * Mirrors `crates/core/src/schemes/secp256k1.rs`. Pulls in only
- * `@noble/curves/secp256k1`.
- */
+/** Plain secp256k1 ECDSA. The identity is the 33-byte compressed public key. */
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
@@ -52,10 +46,8 @@ export function createInitializeSecp256k1(
 }
 
 /**
- * Sign the advance digest with a plain secp256k1 ECDSA key (no EIP-191
- * envelope) and return a ready-to-submit advance instruction. Signature is
- * 64 bytes `(r, s)`.
- * @param privateKey 32-byte secp256k1 private key
+ * Sign an advance with a plain secp256k1 key. The signature is the 64-byte
+ * `(r, s)`.
  */
 export function signAdvanceInstructionSecp256k1(
   privateKey: Uint8Array,
@@ -81,12 +73,9 @@ export function signAdvanceInstructionSecp256k1(
 }
 
 /**
- * Sign an inert advance — a revocation — with a plain secp256k1 ECDSA key:
- * {@link signAdvanceInstructionSecp256k1} with empty pre/post instructions.
- * Landing it only bumps the nonce, orphaning everything pre-signed against
- * it. The digest (`revocationDigest`) commits to the broadcasting
- * transaction containing ONLY this instruction; verify with
- * `verifyAdvanceSignatureSecp256k1` over empty pre/post arrays.
+ * Sign an advance with nothing around it. Landing it only moves the nonce,
+ * which cancels everything signed against the old one. It must be the only
+ * instruction of its transaction.
  */
 export function signRevocationInstructionSecp256k1(
   privateKey: Uint8Array,

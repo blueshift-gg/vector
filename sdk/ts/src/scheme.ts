@@ -1,11 +1,6 @@
 /**
- * The scheme/program/account primitives shared by every scheme: the
- * {@link Scheme} descriptor, the host-side {@link VectorAccount} header
- * mirror, canonical PDA derivation, and the shared low-level byte helpers.
- * Per-scheme details (identity derivation, signing, init builders) live in
- * `./schemes/*`.
- *
- * Mirrors `crates/core/src/scheme.rs`.
+ * What every scheme shares: the {@link Scheme} descriptor, the account
+ * header, and PDA derivation.
  */
 import { createHash } from "crypto";
 import { Connection, Address } from "@solana/web3.js";
@@ -23,10 +18,9 @@ export const PASSTHROUGH_DISCRIMINATOR = 4;
 export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
 /**
- * Fixed-size account header: `nonce[32] || seed[32] || scheme[1] || bump[1]`.
- * The seed is the SHA-256 of the key the account was created with; the scheme
- * byte says which signing scheme the account belongs to. The scheme's
- * identity bytes follow the header.
+ * The account header: `nonce[32] || seed[32] || scheme[1] || bump[1]`. The
+ * seed is the SHA-256 of the key the account was created with. The scheme's
+ * identity bytes follow.
  */
 export const VECTOR_HEADER_LEN = 66;
 export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
@@ -146,12 +140,9 @@ export function findVectorPda(
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 
 /**
- * Synchronous PDA derivation — `@solana/web3.js@3` only ships the async
- * `Address.findProgramAddress`, but our SDK builders need to derive PDAs
- * inline without forcing every caller to be async. The algorithm mirrors
- * the on-chain `find_program_address`: walk bumps 255→0, accept the first
- * `sha256(seeds || bump || program_id || "ProgramDerivedAddress")` that
- * is *off* the ed25519 curve.
+ * `@solana/web3.js` 3 only derives PDAs asynchronously, and the builders here
+ * are synchronous. Same algorithm: try bumps from 255 down and take the first
+ * hash that is off the ed25519 curve.
  */
 function findProgramAddressSync(
   seeds: Uint8Array[],

@@ -1,8 +1,6 @@
 /**
- * The canonical `advance` digest the client signs and the on-chain program
+ * What a vector account signs: a digest of the transaction, which the program
  * recomputes from the instructions sysvar.
- *
- * Mirrors `crates/core/src/digest.rs`.
  */
 import { createHash } from "crypto";
 import { Address, TransactionInstruction } from "@solana/web3.js";
@@ -64,13 +62,12 @@ function promoteToMessageFlags(
 export type AdvanceSigner = { scheme: Scheme; identity: Uint8Array };
 
 /**
- * The message every signer of one `advance` approves: the SHA-256 of the
- * instructions sysvar with the signatures cut off the end of the advance's
- * data. The advance is inserted at `preInstructions.length`; a sibling
- * `passthrough` is just another pre/post instruction, and the message
- * covers all of it.
+ * The message every signer of one advance approves: the SHA-256 of the
+ * instructions sysvar without the advance's signatures.
  *
- * Mirrors `advance_message` in `crates/core/src/digest.rs`.
+ * The advance goes after `preInstructions`. A passthrough is one of the pre
+ * or post instructions, so the message covers it. `feePayer` only matters
+ * when it is also an account of one of the instructions.
  */
 export function advanceMessage(
   signers: AdvanceSigner[],
@@ -109,11 +106,9 @@ export function advanceMessage(
 }
 
 /**
- * What one signer signs: `SHA256(message || nonce || vector)`, with
- * `message` from {@link advanceMessage} and `vector` the signer's account
- * address. It is also the account's next nonce.
- *
- * Mirrors `signer_digest` in `crates/core/src/digest.rs`.
+ * What one signer signs, and the account's next nonce: `SHA256(message ||
+ * nonce || vector)`, with `message` from {@link advanceMessage} and `vector`
+ * the signer's account address.
  */
 export function signerDigest(
   message: Uint8Array,
@@ -146,20 +141,9 @@ export function advanceVectorDigest(
 }
 
 /**
- * The digest a pre-signed revocation commits to: {@link advanceVectorDigest}
- * with empty pre/post instructions. The resulting advance is an inert
- * transition — landing it only installs the next nonce, orphaning every
- * signature pre-signed against `nonce` (a kill-switch).
- *
- * This digest commits to the instructions sysvar of the broadcasting
- * transaction, so a pre-signed revocation must be broadcast as a transaction
- * containing ONLY the advance instruction. ed25519 / eip191 / secp256k1
- * inert advances fit the default compute budget (~13k / ~26k / ~72k CUs);
- * for Falcon-512, sign via the advance signer with a compute-budget
- * pre-instruction committed at sign time (its ~184k CU verify leaves no
- * headroom under the 200k default).
- *
- * Mirrors `revocation_digest` in `crates/core/src/digest.rs`.
+ * The digest of an advance with nothing around it. Landing that advance only
+ * moves the nonce, which cancels everything signed against the old one. It
+ * must be the only instruction of its transaction.
  */
 export function revocationDigest(
   scheme: Scheme,

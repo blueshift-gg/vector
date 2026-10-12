@@ -1,20 +1,10 @@
 /**
- * Offline verification of `advance` signatures. Each function recomputes
- * the canonical digest via {@link advanceVectorDigest} and checks the
- * signature the way the on-chain program will, so a PASS here means the
- * transaction will verify on-chain against the same nonce. On success each
- * function returns the digest — which **is** the account's next nonce, so
- * chains of dependent transactions can be pre-signed by feeding each digest
- * into the next signing call.
+ * Check an `advance` signature offline, the way the program will. Each
+ * function returns the digest, which is the account's next nonce.
  *
- * `feePayer` participates in **message-level flag promotion only**: the
- * live sysvar the on-chain program hashes carries message-level account
- * flags, and the fee payer is always a writable signer at the message
- * level. The digest is therefore independent of the fee payer **unless**
- * its key appears among the committed instructions' accounts, in which
- * case promotion folds it in and the signature is bound to that fee payer.
- *
- * Mirrors `crates/core/src/verify.rs`.
+ * Pass `feePayer` when it is also an account of one of the instructions: the
+ * runtime then marks it a writable signer there, and the digest covers that
+ * flag.
  */
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
@@ -97,15 +87,9 @@ function checkInputs(
 }
 
 /**
- * Normalize an EIP-191 recovery byte from the Ethereum legacy 27/28
- * convention to the 0/1 form the on-chain program requires (it passes `v`
- * straight to `sol_secp256k1_recover`, which rejects recovery ids > 3).
- *
- * Call this at **assembly time**, when packaging a signature produced by
- * Ethereum tooling (`personal_sign`, HSMs, wallets) into an advance
- * instruction. {@link verifyAdvanceSignatureEip191} deliberately does NOT
- * accept 27/28 — an artifact carrying a legacy recovery byte would verify
- * offline but fail on-chain.
+ * Turn Ethereum's 27/28 recovery byte into the 0/1 the program requires. Call
+ * it when packaging a signature from Ethereum tooling into an advance; {@link
+ * verifyAdvanceSignatureEip191} rejects 27/28, as the program does.
  */
 export function normalizeEip191RecoveryByte(v: number): number {
   if (v >= 0 && v <= 3) return v;
@@ -116,10 +100,8 @@ export function normalizeEip191RecoveryByte(v: number): number {
 }
 
 /**
- * Strip the zero padding from a 666-byte Falcon wire signature. The PQClean
- * compressed stream always ends with a coefficient's unary terminator bit,
- * so the final byte of the real stream is never `0x00` — trailing zero
- * bytes are unambiguously wire padding.
+ * Strip the zero padding from a 666-byte Falcon signature. The compressed
+ * stream never ends in a zero byte, so trailing zeros are padding.
  */
 function trimFalconSignature(signature: Uint8Array): Uint8Array {
   let end = signature.length;
@@ -151,12 +133,7 @@ function checkedDigest(
 
 // ── Per-scheme verification ──────────────────────────────────────────
 
-/**
- * Verify an Ed25519 `advance` signature offline. `pubkey` is the 32-byte
- * identity, `signature` the 64-byte wire signature (the advance ix data
- * after the 1-byte discriminator). Returns the recomputed digest — the
- * account's next nonce — on success.
- */
+/** Verify an Ed25519 advance signature. `pubkey` is the identity. */
 export function verifyAdvanceSignatureEd25519(
   pubkey: Uint8Array,
   nonce: Uint8Array,
@@ -173,13 +150,8 @@ export function verifyAdvanceSignatureEd25519(
 }
 
 /**
- * Verify a plain-secp256k1 ECDSA `advance` signature offline.
- * `compressedPubkey` is the 33-byte sec1 identity, `signature` the 64-byte
- * `r || s` wire form. Returns the recomputed digest on success.
- *
- * Verified with `lowS: false`: the on-chain `solana-secp256k1-ecdsa`
- * verifier accepts both `s` normalizations, so the offline check must too
- * or PASS/FAIL would diverge.
+ * Verify a plain secp256k1 advance signature. A high-S signature is accepted,
+ * as it is on chain.
  */
 export function verifyAdvanceSignatureSecp256k1(
   compressedPubkey: Uint8Array,
@@ -201,18 +173,9 @@ export function verifyAdvanceSignatureSecp256k1(
 }
 
 /**
- * Verify an EIP-191 `advance` signature offline. `ethAddress` is the
- * 20-byte identity, `signature` the 65-byte `r || s || v` wire form with
- * `v` the raw recovery id (`0..=3`). The key is recovered from the EIP-191
- * envelope of the digest ({@link eip191EnvelopeHash}) and its derived
- * Ethereum address compared to the identity. Returns the recomputed digest
- * on success.
- *
- * The Ethereum legacy `v = 27/28` form is **rejected**: the on-chain
- * program passes `v` straight to `sol_secp256k1_recover`, which errors on
- * recovery ids above 3, so a legacy-form signature would pass offline yet
- * fail on-chain — subtract 27 at assembly time (see
- * {@link normalizeEip191RecoveryByte}).
+ * Verify an EIP-191 advance signature against an Ethereum address. `v` is the
+ * raw recovery id; Ethereum's 27/28 form is rejected, as it is on chain. See
+ * {@link normalizeEip191RecoveryByte}.
  */
 export function verifyAdvanceSignatureEip191(
   ethAddress: Uint8Array,
@@ -260,11 +223,8 @@ export function verifyAdvanceSignatureEip191(
 }
 
 /**
- * Verify a Falcon-512 `advance` signature offline, given the 897-byte wire
- * pubkey, which is the identity.
- * `signature` is the 666-byte zero-padded wire form; the padding is
- * stripped before handing the compressed stream to the noble verifier.
- * Returns the recomputed digest on success.
+ * Verify a Falcon-512 advance signature. `signature` is the 666-byte
+ * zero-padded form.
  */
 export function verifyAdvanceSignatureFalcon512(
   wirePubkey: Uint8Array,

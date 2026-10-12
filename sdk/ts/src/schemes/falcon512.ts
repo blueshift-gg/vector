@@ -1,16 +1,8 @@
 /**
- * Falcon-512 (post-quantum) scheme: client identity is
- * the wire public key; the on-chain account stores the
- * 1024-byte prepared form of the wire pubkey.
+ * Falcon-512. The identity is the 897-byte wire public key.
  *
- * Mirrors `crates/core/src/schemes/falcon512.rs`. The Rust crate's
- * `solana-falcon512` dep is verify-only, but `@noble/post-quantum/falcon.js`
- * also signs, so the TS SDK implements the full
- * `signAdvanceInstructionFalcon512` flow.
- *
- * The on-chain verifier expects the PQClean *compressed* detached signature
- * zero-padded to 666 bytes — i.e. `falcon512` (not `falcon512padded`, whose
- * fixed-size encoding is a different wire format).
+ * The program expects the compressed detached signature, zero-padded to 666
+ * bytes: noble's `falcon512`, not `falcon512padded`, which is another format.
  */
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
@@ -78,10 +70,8 @@ export function createInitializeFalcon512(
 }
 
 /**
- * Sign the advance digest with a Falcon-512 keypair and return a
- * ready-to-submit advance instruction. The variable-length compressed
- * detached signature is zero-padded to the 666-byte wire format the
- * on-chain verifier expects.
+ * Sign an advance with a Falcon-512 keypair. The signature is zero-padded to
+ * the 666 bytes the program expects.
  */
 export function signAdvanceInstructionFalcon512(
   keypair: Falcon512Keypair,

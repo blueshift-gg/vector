@@ -73,11 +73,9 @@ export function mldsa44PublicKey(secretKey: Uint8Array): Uint8Array {
 }
 
 /**
- * Initialize an ML-DSA-44 vector account: creates the first 10,240 bytes
- * (the key and the first prepared row). Follow with
- * {@link MLDSA44_EXPAND_STEPS} {@link createExpandMlDsa44} instructions, in
- * the same transaction or later; {@link createRegisterMlDsa44Instructions}
- * builds all three.
+ * Create an ML-DSA-44 account. It is created short: follow with {@link
+ * MLDSA44_EXPAND_STEPS} {@link createExpandMlDsa44} instructions. {@link
+ * createRegisterMlDsa44Instructions} builds all three.
  */
 export function createInitializeMlDsa44(
   payer: Address,
@@ -88,11 +86,8 @@ export function createInitializeMlDsa44(
 }
 
 /**
- * Grow the vector account by one 10,240-byte step and expand the prepared
- * rows that fit. Permissionless and deterministic (the content is a
- * function of the stored key); fails once the account is complete.
- *
- * Accounts: `[vector_pda(writable)]`. Data: `[MLDSA44_EXPAND_DISCRIMINATOR, scheme]`.
+ * Grow the account by one step. Anyone can send it; it fails once the account
+ * is complete.
  */
 export function createExpandMlDsa44(publicKey: Uint8Array): TransactionInstruction {
   const [vectorPda] = findVectorPda(MLDSA44, mldsa44Identity(publicKey));
