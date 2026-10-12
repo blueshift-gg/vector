@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use pinocchio::{
-    cpi::{invoke_signed_with_slice, Signer},
+    cpi::{invoke_signed_with_slice, Seed, Signer},
     error::ProgramError,
     instruction::{InstructionAccount, InstructionView},
     AccountView, ProgramResult,
@@ -9,7 +9,7 @@ use pinocchio::{
 
 use crate::{
     instructions::Advance,
-    state::{signer_seeds, VectorAccount},
+    state::{VectorAccount, VECTOR_SEED},
     transaction::{check_instructions_sysvar, top_level_only, Transaction},
 };
 
@@ -36,8 +36,8 @@ use crate::{
 ///
 /// Parameters:
 ///
-/// - for Winternitz, the key that signs next; for XMSS, `0`, or `1` and
-///   the key that signs next
+/// - what the scheme takes first: for Winternitz, the key that signs next;
+///   for XMSS, `0`, or `1` and the key that signs next
 /// - num_instructions: u8
 /// - for each instruction: num_accounts: u8, data_len: u16, data
 ///
@@ -65,9 +65,6 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
         };
 
         // Account Checks
-        if !vector.owned_by(&crate::ID) {
-            return Err(ProgramError::InvalidAccountOwner);
-        }
         check_instructions_sysvar(instructions_sysvar)?;
 
         Ok(Self {
@@ -83,45 +80,30 @@ impl<'a> Passthrough<'a> {
     pub const DISCRIMINATOR: &'a u8 = &4;
 
     pub fn process(&mut self) -> ProgramResult {
-        let scheme = VectorAccount::scheme(self.vector)?;
-        self.check_advanced()?;
-
-        let mut data = self.vector.try_borrow_mut()?;
-        let (account, identity) = VectorAccount::split(&mut data)?;
-        let identity = identity
-            .get_mut(..scheme.identity_len())
-            .ok_or(ProgramError::AccountDataTooSmall)?;
+        let address = self.vector.address().to_bytes();
 
         // The seeds come from the account itself, so the signature below can
-        // only ever be the account's own.
-        let (scheme_id, bump) = ([scheme.id()], [account.bump]);
-        let identity_seed = scheme.seed_from_identity(identity);
-        let seeds = signer_seeds(&scheme_id, &identity_seed, &bump);
+        // only ever be the account's own. A scheme whose key rotates takes
+        // its next key off the front of the data.
+        let (seed, scheme, bump, instructions) = {
+            let mut data = VectorAccount::borrow(self.vector)?;
+            let (account, identity) = VectorAccount::load(&mut data)?;
+            check_advanced(self.instructions_sysvar, &address)?;
+            (
+                account.seed,
+                [account.scheme],
+                [account.bump],
+                identity.passthrough(self.instructions)?,
+            )
+        };
 
-        // A rotating scheme takes its next key off the front of the data.
-        let instructions = scheme.passthrough(identity, self.instructions)?;
-        drop(data);
-
+        let seeds = [
+            Seed::from(VECTOR_SEED),
+            Seed::from(&scheme),
+            Seed::from(&seed),
+            Seed::from(&bump),
+        ];
         self.invoke(instructions, &[Signer::from(&seeds)])
-    }
-
-    /// An earlier instruction of this transaction is an `Advance` that lists
-    /// the account. It ran, so the account's signature was verified.
-    fn check_advanced(&self) -> ProgramResult {
-        let data = self.instructions_sysvar.try_borrow()?;
-        let transaction = Transaction::new(&data);
-        let vector = self.vector.address().as_ref();
-
-        for index in 0..transaction.current_index()? {
-            let instruction = transaction.instruction(index)?;
-            if instruction.program_id == crate::ID.as_ref()
-                && instruction.data.first() == Some(Advance::DISCRIMINATOR)
-                && instruction.accounts.iter().any(|meta| &meta[1..] == vector)
-            {
-                return Ok(());
-            }
-        }
-        Err(ProgramError::MissingRequiredSignature)
     }
 
     /// Invoke each instruction in the data, taking its program and accounts
@@ -172,6 +154,24 @@ impl<'a> Passthrough<'a> {
         }
         Ok(())
     }
+}
+
+/// An earlier instruction of this transaction is an `Advance` that lists
+/// `vector`. It ran, so the account's signature was verified.
+fn check_advanced(instructions_sysvar: &AccountView, vector: &[u8; 32]) -> ProgramResult {
+    let data = instructions_sysvar.try_borrow()?;
+    let transaction = Transaction::new(&data);
+
+    for index in 0..transaction.current_index()? {
+        let instruction = transaction.instruction(index)?;
+        if instruction.program_id == crate::ID.as_ref()
+            && instruction.data.first() == Some(Advance::DISCRIMINATOR)
+            && instruction.accounts.iter().any(|meta| &meta[1..] == vector)
+        {
+            return Ok(());
+        }
+    }
+    Err(ProgramError::MissingRequiredSignature)
 }
 
 /// Take the next `N` bytes off the front of `data`.

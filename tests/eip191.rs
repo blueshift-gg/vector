@@ -60,11 +60,11 @@ fn advance_empty() {
     let key = signing_key();
     let identity = secp256k1_eip191_eth_address(&key);
 
-    let (vector, bump) = find_vector_pda(&EIP191, &identity);
+    let (vector, _) = find_vector_pda(&EIP191, &identity);
     let vector_account = build_vector_account(
         NONCE,
         &EIP191,
-        bump,
+        &identity,
         mollusk.sysvars.rent.minimum_balance(EIP191.account_len()),
         &identity,
     );
@@ -72,7 +72,7 @@ fn advance_empty() {
     let advance_ix = sign_advance_instruction_secp256k1_eip191(&key, &NONCE, &[], &[], None);
 
     let next_nonce = advance_vector_digest(&EIP191, &NONCE, &identity, &[], &[]);
-    let expected_vector_data = expected_advanced_data(next_nonce, &EIP191, bump, &identity);
+    let expected_vector_data = expected_advanced_data(next_nonce, &EIP191, &identity, &identity);
 
     let accounts = vec![(vector, vector_account)];
 
@@ -105,8 +105,9 @@ fn close_via_advance() {
     let identity = secp256k1_eip191_eth_address(&key);
 
     let vector_lamports = mollusk.sysvars.rent.minimum_balance(EIP191.account_len());
-    let (vector, bump) = find_vector_pda(&EIP191, &identity);
-    let vector_account = build_vector_account(NONCE, &EIP191, bump, vector_lamports, &identity);
+    let (vector, _) = find_vector_pda(&EIP191, &identity);
+    let vector_account =
+        build_vector_account(NONCE, &EIP191, &identity, vector_lamports, &identity);
 
     let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (
@@ -150,9 +151,14 @@ fn withdraw_via_advance() {
     let starting_vector_lamports = rent_min + 5_000_000;
     let withdraw_amount = 3_000_000u64;
 
-    let (vector, bump) = find_vector_pda(&EIP191, &identity);
-    let vector_account =
-        build_vector_account(NONCE, &EIP191, bump, starting_vector_lamports, &identity);
+    let (vector, _) = find_vector_pda(&EIP191, &identity);
+    let vector_account = build_vector_account(
+        NONCE,
+        &EIP191,
+        &identity,
+        starting_vector_lamports,
+        &identity,
+    );
 
     let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (

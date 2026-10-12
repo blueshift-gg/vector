@@ -23,11 +23,12 @@ export const PASSTHROUGH_DISCRIMINATOR = 4;
 export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
 /**
- * Fixed-size account header: `nonce[32] || scheme[1] || bump[1]`. The
- * scheme byte says which signing scheme the account belongs to; the scheme's
+ * Fixed-size account header: `nonce[32] || seed[32] || scheme[1] || bump[1]`.
+ * The seed is the SHA-256 of the key the account was created with; the scheme
+ * byte says which signing scheme the account belongs to. The scheme's
  * identity bytes follow the header.
  */
-export const VECTOR_HEADER_LEN = 34;
+export const VECTOR_HEADER_LEN = 66;
 export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
 
 // Falcon-512 wire sizes — mirror `solana-falcon512` constants.
@@ -86,9 +87,10 @@ export function vectorAccountLen(scheme: Scheme): number {
 
 // ── VectorAccount ────────────────────────────────────────────────────
 
-/** Header of a vector account. Scheme identity follows at offset 34. */
+/** Header of a vector account. Scheme identity follows at offset 66. */
 export interface VectorAccount {
   nonce: Uint8Array; // 32 bytes
+  seed: Uint8Array; // 32 bytes
   scheme: number; // 1 byte
   bump: number; // 1 byte
 }
@@ -101,16 +103,18 @@ export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
   }
   return {
     nonce: data.slice(0, 32),
-    scheme: data[32],
-    bump: data[33],
+    seed: data.slice(32, 64),
+    scheme: data[64],
+    bump: data[65],
   };
 }
 
 export function serializeVectorAccountHeader(account: VectorAccount): Uint8Array {
   const buf = new Uint8Array(VECTOR_HEADER_LEN);
   buf.set(account.nonce, 0);
-  buf[32] = account.scheme;
-  buf[33] = account.bump;
+  buf.set(account.seed, 32);
+  buf[64] = account.scheme;
+  buf[65] = account.bump;
   return buf;
 }
 
@@ -121,15 +125,12 @@ export function sha256(data: Uint8Array): Uint8Array {
   return new Uint8Array(createHash("sha256").update(data).digest());
 }
 
-/**
- * 32-byte PDA-seed input: identity bytes themselves when `length <= 32`,
- * `sha256(identity)` otherwise. Mirrors `IdentitySeed::default_from`.
- */
-export function pdaSeedFromIdentity(identity: Uint8Array): Uint8Array {
-  return identity.length <= 32 ? identity : sha256(identity);
+/** The PDA seed for an identity: its SHA-256, for every scheme. */
+export function vectorSeed(identity: Uint8Array): Uint8Array {
+  return sha256(identity);
 }
 
-/** Derive `(vector_pda, bump)`. Seeds: `["vector", [scheme], identity_seed]`. */
+/** Derive `(vector_pda, bump)`. Seeds: `["vector", [scheme], sha256(identity)]`. */
 export function findVectorPda(
   scheme: Scheme,
   identity: Uint8Array
@@ -138,7 +139,7 @@ export function findVectorPda(
     throw new Error(`Identity must be ${scheme.identityLen} bytes`);
   }
   return findProgramAddressSync(
-    [VECTOR_PDA_SEED, Uint8Array.of(scheme.id), pdaSeedFromIdentity(identity)],
+    [VECTOR_PDA_SEED, Uint8Array.of(scheme.id), vectorSeed(identity)],
     PROGRAM_ID
   );
 }

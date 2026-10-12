@@ -1,6 +1,6 @@
 /**
  * Falcon-512 (post-quantum) scheme: client identity is
- * `sha256(wire_pubkey)`; the on-chain account stores that hash plus the
+ * the wire public key; the on-chain account stores the
  * 1024-byte prepared form of the wire pubkey.
  *
  * Mirrors `crates/core/src/schemes/falcon512.rs`. The Rust crate's
@@ -17,7 +17,6 @@ import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 
 import {
   Scheme,
-  sha256,
   FALCON_PUBKEY_LEN,
   FALCON_SIGNATURE_LEN,
   FALCON_PREPARED_PUBKEY_LEN,
@@ -37,24 +36,24 @@ export {
 /** Falcon-512 secret key length (`@noble/post-quantum` encoding). */
 export const FALCON_SECRET_KEY_LEN = 1281;
 
-/** Falcon-512 — client identity is `sha256(wire_pubkey)` (32 bytes). */
+/** Falcon-512. The identity is the 897-byte wire public key. */
 export const FALCON512: Scheme = {
   id: 4,
   signatureLen: FALCON_SIGNATURE_LEN,
-  identityLen: 32,
-  storedIdentityLen: 32 + FALCON_PREPARED_PUBKEY_LEN,
+  identityLen: FALCON_PUBKEY_LEN,
+  storedIdentityLen: FALCON_PREPARED_PUBKEY_LEN,
   nextKeyLen: 0,
   nextKeyOptional: false,
 };
 
-/** Falcon-512 client identity: `sha256(wire_pubkey)` (32 bytes). */
+/** Falcon-512 identity: the wire public key. */
 export function falcon512Identity(wirePubkey: Uint8Array): Uint8Array {
   if (wirePubkey.length !== FALCON_PUBKEY_LEN) {
     throw new Error(
       `Falcon-512 wire pubkey must be ${FALCON_PUBKEY_LEN} bytes, got ${wirePubkey.length}`
     );
   }
-  return sha256(wirePubkey);
+  return wirePubkey;
 }
 
 /** Falcon-512 keypair: 1281-byte secret + 897-byte wire pubkey. */
@@ -79,7 +78,7 @@ export function falcon512PublicKey(secretKey: Uint8Array): Uint8Array {
 
 /**
  * Initialize a Falcon-512 vector account. The on-chain program hashes and
- * prepares the 897-byte wire pubkey; the client identity is its sha256.
+ * prepares the 897-byte wire pubkey, which is also the client identity.
  */
 export function createInitializeFalcon512(
   payer: Address,

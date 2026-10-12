@@ -10,7 +10,7 @@ use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use vector_core::{
-    advance_vector_digest_with_fee_payer, ed25519_pubkey, falcon512_identity, revocation_digest,
+    advance_vector_digest_with_fee_payer, ed25519_pubkey, revocation_digest,
     secp256k1_compressed_pubkey, secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
     sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
     sign_revocation_instruction_ed25519, verify_advance_signature_ed25519,
@@ -146,7 +146,7 @@ fn falcon512_round_trip() {
     let digest = advance_vector_digest_with_fee_payer(
         &FALCON512,
         &NONCE,
-        &falcon512_identity(&wire),
+        &wire,
         &pre,
         &post,
         None,
@@ -215,7 +215,7 @@ fn tampering_any_committed_byte_fails_verification() {
 /// `sdk/ts/test/verify.test.ts` pins the SAME constant — if either
 /// implementation drifts (hashing, sysvar serialization, flag promotion,
 /// index footer), its half of the pin breaks.
-const PINNED_DIGEST_HEX: &str = "87416dcb688293806e1334963743bb644582e234f7e2cc426b49ae3f7da256f3";
+const PINNED_DIGEST_HEX: &str = "8c8e6e1064304f4e7888cc65f52a4c17b28c6fdf996a1ea23bbbd8aaec2c857d";
 
 #[test]
 fn digest_matches_the_cross_language_pin() {
@@ -250,7 +250,7 @@ fn digest_matches_the_cross_language_pin() {
 /// `sdk/ts/test/verify.test.ts` pins the SAME constant — if either
 /// implementation drifts, its half of the pin breaks.
 const PINNED_REVOCATION_DIGEST_HEX: &str =
-    "750352ab886465b25b03cfc4c6c8b34e57c5671f00457ed790afda11084ef046";
+    "3f7291877735e12ec808503e2b4895876344b611f82b81c9a55c7695a42f3360";
 
 #[test]
 fn revocation_round_trip_and_cross_language_pin() {

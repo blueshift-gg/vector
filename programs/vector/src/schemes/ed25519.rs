@@ -1,57 +1,40 @@
-use crate::scheme::SigningScheme;
 use brine_ed25519::{hasher::FastSha512, verify};
 use pinocchio::error::ProgramError;
 use solana_address::{bytes_are_curve_point, Address};
 
-/// Ed25519. Identity is the 32-byte public key; signatures are 64-byte
-/// `(R, s)` verified directly over the 32-byte advance digest.
-pub struct Ed25519;
+use crate::scheme::SigningScheme;
 
-impl Ed25519 {
-    pub const ID: u8 = 1;
+/// Ed25519. A signature is the 64-byte `(R, s)`.
+#[repr(C)]
+pub struct Ed25519 {
+    public_key: [u8; 32],
 }
 
-impl SigningScheme for Ed25519 {
-    fn id(&self) -> u8 {
-        Self::ID
+unsafe impl SigningScheme for Ed25519 {
+    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
+        let public_key: &[u8; 32] = key
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        if !bytes_are_curve_point(public_key) {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        identity.copy_from_slice(public_key);
+        Ok(())
     }
 
     fn signature_len(&self) -> usize {
         64
     }
-    fn identity_len(&self) -> usize {
-        32
-    }
-    fn key_len(&self) -> usize {
-        32
-    }
 
-    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
-        let pubkey: &[u8; 32] = key
+    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+        let signature: &[u8; 64] = signature
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        if !bytes_are_curve_point(pubkey) {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        identity_out.copy_from_slice(pubkey);
-        Ok(())
-    }
-
-    fn advance(
-        &self,
-        identity: &[u8],
-        digest: &[u8; 32],
-        signature: &[u8],
-    ) -> Result<(), ProgramError> {
-        let sig: &[u8; 64] = signature
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let pubkey_bytes: &[u8; 32] = identity
-            .try_into()
-            .map_err(|_| ProgramError::InvalidAccountData)?;
-        // `solana_address::Address` is `#[repr(transparent)]` over `[u8; 32]`.
-        let pubkey: &Address = unsafe { &*(pubkey_bytes.as_ptr() as *const Address) };
-        verify::<FastSha512>(pubkey, sig, &[digest])
-            .map_err(|_| ProgramError::MissingRequiredSignature)
+        verify::<FastSha512>(
+            &Address::new_from_array(self.public_key),
+            signature,
+            &[digest],
+        )
+        .map_err(|_| ProgramError::MissingRequiredSignature)
     }
 }

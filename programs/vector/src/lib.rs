@@ -15,7 +15,6 @@ use solana_address::declare_id;
 pub mod instructions;
 pub use instructions::*;
 
-pub mod constants;
 pub mod scheme;
 pub mod schemes;
 pub mod state;

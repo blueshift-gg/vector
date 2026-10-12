@@ -11,7 +11,7 @@ use solana_winternitz::{
 use vector_core::{
     advance_vector_digest_with_fee_payer, create_advance_instruction,
     create_rotating_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
-    pda_seed_from_identity, Scheme, WINTERNITZ, XMSS,
+    Scheme, WINTERNITZ, XMSS,
 };
 
 use crate::common::{
@@ -35,16 +35,17 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let mut first = SigningKey::<K>::create(directory.path().join("first.key")).unwrap();
     let mut second = SigningKey::<K>::create(directory.path().join("second.key")).unwrap();
     let third = SigningKey::<K>::create(directory.path().join("third.key")).unwrap();
-    let identity = pda_seed_from_identity(first.verifying_key().as_bytes());
-    let (vector, bump) = find_vector_pda(scheme, &identity);
-    let stored = [identity.as_slice(), first.verifying_key().as_ref()].concat();
+    // The first key names the account for good.
+    let identity = first.verifying_key().as_bytes().to_vec();
+    let (vector, _) = find_vector_pda(scheme, &identity);
+    let stored = identity.clone();
     let mollusk = mollusk();
     let rent = mollusk.sysvars.rent.minimum_balance(scheme.account_len());
     let receiver = Address::new_unique();
     let accounts = vec![
         (
             vector,
-            build_vector_account(NONCE, scheme, bump, rent + 5_000_000, &stored),
+            build_vector_account(NONCE, scheme, &identity, rent + 5_000_000, &stored),
         ),
         (receiver, Account::new(1_000_000, 0, &Address::default())),
     ];
@@ -97,11 +98,11 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     );
     assert_eq!(result.program_result, TransactionProgramResult::Success);
     let rotated = result.resulting_accounts;
-    let stored_second = [identity.as_slice(), second.verifying_key().as_ref()].concat();
+    let stored_second = second.verifying_key().as_bytes().to_vec();
     let account = &rotated.iter().find(|(key, _)| *key == vector).unwrap().1;
     assert_eq!(
         account.data,
-        expected_advanced_data(digest, scheme, bump, &stored_second)
+        expected_advanced_data(digest, scheme, &identity, &stored_second)
     );
     assert_eq!(account.lamports, rent + 2_000_000);
     assert_eq!(
@@ -181,10 +182,10 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .find(|(key, _)| *key == vector)
         .unwrap()
         .1;
-    let stored_third = [identity.as_slice(), third.verifying_key().as_ref()].concat();
+    let stored_third = third.verifying_key().as_bytes().to_vec();
     assert_eq!(
         account.data,
-        expected_advanced_data(next_digest, scheme, bump, &stored_third)
+        expected_advanced_data(next_digest, scheme, &identity, &stored_third)
     );
     assert_eq!(account.lamports, rent + 1_000_000);
 
@@ -215,16 +216,16 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
     let directory = tempfile::tempdir().unwrap();
     let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
     let public_key = signer.verifying_key().to_bytes();
-    let identity = pda_seed_from_identity(&public_key);
-    let (vector, bump) = find_vector_pda(&XMSS, &identity);
-    let stored = [identity.as_slice(), public_key.as_slice()].concat();
+    let identity = public_key;
+    let (vector, _) = find_vector_pda(&XMSS, &identity);
+    let stored = public_key.to_vec();
     let mollusk = mollusk();
     let accounts = [(
         vector,
         build_vector_account(
             NONCE,
             &XMSS,
-            bump,
+            &identity,
             mollusk.sysvars.rent.minimum_balance(XMSS.account_len()),
             &stored,
         ),
@@ -256,7 +257,7 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
         if flag == 1 && key == public_key {
             assert_eq!(result.program_result, TransactionProgramResult::Success);
             let mut expected = accounts.clone();
-            expected[0].1.data = expected_advanced_data(digest, &XMSS, bump, &stored);
+            expected[0].1.data = expected_advanced_data(digest, &XMSS, &identity, &stored);
             assert_eq!(result.resulting_accounts, expected);
         } else {
             assert_eq!(

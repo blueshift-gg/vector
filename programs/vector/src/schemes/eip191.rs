@@ -1,67 +1,42 @@
-use crate::scheme::SigningScheme;
 use pinocchio::error::ProgramError;
 use solana_nostd_keccak::{hash, hashv};
 
-const ETH_ADDRESS_LEN: usize = 20;
+use crate::scheme::SigningScheme;
 
-/// secp256k1 ECDSA + EIP-191 ("Ethereum Signed Message") envelope. Identity
-/// is the 20-byte Ethereum address; signatures are 65 bytes `(r, s, v)`. The
-/// recovery id `v` is part of the signature, so it is outside the message
-/// the client signs.
-pub struct Secp256k1Eip191;
-
-impl Secp256k1Eip191 {
-    pub const ID: u8 = 2;
+/// secp256k1 ECDSA in an EIP-191 "Ethereum Signed Message" envelope, so any
+/// Ethereum wallet's `personal_sign` produces a signature. A signature is
+/// the 65-byte `(r, s, v)`; `v` is the recovery id, 0 or 1.
+#[repr(C)]
+pub struct Eip191 {
+    /// The Ethereum address: the last 20 bytes of the public key's keccak.
+    address: [u8; 20],
 }
 
-impl SigningScheme for Secp256k1Eip191 {
-    fn id(&self) -> u8 {
-        Self::ID
+unsafe impl SigningScheme for Eip191 {
+    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
+        let address: &[u8; 20] = key
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        if address == &[0; 20] {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        identity.copy_from_slice(address);
+        Ok(())
     }
 
     fn signature_len(&self) -> usize {
         65
     }
-    fn identity_len(&self) -> usize {
-        ETH_ADDRESS_LEN
-    }
-    fn key_len(&self) -> usize {
-        ETH_ADDRESS_LEN
-    }
 
-    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
-        let eth_addr: &[u8; ETH_ADDRESS_LEN] = key
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        if eth_addr == &[0u8; ETH_ADDRESS_LEN] {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        identity_out.copy_from_slice(eth_addr);
-        Ok(())
-    }
+    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+        let (rs, v) = signature
+            .split_first_chunk::<64>()
+            .filter(|(_, v)| v.len() == 1)
+            .ok_or(ProgramError::InvalidInstructionData)?;
 
-    fn advance(
-        &self,
-        identity: &[u8],
-        digest: &[u8; 32],
-        signature: &[u8],
-    ) -> Result<(), ProgramError> {
-        if signature.len() != self.signature_len() {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        if identity.len() != ETH_ADDRESS_LEN {
-            return Err(ProgramError::InvalidAccountData);
-        }
-        let rs: &[u8; 64] = signature[..64]
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let v = signature[64];
-        // EIP-191 personal message: keccak256("\x19Ethereum Signed
-        // Message:\n32" || digest).
-        let eth_digest = hashv(&[b"\x19Ethereum Signed Message:\n32", digest]);
-        let recovered = secp256k1_recover(&eth_digest, v as u64, rs)?;
-        let h = hash(&recovered);
-        if h[12..32] == *identity {
+        let signed = hashv(&[b"\x19Ethereum Signed Message:\n32", digest]);
+        let public_key = secp256k1_recover(&signed, v[0] as u64, rs)?;
+        if hash(&public_key)[12..] == self.address {
             Ok(())
         } else {
             Err(ProgramError::MissingRequiredSignature)

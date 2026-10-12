@@ -4,8 +4,6 @@ use pinocchio::{
     AccountView, ProgramResult,
 };
 
-use crate::state::VectorAccount;
-
 /// # Withdraw
 ///
 /// Send lamports from the account to the receiver, leaving enough for the
@@ -43,6 +41,9 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Withdraw<'a> {
         if !vector.is_signer() {
             return Err(ProgramError::MissingRequiredSignature);
         }
+        if !vector.owned_by(&crate::ID) {
+            return Err(ProgramError::InvalidAccountOwner);
+        }
         if vector.address() == receiver.address() {
             return Err(ProgramError::InvalidAccountData);
         }
@@ -64,8 +65,7 @@ impl<'a> Withdraw<'a> {
     pub const DISCRIMINATOR: &'a u8 = &3;
 
     pub fn process(&mut self) -> ProgramResult {
-        let scheme = VectorAccount::scheme(self.vector)?;
-        let rent = Rent::get()?.try_minimum_balance(VectorAccount::len(scheme))?;
+        let rent = Rent::get()?.try_minimum_balance(self.vector.data_len())?;
 
         let remaining = self
             .vector

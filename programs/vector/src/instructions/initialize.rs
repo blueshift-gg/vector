@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 
 use pinocchio::{
     account::MAX_PERMITTED_DATA_INCREASE,
-    cpi::Signer,
+    cpi::{Seed, Signer},
     error::ProgramError,
     sysvars::{rent::Rent, slot_hashes, Sysvar},
     AccountView, Address, ProgramResult,
@@ -10,13 +10,11 @@ use pinocchio::{
 use pinocchio_system::{
     create_program_account_with_minimum_balance_signed, instructions::Transfer,
 };
-use solana_nostd_sha256::hashv;
+use solana_nostd_sha256::{hash, hashv};
 
 use crate::{
-    constants::VECTOR_SEED,
-    scheme::{IdentitySeed, SigningScheme},
     schemes,
-    state::{signer_seeds, VectorAccount},
+    state::{VectorAccount, VECTOR_SEED},
 };
 
 /// # Initialize
@@ -24,8 +22,8 @@ use crate::{
 /// Create the vector account for a key. Anyone can, for any key: only the
 /// key's owner can use the account afterwards.
 ///
-/// The address is derived from the scheme and the key. The first nonce is
-/// derived from the key and the latest slot hash, so an account that is
+/// The address is derived from the scheme and the SHA-256 of the key. The
+/// first nonce is derived from that hash and the latest slot hash, so an account that is
 /// closed and created again in a later slot starts somewhere new.
 ///
 /// > Create the account at the address for this scheme and key
@@ -44,17 +42,18 @@ use crate::{
 /// Parameters:
 ///
 /// - scheme: u8
-/// - key: the public key or address, in the scheme's wire form
+/// - key: the public key or address, as the scheme takes it
 ///
 /// Account Checks:
 /// - Vector: at the address derived from the scheme and the key
+/// - Key: the scheme validates it as it writes the identity
 /// - Payer, SystemProgram: no need to check since the create CPI fails
 pub struct Initialize<'a> {
     payer: &'a AccountView,
     vector: &'a mut AccountView,
-    scheme: &'static dyn SigningScheme,
+    scheme: u8,
     key: &'a [u8],
-    identity_seed: IdentitySeed,
+    seed: [u8; 32],
     bump: u8,
 }
 
@@ -65,21 +64,14 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
         let [payer, vector, _system_program] = accounts else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
-
         let [scheme, key @ ..] = data else {
             return Err(ProgramError::InvalidInstructionData);
         };
-        let scheme = schemes::scheme(*scheme)?;
-        if key.len() != scheme.key_len() {
-            return Err(ProgramError::InvalidInstructionData);
-        }
 
         // Account Checks
-        let identity_seed = scheme.seed_from_key(key);
-        let (address, bump) = Address::find_program_address(
-            &[VECTOR_SEED, &[scheme.id()], identity_seed.as_slice()],
-            &crate::ID,
-        );
+        let seed = hash(key);
+        let (address, bump) =
+            Address::find_program_address(&[VECTOR_SEED, &[*scheme], &seed], &crate::ID);
         if vector.address() != &address {
             return Err(ProgramError::InvalidAccountData);
         }
@@ -87,9 +79,9 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
         Ok(Self {
             payer,
             vector,
-            scheme,
+            scheme: *scheme,
             key,
-            identity_seed,
+            seed,
             bump,
         })
     }
@@ -99,16 +91,21 @@ impl<'a> Initialize<'a> {
     pub const DISCRIMINATOR: &'a u8 = &0;
 
     pub fn process(&mut self) -> ProgramResult {
-        let (payer, vector, scheme) = (self.payer, &mut *self.vector, self.scheme);
-        let nonce = hashv(&[self.identity_seed.as_slice(), &latest_slot_hash()?]);
+        let (payer, vector) = (self.payer, &mut *self.vector);
+        let scheme = schemes::scheme(self.scheme)?;
 
         // Create the account. Anyone can send lamports to the address before
         // it exists, and a plain `CreateAccount` refuses an address that
         // holds any; this funds only the shortfall, and still fails on an
         // account that has data.
-        let full_len = VectorAccount::len(scheme);
-        let (scheme_seed, bump_seed) = ([scheme.id()], [self.bump]);
-        let seeds = signer_seeds(&scheme_seed, &self.identity_seed, &bump_seed);
+        let full_len = VectorAccount::HEADER_LEN + scheme.identity_len();
+        let (scheme_seed, bump_seed) = ([self.scheme], [self.bump]);
+        let seeds = [
+            Seed::from(VECTOR_SEED),
+            Seed::from(&scheme_seed),
+            Seed::from(&self.seed),
+            Seed::from(&bump_seed),
+        ];
         create_program_account_with_minimum_balance_signed(
             vector,
             full_len.min(MAX_PERMITTED_DATA_INCREASE),
@@ -134,8 +131,9 @@ impl<'a> Initialize<'a> {
         // Write the header, then as much of the identity as fits.
         let mut data = vector.try_borrow_mut()?;
         let (account, identity) = VectorAccount::split(&mut data)?;
-        account.nonce = nonce;
-        account.scheme = scheme.id();
+        account.nonce = hashv(&[&self.seed, &latest_slot_hash()?]);
+        account.seed = self.seed;
+        account.scheme = self.scheme;
         account.bump = self.bump;
         scheme.initialize(self.key, identity)
     }

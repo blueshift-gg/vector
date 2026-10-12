@@ -66,7 +66,7 @@ fn register_in_one_transaction() {
     let init_ix = create_initialize_mldsa44(&payer, &pk);
     let expand_ix = create_expand_mldsa44(&pk);
     assert_eq!(MLDSA44_EXPAND_STEPS, 2);
-    assert_eq!(MLDSA44.account_len(), 21_892);
+    assert_eq!(MLDSA44.account_len(), 21_924);
 
     let accounts = vec![
         (payer, payer_account),
@@ -82,8 +82,8 @@ fn register_in_one_transaction() {
     assert_eq!(foreign.resulting_accounts, accounts);
     let mut malformed = expand_ix.clone();
     malformed.data.push(0);
-    let mut header = vec![0; 34];
-    header[32] = MLDSA44.id;
+    let mut header = vec![0; 66];
+    header[64] = MLDSA44.id;
     let mut owned = Account::new(1_000_000_000, 0, &vector_core::PROGRAM_ID);
     owned.data = header;
     let rejected = mollusk.process_instruction(&malformed, &[(vector, owned)]);
@@ -110,8 +110,8 @@ fn register_in_one_transaction() {
     // header whose nonce the program derived on chain.
     let registered = accounts.iter().find(|(k, _)| *k == vector).unwrap().clone();
     let data = &registered.1.data;
-    assert_eq!(data[32..34], [MLDSA44.id, bump]);
-    assert_eq!(&data[34..], &stored_identity(&pk)[..]);
+    assert_eq!(data[64..66], [MLDSA44.id, bump]);
+    assert_eq!(&data[66..], &stored_identity(&pk)[..]);
 
     // A third expand is refused.
     let full = mollusk.process_instruction(&expand_ix, std::slice::from_ref(&registered));
@@ -137,12 +137,12 @@ fn advance_before_expand_fails() {
     let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = TRANSACTION_CU_LIMIT;
     let (pk, sk) = keypair();
-    let (vector, bump) = find_vector_pda(&MLDSA44, &pk);
+    let (vector, _) = find_vector_pda(&MLDSA44, &pk);
     let stored = stored_identity(&pk);
     let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[]);
     let advance_ix = create_advance_instruction(&MLDSA44, &pk, &sign(&digest, &sk));
     for length in [10_240, 20_480] {
-        let mut account = build_vector_account(NONCE, &MLDSA44, bump, 1, &stored);
+        let mut account = build_vector_account(NONCE, &MLDSA44, &pk, 1, &stored);
         account.data.truncate(length);
         let accounts = [(vector, account)];
         let result = mollusk.process_instruction(&advance_ix, &accounts);
@@ -162,11 +162,11 @@ fn advance_empty() {
     let (pk, sk) = keypair();
     let stored = stored_identity(&pk);
 
-    let (vector, bump) = find_vector_pda(&MLDSA44, &pk);
+    let (vector, _) = find_vector_pda(&MLDSA44, &pk);
     let vector_account = build_vector_account(
         NONCE,
         &MLDSA44,
-        bump,
+        &pk,
         mollusk.sysvars.rent.minimum_balance(MLDSA44.account_len()),
         &stored,
     );
@@ -178,7 +178,7 @@ fn advance_empty() {
         Ok(digest)
     );
     let advance_ix = create_advance_instruction(&MLDSA44, &pk, &signature);
-    let expected_vector_data = expected_advanced_data(digest, &MLDSA44, bump, &stored);
+    let expected_vector_data = expected_advanced_data(digest, &MLDSA44, &pk, &stored);
 
     let result = mollusk.process_and_validate_instruction_chain(
         &[(

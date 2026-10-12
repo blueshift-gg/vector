@@ -1,7 +1,6 @@
 //! DKKW25 one-time Winternitz. Sign through `solana_winternitz::winternitz::SigningKey`:
 //! each key permits one signing attempt, including failed salt sampling.
 
-use sha2::{Digest, Sha256};
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_winternitz::{winternitz, PUBLIC_KEY_LEN};
@@ -11,20 +10,16 @@ use crate::{instructions::create_initialize_instruction, scheme::Scheme};
 pub const WINTERNITZ_PUBKEY_LEN: usize = PUBLIC_KEY_LEN;
 pub const WINTERNITZ_SIGNATURE_LEN: usize = winternitz::SIGNATURE_LEN;
 
-/// The initial key hash is the permanent identity; the current key follows it.
+/// The first key is the permanent identity. The account stores the key that
+/// signs next, which changes as it rotates.
 pub const WINTERNITZ: Scheme = Scheme {
     id: 6,
     signature_len: WINTERNITZ_SIGNATURE_LEN,
-    identity_len: 32,
-    stored_identity_len: 32 + WINTERNITZ_PUBKEY_LEN,
+    identity_len: WINTERNITZ_PUBKEY_LEN,
+    stored_identity_len: WINTERNITZ_PUBKEY_LEN,
     next_key_len: WINTERNITZ_PUBKEY_LEN,
     next_key_optional: false,
 };
-
-/// Derive the permanent account identity. Do not recompute it on rotation.
-pub fn winternitz_identity(initial_public_key: &[u8; WINTERNITZ_PUBKEY_LEN]) -> [u8; 32] {
-    Sha256::digest(initial_public_key).into()
-}
 
 /// Initialize a stable account with its first signing key.
 pub fn create_initialize_winternitz(
@@ -34,7 +29,7 @@ pub fn create_initialize_winternitz(
     create_initialize_instruction(
         payer,
         &WINTERNITZ,
-        &winternitz_identity(public_key),
+        public_key,
         public_key,
     )
 }

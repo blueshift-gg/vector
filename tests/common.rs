@@ -15,8 +15,8 @@ use spl_token_interface::{
     state::{Account as TokenAccount, AccountState, Mint},
 };
 use vector_core::{
-    advance_vector_digest, create_passthrough_instruction, find_vector_pda, Scheme, VectorAccount,
-    PROGRAM_ID,
+    advance_vector_digest, create_passthrough_instruction, find_vector_pda, vector_seed, Scheme,
+    VectorAccount, PROGRAM_ID,
 };
 
 /// Initial nonce used for advance/close digests across the suite.
@@ -59,55 +59,45 @@ pub fn process_transaction(
     result
 }
 
-/// Build a fully-populated vector account. `stored_identity` is the on-chain
-/// identity blob (length `scheme.stored_identity_len`) appended after the
-/// 34-byte header.
+/// The account header for `identity` at `nonce`.
+fn header(nonce: [u8; 32], scheme: &Scheme, identity: &[u8]) -> [u8; VectorAccount::HEADER_LEN] {
+    VectorAccount {
+        nonce,
+        seed: vector_seed(identity),
+        scheme: scheme.id,
+        bump: find_vector_pda(scheme, identity).1,
+    }
+    .header_bytes()
+}
+
+/// Build a fully-populated vector account for `identity`. `stored_identity`
+/// is what the account holds after its header (`scheme.stored_identity_len`).
 pub fn build_vector_account(
     nonce: [u8; 32],
     scheme: &Scheme,
-    bump: u8,
+    identity: &[u8],
     lamports: u64,
     stored_identity: &[u8],
 ) -> Account {
     assert_eq!(stored_identity.len(), scheme.stored_identity_len);
-    let mut data = Vec::with_capacity(scheme.account_len());
-    data.extend_from_slice(
-        &VectorAccount {
-            nonce,
-            scheme: scheme.id,
-            bump,
-        }
-        .header_bytes(),
-    );
-    data.extend_from_slice(stored_identity);
     Account {
         lamports,
-        data,
+        data: expected_advanced_data(nonce, scheme, identity, stored_identity),
         owner: PROGRAM_ID,
         executable: false,
         rent_epoch: 0,
     }
 }
 
-/// Expected on-chain account data after a successful advance: the 34-byte
-/// header with `nonce = next_nonce` followed by the unchanged identity.
+/// Expected on-chain account data after a successful advance: the header
+/// with `nonce = next_nonce` followed by the unchanged identity.
 pub fn expected_advanced_data(
     next_nonce: [u8; 32],
     scheme: &Scheme,
-    bump: u8,
+    identity: &[u8],
     stored_identity: &[u8],
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(scheme.account_len());
-    out.extend_from_slice(
-        &VectorAccount {
-            nonce: next_nonce,
-            scheme: scheme.id,
-            bump,
-        }
-        .header_bytes(),
-    );
-    out.extend_from_slice(stored_identity);
-    out
+    [&header(next_nonce, scheme, identity), stored_identity].concat()
 }
 
 /// Drive the SPL mint-authority round-trip flow against any program.
@@ -139,11 +129,11 @@ pub fn run_round_trip_spl<F>(
         Account::new(10_000_000_000, 0, &Address::default()),
     );
 
-    let (vector, bump) = find_vector_pda(scheme, identity);
+    let (vector, _) = find_vector_pda(scheme, identity);
     let vector_account = build_vector_account(
         NONCE,
         scheme,
-        bump,
+        identity,
         mollusk.sysvars.rent.minimum_balance(scheme.account_len()),
         stored_identity,
     );
@@ -207,7 +197,8 @@ pub fn run_round_trip_spl<F>(
 
     let next_nonce = advance_vector_digest(scheme, &NONCE, identity, &[], &post_ixs);
 
-    let expected_vector_data = expected_advanced_data(next_nonce, scheme, bump, stored_identity);
+    let expected_vector_data =
+        expected_advanced_data(next_nonce, scheme, identity, stored_identity);
 
     let accounts = vec![
         (vector, vector_account),

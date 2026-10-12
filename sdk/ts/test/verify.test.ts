@@ -296,7 +296,7 @@ describe("eip191 recovery byte", () => {
  * index footer), its half of the pin breaks.
  */
 const PINNED_DIGEST_HEX =
-  "87416dcb688293806e1334963743bb644582e234f7e2cc426b49ae3f7da256f3";
+  "8c8e6e1064304f4e7888cc65f52a4c17b28c6fdf996a1ea23bbbd8aaec2c857d";
 
 describe("cross-language digest pin", () => {
   test("digest matches the constant pinned by the Rust suite", () => {
@@ -323,7 +323,7 @@ describe("cross-language digest pin", () => {
  * implementation drifts, its half of the pin breaks.
  */
 const PINNED_REVOCATION_DIGEST_HEX =
-  "750352ab886465b25b03cfc4c6c8b34e57c5671f00457ed790afda11084ef046";
+  "3f7291877735e12ec808503e2b4895876344b611f82b81c9a55c7695a42f3360";
 
 describe("revocation (inert advance)", () => {
   test("round trip + cross-language pin", () => {

@@ -24,18 +24,18 @@ pub const VECTOR_PDA_SEED: &[u8] = b"vector";
 /// [`crate::schemes`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scheme {
-    /// The scheme byte: the second header field of every account, a PDA
-    /// seed, and what `initialize` takes after its discriminator.
+    /// The scheme byte: a header field of every account, a PDA seed, and
+    /// what `initialize` takes after its discriminator.
     pub id: u8,
     /// Wire signature length carried in `advance` instruction data.
     pub signature_len: usize,
-    /// Length of the client-side identity — the value hashed into the
-    /// advance digest and used to derive the PDA. Winternitz/XMSS retain
-    /// `sha256(initial_pubkey)` across rotations; Falcon uses `sha256(wire)`.
+    /// Length of the identity: the key the account is created with, as
+    /// `initialize` takes it. It names the account for good, also after a
+    /// Winternitz or XMSS key rotates.
     pub identity_len: usize,
-    /// Bytes the on-chain account stores after the 34-byte header. Equals
-    /// `identity_len` for schemes that store the pubkey verbatim; larger for
-    /// schemes that store an expanded form (Falcon: 32 + 1024).
+    /// Bytes the on-chain account stores after its header: the key in the
+    /// form the scheme verifies against. Equals `identity_len` for schemes
+    /// that store the key as given; Falcon-512 and ML-DSA-44 prepare it.
     pub stored_identity_len: usize,
     /// Length of the key a `passthrough` carries for a scheme whose key
     /// rotates (Winternitz, XMSS): the key that signs next. Zero otherwise.
@@ -52,19 +52,21 @@ impl Scheme {
     }
 }
 
-/// Host-side mirror of the on-chain `VectorAccount` *header*:
-/// `nonce (32) || bump (1)` — 33 bytes. The scheme's identity bytes follow
-/// at offset [`HEADER_LEN`](Self::HEADER_LEN).
+/// Host-side mirror of the on-chain account header:
+/// `nonce (32) || seed (32) || scheme (1) || bump (1)`. The scheme's
+/// identity bytes follow at offset [`HEADER_LEN`](Self::HEADER_LEN).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VectorAccount {
     pub nonce: [u8; 32],
+    /// [`vector_seed`] of the identity.
+    pub seed: [u8; 32],
     pub scheme: u8,
     pub bump: u8,
 }
 
 impl VectorAccount {
-    pub const HEADER_LEN: usize = 34;
+    pub const HEADER_LEN: usize = 66;
 
     /// Total on-chain account length for an identity of `identity_len` bytes.
     pub const fn account_len(identity_len: usize) -> usize {
@@ -74,43 +76,33 @@ impl VectorAccount {
     pub fn header_bytes(&self) -> [u8; Self::HEADER_LEN] {
         let mut bytes = [0u8; Self::HEADER_LEN];
         bytes[..32].copy_from_slice(&self.nonce);
-        bytes[32] = self.scheme;
-        bytes[33] = self.bump;
+        bytes[32..64].copy_from_slice(&self.seed);
+        bytes[64] = self.scheme;
+        bytes[65] = self.bump;
         bytes
     }
 
     pub fn from_header_bytes(bytes: &[u8; Self::HEADER_LEN]) -> Self {
-        let mut nonce = [0u8; 32];
-        nonce.copy_from_slice(&bytes[..32]);
         VectorAccount {
-            nonce,
-            scheme: bytes[32],
-            bump: bytes[33],
+            nonce: bytes[..32].try_into().unwrap(),
+            seed: bytes[32..64].try_into().unwrap(),
+            scheme: bytes[64],
+            bump: bytes[65],
         }
     }
 }
 
-/// 32-byte PDA-seed input derived from a scheme's identity: identity bytes
-/// themselves when `identity.len() <= 32`, `sha256(identity)` otherwise.
-/// Off-chain mirror of `IdentitySeed::default_from` in the program.
-pub fn pda_seed_from_identity(identity: &[u8]) -> [u8; 32] {
-    if identity.len() <= 32 {
-        let mut out = [0u8; 32];
-        out[..identity.len()].copy_from_slice(identity);
-        out
-    } else {
-        Sha256::digest(identity).into()
-    }
+/// The PDA seed for an identity: its SHA-256, for every scheme.
+pub fn vector_seed(identity: &[u8]) -> [u8; 32] {
+    Sha256::digest(identity).into()
 }
 
 /// Derive the canonical `(vector_pda, bump)` for a scheme + identity.
-/// Seeds: `["vector", [scheme], identity_seed]`.
+/// Seeds: `["vector", [scheme], sha256(identity)]`.
 pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
     assert_eq!(identity.len(), scheme.identity_len, "identity length mismatch");
-    let seed_bytes = pda_seed_from_identity(identity);
-    let seed_len = identity.len().min(32);
     Address::find_program_address(
-        &[VECTOR_PDA_SEED, &[scheme.id], &seed_bytes[..seed_len]],
+        &[VECTOR_PDA_SEED, &[scheme.id], &vector_seed(identity)],
         &PROGRAM_ID,
     )
 }

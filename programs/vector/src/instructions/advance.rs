@@ -73,23 +73,19 @@ impl<'a> Advance<'a> {
 
         let mut signatures = self.signatures;
         for vector in self.vectors.iter_mut() {
-            let scheme = VectorAccount::scheme(vector)?;
+            let address = vector.address().to_bytes();
+            let mut data = VectorAccount::borrow(vector)?;
+            let (account, identity) = VectorAccount::load(&mut data)?;
+
             let (signature, rest) = signatures
-                .split_at_checked(scheme.signature_len())
+                .split_at_checked(identity.signature_len())
                 .ok_or(ProgramError::InvalidInstructionData)?;
             signatures = rest;
-
-            let address = vector.address().to_bytes();
-            let mut data = vector.try_borrow_mut()?;
-            let (account, identity) = VectorAccount::split(&mut data)?;
-            let identity = identity
-                .get(..scheme.identity_len())
-                .ok_or(ProgramError::AccountDataTooSmall)?;
 
             // The message is the same for every signer. The nonce and the
             // address make the digest this account's own.
             let digest = hashv(&[&message, &account.nonce, &address]);
-            scheme.advance(identity, &digest, signature)?;
+            identity.advance(&digest, signature)?;
             account.nonce = digest;
         }
 

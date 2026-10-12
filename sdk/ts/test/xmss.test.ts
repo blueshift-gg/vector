@@ -29,7 +29,6 @@ test("XMSS account and rotation digest match Rust", () => {
     expect(() => createInitializeXmss(receiver, new Uint8Array(length))).toThrow();
   }
 
-  expect(() => findVectorPda(XMSS, publicKey)).toThrow();
   const nextKey = new Uint8Array(41).fill(7);
   const passthrough = createRotatingPassthroughInstruction(XMSS, identity, nextKey, [
     createWithdrawSubinstruction(XMSS, identity, receiver, 1234n),

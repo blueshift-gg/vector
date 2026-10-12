@@ -46,11 +46,12 @@ impl<'a> Expand<'a> {
     pub const DISCRIMINATOR: &'a u8 = &5;
 
     pub fn process(&mut self) -> ProgramResult {
-        let scheme = VectorAccount::scheme(self.vector)?;
+        let scheme = VectorAccount::scheme(&VectorAccount::borrow(self.vector)?)?;
 
         let old_len = self.vector.data_len();
-        let new_len = VectorAccount::len(scheme).min(old_len + MAX_PERMITTED_DATA_INCREASE);
-        self.vector.resize(new_len)?;
+        let full_len = VectorAccount::HEADER_LEN + scheme.identity_len();
+        self.vector
+            .resize(full_len.min(old_len + MAX_PERMITTED_DATA_INCREASE))?;
 
         let mut data = self.vector.try_borrow_mut()?;
         let (_, identity) = VectorAccount::split(&mut data)?;

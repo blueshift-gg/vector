@@ -1,49 +1,44 @@
-use crate::scheme::SigningScheme;
 use pinocchio::error::ProgramError;
 use solana_winternitz::{winternitz, VerifyingKey, PUBLIC_KEY_LEN};
 
-/// DKKW25 Winternitz verification. The lookup wraps it in `Rotating`.
-pub struct Winternitz;
+use crate::scheme::SigningScheme;
 
-impl Winternitz {
-    pub const ID: u8 = 6;
+/// DKKW25 Winternitz. A key signs once, so every `Passthrough` replaces it.
+#[repr(C)]
+pub struct Winternitz {
+    /// The key that signs next.
+    public_key: [u8; PUBLIC_KEY_LEN],
 }
 
-impl SigningScheme for Winternitz {
-    fn id(&self) -> u8 {
-        Self::ID
+unsafe impl SigningScheme for Winternitz {
+    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
+        let public_key: &[u8; PUBLIC_KEY_LEN] = key
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        identity.copy_from_slice(public_key);
+        Ok(())
     }
 
     fn signature_len(&self) -> usize {
         winternitz::SIGNATURE_LEN
     }
-    fn identity_len(&self) -> usize {
-        PUBLIC_KEY_LEN
-    }
-    fn key_len(&self) -> usize {
-        PUBLIC_KEY_LEN
-    }
 
-    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
-        let public_key: &[u8; PUBLIC_KEY_LEN] = key
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        identity_out.copy_from_slice(public_key);
-        Ok(())
-    }
-
-    fn advance(
-        &self,
-        identity: &[u8],
-        digest: &[u8; 32],
-        signature: &[u8],
-    ) -> Result<(), ProgramError> {
-        let public_key =
-            VerifyingKey::ref_from_bytes(identity).map_err(|_| ProgramError::InvalidAccountData)?;
+    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         let signature = winternitz::Signature::ref_from_bytes(signature)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        public_key
+        VerifyingKey::ref_from_bytes(&self.public_key)
+            .map_err(|_| ProgramError::InvalidAccountData)?
             .verify(digest, signature)
             .map_err(|_| ProgramError::MissingRequiredSignature)
+    }
+
+    /// The data starts with the key that signs next. The owner signed the
+    /// whole transaction, this key included.
+    fn passthrough<'a>(&mut self, data: &'a [u8]) -> Result<&'a [u8], ProgramError> {
+        let (public_key, instructions) = data
+            .split_first_chunk()
+            .ok_or(ProgramError::InvalidInstructionData)?;
+        self.public_key = *public_key;
+        Ok(instructions)
     }
 }

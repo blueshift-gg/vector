@@ -1,74 +1,49 @@
-use crate::scheme::SigningScheme;
 use pinocchio::error::ProgramError;
 use solana_secp256k1::{CompressedPoint, Secp256k1Point};
 use solana_secp256k1_ecdsa::{hash::Secp256k1EcdsaHash, Secp256k1EcdsaSignature};
 
-const COMPRESSED_PUBKEY_LEN: usize = CompressedPoint::SIZE;
+use crate::scheme::SigningScheme;
 
-/// Plain secp256k1 ECDSA. Identity is the 33-byte sec1-compressed pubkey;
-/// signatures are 64 bytes `(r, s)` verified via standard ECDSA (no
-/// recovery).
-pub struct Secp256k1Ecdsa;
-
-impl Secp256k1Ecdsa {
-    pub const ID: u8 = 3;
+/// Plain secp256k1 ECDSA, with no recovery. A signature is the 64-byte
+/// `(r, s)`.
+#[repr(C)]
+pub struct Secp256k1 {
+    /// sec1-compressed: `0x02` or `0x03`, then the x coordinate.
+    public_key: [u8; CompressedPoint::SIZE],
 }
 
-impl SigningScheme for Secp256k1Ecdsa {
-    fn id(&self) -> u8 {
-        Self::ID
+unsafe impl SigningScheme for Secp256k1 {
+    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
+        let public_key: &[u8; CompressedPoint::SIZE] = key
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        if public_key[0] != 0x02 && public_key[0] != 0x03 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        identity.copy_from_slice(public_key);
+        Ok(())
     }
 
     fn signature_len(&self) -> usize {
         64
     }
-    fn identity_len(&self) -> usize {
-        COMPRESSED_PUBKEY_LEN
-    }
-    fn key_len(&self) -> usize {
-        COMPRESSED_PUBKEY_LEN
-    }
 
-    fn initialize(&self, key: &[u8], identity_out: &mut [u8]) -> Result<(), ProgramError> {
-        if key.len() != COMPRESSED_PUBKEY_LEN {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        // sec1 compressed pubkey: `0x02` (even y) or `0x03` (odd y) || x[32].
-        if key[0] != 0x02 && key[0] != 0x03 {
-            return Err(ProgramError::InvalidInstructionData);
-        }
-        identity_out.copy_from_slice(key);
-        Ok(())
-    }
-
-    fn advance(
-        &self,
-        identity: &[u8],
-        digest: &[u8; 32],
-        signature: &[u8],
-    ) -> Result<(), ProgramError> {
-        let sig_bytes: [u8; 64] = signature
+    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+        let signature: [u8; 64] = signature
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let pubkey_bytes: [u8; COMPRESSED_PUBKEY_LEN] = identity
-            .try_into()
-            .map_err(|_| ProgramError::InvalidAccountData)?;
-
-        let sig = Secp256k1EcdsaSignature(sig_bytes);
-        let pubkey = CompressedPoint(pubkey_bytes);
-        sig.verify::<PreHashedDigest, CompressedPoint>(digest, pubkey)
+        Secp256k1EcdsaSignature(signature)
+            .verify::<PreHashed, CompressedPoint>(digest, CompressedPoint(self.public_key))
             .map_err(|_| ProgramError::MissingRequiredSignature)
     }
 }
 
-/// Pass-through hasher: the message handed to `verify` is already the 32-byte
-/// SHA-256 digest the client signed, so no further hashing is needed.
-struct PreHashedDigest;
+/// The message handed to the verifier is already the digest to verify.
+struct PreHashed;
 
-impl Secp256k1EcdsaHash for PreHashedDigest {
+impl Secp256k1EcdsaHash for PreHashed {
     #[inline(always)]
     fn hash(message: &[u8]) -> [u8; 32] {
-        // Caller guarantees `message` is the 32-byte digest.
         message.try_into().expect("digest must be 32 bytes")
     }
 }

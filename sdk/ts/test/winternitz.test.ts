@@ -29,7 +29,6 @@ test("Winternitz account and rotation digest match Rust", () => {
     expect(() => createInitializeWinternitz(receiver, new Uint8Array(length))).toThrow();
   }
 
-  expect(() => findVectorPda(WINTERNITZ, publicKey)).toThrow();
   const nextKey = new Uint8Array(41).fill(7);
   const passthrough = createRotatingPassthroughInstruction(WINTERNITZ, identity, nextKey, [
     createCloseSubinstruction(WINTERNITZ, identity, receiver),

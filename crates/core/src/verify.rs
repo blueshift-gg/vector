@@ -32,7 +32,7 @@ use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest_with_fee_payer;
 use crate::schemes::eip191::{eip191_envelope_hash, EIP191, EIP191_ETH_ADDRESS_LEN};
-use crate::schemes::falcon512::{falcon512_identity, FALCON512, FALCON512_WIRE_PUBKEY_LEN};
+use crate::schemes::falcon512::{FALCON512, FALCON512_WIRE_PUBKEY_LEN};
 use crate::schemes::mldsa44::{MLDSA44, MLDSA44_PUBKEY_LEN, MLDSA44_SIGNATURE_LEN};
 use crate::schemes::{
     ed25519::{ED25519, ED25519_PUBKEY_LEN},
@@ -234,12 +234,11 @@ pub fn verify_advance_signature_falcon512(
     let sig_bytes: &[u8; crate::FALCON512_SIGNATURE_LEN] = signature.try_into().map_err(|_| {
         VerifyError::MalformedSignature("falcon512 signature must be 666 bytes (zero-padded wire)")
     })?;
-    let identity = falcon512_identity(wire_pubkey);
 
     let digest = advance_vector_digest_with_fee_payer(
         &FALCON512,
         nonce,
-        &identity,
+        wire_pubkey,
         pre_instructions,
         post_instructions,
         fee_payer,

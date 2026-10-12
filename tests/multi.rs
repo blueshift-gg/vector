@@ -44,10 +44,10 @@ impl World {
             (&ED25519, ed25519_pubkey(&alice).to_vec()),
             (&SECP256K1, secp256k1_compressed_pubkey(&bob).to_vec()),
         ] {
-            let (vector, bump) = find_vector_pda(scheme, &identity);
+            let (vector, _) = find_vector_pda(scheme, &identity);
             accounts.push((
                 vector,
-                build_vector_account(NONCE, scheme, bump, FUNDS, &identity),
+                build_vector_account(NONCE, scheme, &identity, FUNDS, &identity),
             ));
         }
         Self {
@@ -128,17 +128,17 @@ fn two_schemes_sign_one_advance() {
     let account = |key: &Address| &after.iter().find(|(k, _)| k == key).unwrap().1;
     let alice = ed25519_pubkey(&world.alice);
     let bob = secp256k1_compressed_pubkey(&world.bob);
-    let (alice_vector, alice_bump) = find_vector_pda(&ED25519, &alice);
-    let (bob_vector, bob_bump) = find_vector_pda(&SECP256K1, &bob);
+    let (alice_vector, _) = find_vector_pda(&ED25519, &alice);
+    let (bob_vector, _) = find_vector_pda(&SECP256K1, &bob);
     // Each account's next nonce is its own digest of the shared message.
     assert_ne!(alice_digest, bob_digest);
     assert_eq!(
         account(&alice_vector).data,
-        expected_advanced_data(alice_digest, &ED25519, alice_bump, &alice)
+        expected_advanced_data(alice_digest, &ED25519, &alice, &alice)
     );
     assert_eq!(
         account(&bob_vector).data,
-        expected_advanced_data(bob_digest, &SECP256K1, bob_bump, &bob)
+        expected_advanced_data(bob_digest, &SECP256K1, &bob, &bob)
     );
     assert_eq!(account(&alice_vector).lamports, FUNDS - 1_000_000_000);
     assert_eq!(account(&bob_vector).lamports, FUNDS - 2_000_000_000);

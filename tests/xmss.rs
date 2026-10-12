@@ -8,7 +8,7 @@ use solana_winternitz::xmss;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_initialize_xmss,
     create_rotating_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
-    xmss_identity, PROGRAM_ID, XMSS,
+    PROGRAM_ID, XMSS,
 };
 
 use crate::common::{
@@ -19,7 +19,7 @@ use crate::common::{
 fn initialize_checks_key_length_and_pda() {
     let mollusk = mollusk();
     let public_key = core::array::from_fn(|i| i as u8);
-    let identity = xmss_identity(&public_key);
+    let identity = public_key;
     let (system, system_account) = keyed_account_for_system_program();
     let payer = Address::new_unique();
     let (vector, bump) = find_vector_pda(&XMSS, &identity);
@@ -64,19 +64,28 @@ fn initialize_checks_key_length_and_pda() {
         .unwrap()
         .1
         .data;
-    assert_eq!(stored[32..34], [XMSS.id, bump]);
-    assert_eq!(&stored[34..66], &identity);
+    assert_eq!(&stored[32..64], &vector_core::vector_seed(&identity));
+    assert_eq!(stored[64..66], [XMSS.id, bump]);
     assert_eq!(&stored[66..], &public_key);
 
+    // A key of another length has another address, and the scheme refuses it.
     for length in [40, 42] {
+        let key = vec![0; length];
+        let (address, _) = Address::find_program_address(
+            &[b"vector", &[XMSS.id], &vector_core::vector_seed(&key)],
+            &PROGRAM_ID,
+        );
         let mut malformed = initialize.clone();
-        malformed.data.resize(2 + length, 0);
+        malformed.accounts[1].pubkey = address;
+        malformed.data.splice(2.., key);
+        let mut accounts = accounts.to_vec();
+        accounts[1].0 = address;
         mollusk.process_and_validate_instruction(
             &malformed,
             &accounts,
             &[
                 Check::err(ProgramError::InvalidInstructionData),
-                Check::account(&vector).space(0).build(),
+                Check::account(&address).space(0).build(),
             ],
         );
     }
@@ -97,21 +106,21 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
     let directory = tempfile::tempdir().unwrap();
     let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
     let public_key = signer.verifying_key().to_bytes();
-    let identity = xmss_identity(&public_key);
-    let stored = [identity.as_slice(), public_key.as_slice()].concat();
+    let identity = public_key;
+    let stored = public_key.to_vec();
     let mollusk = mollusk();
-    let (vector, bump) = find_vector_pda(&XMSS, &identity);
+    let (vector, _) = find_vector_pda(&XMSS, &identity);
     let account = build_vector_account(
         NONCE,
         &XMSS,
-        bump,
+        &identity,
         mollusk.sysvars.rent.minimum_balance(XMSS.account_len()),
         &stored,
     );
     let digest = advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[]);
     let signature = signer.sign(&digest).unwrap();
     let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
-    let expected = expected_advanced_data(digest, &XMSS, bump, &stored);
+    let expected = expected_advanced_data(digest, &XMSS, &identity, &stored);
     let result = mollusk.process_and_validate_instruction_chain(
         &[(
             &advance,
@@ -188,15 +197,15 @@ fn advance_binds_and_authorizes_withdrawal() {
     let directory = tempfile::tempdir().unwrap();
     let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
     let public_key = signer.verifying_key().to_bytes();
-    let identity = xmss_identity(&public_key);
-    let stored = [identity.as_slice(), public_key.as_slice()].concat();
+    let identity = public_key;
+    let stored = public_key.to_vec();
     // Abandoned authorizations spend leaves even when no transaction lands.
     signer.sign(&[0; 32]).unwrap();
 
     let mollusk = mollusk();
-    let (vector, bump) = find_vector_pda(&XMSS, &identity);
+    let (vector, _) = find_vector_pda(&XMSS, &identity);
     let rent = mollusk.sysvars.rent.minimum_balance(XMSS.account_len());
-    let account = build_vector_account(NONCE, &XMSS, bump, rent + 5_000_000, &stored);
+    let account = build_vector_account(NONCE, &XMSS, &identity, rent + 5_000_000, &stored);
     let receiver = Address::new_unique();
     let accounts = [
         (vector, account.clone()),
@@ -229,7 +238,7 @@ fn advance_binds_and_authorizes_withdrawal() {
         ],
     );
 
-    let expected = expected_advanced_data(digest, &XMSS, bump, &stored);
+    let expected = expected_advanced_data(digest, &XMSS, &identity, &stored);
     process_transaction(
         &mollusk,
         &[&advance, &passthrough],

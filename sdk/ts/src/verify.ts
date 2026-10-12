@@ -23,7 +23,7 @@ import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
 
-import { Scheme, sha256, FALCON_PUBKEY_LEN, MLDSA44_PUBKEY_LEN } from "./scheme.js";
+import { Scheme, FALCON_PUBKEY_LEN, MLDSA44_PUBKEY_LEN } from "./scheme.js";
 import { advanceVectorDigest } from "./digest.js";
 import { ED25519 } from "./schemes/ed25519.js";
 import { EIP191, eip191EnvelopeHash } from "./schemes/eip191.js";
@@ -261,7 +261,7 @@ export function verifyAdvanceSignatureEip191(
 
 /**
  * Verify a Falcon-512 `advance` signature offline, given the 897-byte wire
- * pubkey (the identity, `sha256(wire_pubkey)`, is derived from it).
+ * pubkey, which is the identity.
  * `signature` is the 666-byte zero-padded wire form; the padding is
  * stripped before handing the compressed stream to the noble verifier.
  * Returns the recomputed digest on success.
@@ -279,7 +279,7 @@ export function verifyAdvanceSignatureFalcon512(
     signature, FALCON512.signatureLen
   );
   return checkedDigest(
-    "falcon512", FALCON512, sha256(wirePubkey), nonce, preInstructions,
+    "falcon512", FALCON512, wirePubkey, nonce, preInstructions,
     postInstructions, feePayer,
     (digest) => nobleFalcon.verify(trimFalconSignature(signature), digest, wirePubkey)
   );

@@ -14,8 +14,7 @@ use solana_falcon512::Falcon512Pubkey;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
     create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
-    falcon512_identity, find_vector_pda, FALCON512, FALCON512_SIGNATURE_LEN,
-    FALCON512_WIRE_PUBKEY_LEN, PROGRAM_ID,
+    find_vector_pda, FALCON512, FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN, PROGRAM_ID,
 };
 
 use crate::common::{
@@ -42,14 +41,11 @@ fn wire_pubkey(pk: &falcon512::PublicKey) -> [u8; FALCON512_WIRE_PUBKEY_LEN] {
     out
 }
 
-/// On-chain stored identity: `sha256(wire)[32] || prepared_pubkey[1024]`
-/// (mirrors `populate_identity`).
+/// What the account stores: the prepared public key.
 fn stored_identity(wire: &[u8; FALCON512_WIRE_PUBKEY_LEN]) -> Vec<u8> {
     let pk = Falcon512Pubkey::try_from_slice(wire).expect("valid wire pubkey");
     let prepared = pk.try_prepare_pubkey().expect("preparable pubkey");
-    let mut out = falcon512_identity(wire).to_vec();
-    out.extend_from_slice(prepared.as_bytes());
-    out
+    prepared.as_bytes().to_vec()
 }
 
 #[test]
@@ -58,7 +54,7 @@ fn initialize() {
 
     let (pk, _sk) = falcon512::keypair();
     let wire = wire_pubkey(&pk);
-    let identity = falcon512_identity(&wire);
+    let identity = wire;
 
     let (system_program, system_program_account) = keyed_account_for_system_program();
     let (payer, payer_account) = (
@@ -100,14 +96,14 @@ fn advance_empty() {
 
     let (pk, sk) = falcon512::keypair();
     let wire = wire_pubkey(&pk);
-    let identity = falcon512_identity(&wire);
+    let identity = wire;
     let stored = stored_identity(&wire);
 
-    let (vector, bump) = find_vector_pda(&FALCON512, &identity);
+    let (vector, _) = find_vector_pda(&FALCON512, &identity);
     let vector_account = build_vector_account(
         NONCE,
         &FALCON512,
-        bump,
+        &identity,
         mollusk
             .sysvars
             .rent
@@ -119,7 +115,7 @@ fn advance_empty() {
     let signature = sign(&digest, &sk);
     let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature);
 
-    let expected_vector_data = expected_advanced_data(digest, &FALCON512, bump, &stored);
+    let expected_vector_data = expected_advanced_data(digest, &FALCON512, &identity, &stored);
 
     let accounts = vec![(vector, vector_account)];
 
@@ -140,7 +136,7 @@ fn advance_empty() {
 fn advance_round_trips_spl_mint_authority() {
     let (pk, sk) = falcon512::keypair();
     let wire = wire_pubkey(&pk);
-    let identity = falcon512_identity(&wire);
+    let identity = wire;
     let stored = stored_identity(&wire);
     run_round_trip_spl(&FALCON512, &identity, &stored, |nonce, pre, post| {
         let digest = advance_vector_digest(&FALCON512, nonce, &identity, pre, post);
@@ -156,15 +152,16 @@ fn close_via_advance() {
 
     let (pk, sk) = falcon512::keypair();
     let wire = wire_pubkey(&pk);
-    let identity = falcon512_identity(&wire);
+    let identity = wire;
     let stored = stored_identity(&wire);
 
     let vector_lamports = mollusk
         .sysvars
         .rent
         .minimum_balance(FALCON512.account_len());
-    let (vector, bump) = find_vector_pda(&FALCON512, &identity);
-    let vector_account = build_vector_account(NONCE, &FALCON512, bump, vector_lamports, &stored);
+    let (vector, _) = find_vector_pda(&FALCON512, &identity);
+    let vector_account =
+        build_vector_account(NONCE, &FALCON512, &identity, vector_lamports, &stored);
 
     let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (
@@ -207,7 +204,7 @@ fn withdraw_via_advance() {
 
     let (pk, sk) = falcon512::keypair();
     let wire = wire_pubkey(&pk);
-    let identity = falcon512_identity(&wire);
+    let identity = wire;
     let stored = stored_identity(&wire);
 
     let rent_min = mollusk
@@ -217,9 +214,14 @@ fn withdraw_via_advance() {
     let starting_vector_lamports = rent_min + 5_000_000;
     let withdraw_amount = 3_000_000u64;
 
-    let (vector, bump) = find_vector_pda(&FALCON512, &identity);
-    let vector_account =
-        build_vector_account(NONCE, &FALCON512, bump, starting_vector_lamports, &stored);
+    let (vector, _) = find_vector_pda(&FALCON512, &identity);
+    let vector_account = build_vector_account(
+        NONCE,
+        &FALCON512,
+        &identity,
+        starting_vector_lamports,
+        &stored,
+    );
 
     let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (
