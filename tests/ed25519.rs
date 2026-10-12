@@ -78,7 +78,7 @@ fn advance_empty() {
 
     let advance_ix = sign_advance_instruction_ed25519(&key, &NONCE, &[], &[], None);
 
-    let next_nonce = advance_vector_digest(&ED25519, &NONCE, &pubkey, &[], &[]);
+    let next_nonce = advance_vector_digest(&ED25519, &NONCE, &pubkey, &[], &[], None);
     let expected_vector_data = expected_advanced_data(next_nonce, &ED25519, &pubkey, &pubkey);
 
     let accounts = vec![(vector, vector_account)];

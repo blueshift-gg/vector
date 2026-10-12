@@ -1,12 +1,7 @@
-//! Check an `advance` signature offline, the way the program will. Each
-//! function returns the digest, which is the account's next nonce.
+//! Check an `advance` signature offline, the way the program will.
 //!
 //! Ed25519 is checked with `ed25519-dalek` here and `brine-ed25519` on chain.
 //! The two can only disagree on deliberately malformed signatures.
-//!
-//! Pass `fee_payer` when it is also an account of one of the instructions:
-//! the runtime then marks it a writable signer there, and the digest covers
-//! that flag.
 
 use ed25519_dalek::Verifier as _;
 use k256::ecdsa::signature::hazmat::PrehashVerifier as _;
@@ -18,21 +13,18 @@ use solana_address::Address;
 use solana_falcon512::{Falcon512Pubkey, Falcon512Signature};
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest_with_fee_payer;
-use crate::schemes::eip191::{eip191_envelope_hash, EIP191, EIP191_ETH_ADDRESS_LEN};
-use crate::schemes::falcon512::{FALCON512, FALCON512_WIRE_PUBKEY_LEN};
-use crate::schemes::mldsa44::{MLDSA44, MLDSA44_PUBKEY_LEN, MLDSA44_SIGNATURE_LEN};
+use crate::digest::advance_vector_digest;
+use crate::scheme::Scheme;
 use crate::schemes::{
-    ed25519::{ED25519, ED25519_PUBKEY_LEN},
-    secp256k1::{SECP256K1, SECP256K1_COMPRESSED_PUBKEY_LEN},
+    ed25519::ED25519,
+    eip191::{eip191_envelope_hash, EIP191},
+    falcon512::FALCON512,
+    mldsa44::MLDSA44,
+    secp256k1::SECP256K1,
 };
 
-/// Why an offline `advance` verification failed. The crate otherwise
-/// carries no error types, so this stays deliberately small; the two
-/// parse-stage variants carry a static reason so the `Display` output is
-/// self-explaining at call sites.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Why an offline check failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerifyError {
     /// The signature bytes are unusable: wrong length, or out of range.
     MalformedSignature(&'static str),
@@ -58,89 +50,82 @@ impl core::fmt::Display for VerifyError {
 
 impl std::error::Error for VerifyError {}
 
-/// Verify an Ed25519 advance signature. `pubkey` is the identity.
-pub fn verify_advance_signature_ed25519(
-    pubkey: &[u8; ED25519_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; 64] = signature
-        .try_into()
-        .map_err(|_| VerifyError::MalformedSignature("ed25519 signature must be 64 bytes"))?;
-    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(pubkey)
-        .map_err(|_| VerifyError::IdentityMismatch("identity is not a valid ed25519 public key"))?;
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &ED25519,
-        nonce,
-        pubkey,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    verifying_key
-        .verify(&digest, &ed25519_dalek::Signature::from_bytes(sig_bytes))
-        .map_err(|_| VerifyError::SignatureInvalid)?;
-    Ok(digest)
-}
-
-/// Verify a plain secp256k1 advance signature. A high-S signature is
-/// accepted, as it is on chain.
-pub fn verify_advance_signature_secp256k1_ecdsa(
-    compressed_pubkey: &[u8; SECP256K1_COMPRESSED_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let verifying_key =
-        Secp256k1VerifyingKey::from_sec1_bytes(compressed_pubkey).map_err(|_| {
-            VerifyError::IdentityMismatch(
-                "identity is not a valid sec1-compressed secp256k1 pubkey",
-            )
-        })?;
-    let sig = Secp256k1Signature::from_slice(signature).map_err(|_| {
-        VerifyError::MalformedSignature("secp256k1 signature must be 64 bytes of valid r || s")
-    })?;
-    let sig = sig.normalize_s().unwrap_or(sig);
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &SECP256K1,
-        nonce,
-        compressed_pubkey,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    verifying_key
-        .verify_prehash(&digest, &sig)
-        .map_err(|_| VerifyError::SignatureInvalid)?;
-    Ok(digest)
-}
-
-/// Verify an EIP-191 advance signature against an Ethereum address. A high-S
-/// signature is accepted, as it is on chain.
+/// Verify an advance signature: recompute the digest and check `signature`
+/// over it with the scheme's verifier. Returns the digest, which is the
+/// account's next nonce.
 ///
-/// `v` is the raw recovery id, 0 or 1. The program rejects Ethereum's 27/28
-/// form, so this does too: subtract 27 when assembling the signature.
-pub fn verify_advance_signature_secp256k1_eip191(
-    eth_address: &[u8; EIP191_ETH_ADDRESS_LEN],
+/// `fee_payer` is as in [`advance_vector_digest`]. Winternitz and XMSS have
+/// no offline verifier.
+pub fn verify_advance_signature(
+    scheme: &Scheme,
+    identity: &[u8],
     nonce: &[u8; 32],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
     fee_payer: Option<&Address>,
     signature: &[u8],
 ) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; 65] = signature.try_into().map_err(|_| {
-        VerifyError::MalformedSignature("eip191 signature must be 65 bytes (r || s || v)")
+    if identity.len() != scheme.identity_len {
+        return Err(VerifyError::IdentityMismatch(
+            "identity has the wrong length for its scheme",
+        ));
+    }
+    if signature.len() != scheme.signature_len {
+        return Err(VerifyError::MalformedSignature(
+            "signature has the wrong length for its scheme",
+        ));
+    }
+
+    let digest = advance_vector_digest(
+        scheme,
+        nonce,
+        identity,
+        pre_instructions,
+        post_instructions,
+        fee_payer,
+    );
+    match scheme.id {
+        id if id == ED25519.id => ed25519(identity, &digest, signature),
+        id if id == EIP191.id => eip191(identity, &digest, signature),
+        id if id == SECP256K1.id => secp256k1(identity, &digest, signature),
+        id if id == FALCON512.id => falcon512(identity, &digest, signature),
+        id if id == MLDSA44.id => mldsa44(identity, &digest, signature),
+        _ => Err(VerifyError::IdentityMismatch(
+            "this scheme has no offline verifier",
+        )),
+    }?;
+    Ok(digest)
+}
+
+// One check per scheme. `verify_advance_signature` has already checked the
+// lengths of `identity` and `signature`.
+
+fn ed25519(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), VerifyError> {
+    let key = ed25519_dalek::VerifyingKey::from_bytes(identity.try_into().unwrap())
+        .map_err(|_| VerifyError::IdentityMismatch("identity is not a valid ed25519 public key"))?;
+    let signature = ed25519_dalek::Signature::from_bytes(signature.try_into().unwrap());
+    key.verify(digest, &signature)
+        .map_err(|_| VerifyError::SignatureInvalid)
+}
+
+/// A high-S signature is accepted, as it is on chain.
+fn secp256k1(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), VerifyError> {
+    let key = Secp256k1VerifyingKey::from_sec1_bytes(identity).map_err(|_| {
+        VerifyError::IdentityMismatch("identity is not a valid sec1-compressed secp256k1 pubkey")
     })?;
-    let v = sig_bytes[64];
+    let signature = Secp256k1Signature::from_slice(signature).map_err(|_| {
+        VerifyError::MalformedSignature("secp256k1 signature is not a valid r || s")
+    })?;
+    let signature = signature.normalize_s().unwrap_or(signature);
+    key.verify_prehash(digest, &signature)
+        .map_err(|_| VerifyError::SignatureInvalid)
+}
+
+/// A high-S signature is accepted, as it is on chain. `v` is the raw
+/// recovery id, 0 or 1: the program rejects Ethereum's 27/28 form, so this
+/// does too.
+fn eip191(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), VerifyError> {
+    let v = signature[64];
     if v == 27 || v == 28 {
         return Err(VerifyError::MalformedSignature(
             "eip191 recovery byte is in the Ethereum legacy 27/28 form; the on-chain program \
@@ -150,7 +135,7 @@ pub fn verify_advance_signature_secp256k1_eip191(
     let mut recovery_id = RecoveryId::from_byte(v).ok_or(VerifyError::MalformedSignature(
         "eip191 recovery byte must be 0..=3",
     ))?;
-    let mut sig = Secp256k1Signature::from_slice(&sig_bytes[..64]).map_err(|_| {
+    let mut sig = Secp256k1Signature::from_slice(&signature[..64]).map_err(|_| {
         VerifyError::MalformedSignature("eip191 signature r || s bytes are not a valid signature")
     })?;
     // Normalizing s negates the signature point, so the recovery id's
@@ -161,87 +146,37 @@ pub fn verify_advance_signature_secp256k1_eip191(
             .expect("flipping the parity bit keeps the id in 0..=3");
     }
 
-    let digest = advance_vector_digest_with_fee_payer(
-        &EIP191,
-        nonce,
-        eth_address,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-    let envelope = eip191_envelope_hash(&digest);
-
+    let envelope = eip191_envelope_hash(digest);
     let recovered = Secp256k1VerifyingKey::recover_from_prehash(&envelope, &sig, recovery_id)
         .map_err(|_| VerifyError::SignatureInvalid)?;
     let uncompressed = recovered.to_encoded_point(false);
     let hash: [u8; 32] = Keccak256::digest(&uncompressed.as_bytes()[1..]).into();
-    if hash[12..32] != *eth_address {
+    if hash[12..32] != *identity {
         return Err(VerifyError::IdentityMismatch(
             "recovered Ethereum address does not match the identity",
         ));
     }
-    Ok(digest)
+    Ok(())
 }
 
-/// Verify a Falcon-512 advance signature with the verifier the program uses.
-/// `signature` is the 666-byte zero-padded form.
-pub fn verify_advance_signature_falcon512(
-    wire_pubkey: &[u8; FALCON512_WIRE_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; crate::FALCON512_SIGNATURE_LEN] = signature.try_into().map_err(|_| {
-        VerifyError::MalformedSignature("falcon512 signature must be 666 bytes (zero-padded wire)")
-    })?;
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &FALCON512,
-        nonce,
-        wire_pubkey,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    if Falcon512Signature::from_ref(sig_bytes)
-        .verify(&digest, Falcon512Pubkey::from_ref(wire_pubkey))
-    {
-        Ok(digest)
+/// The verifier the program uses. `signature` is the 666-byte zero-padded
+/// form.
+fn falcon512(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), VerifyError> {
+    let signature = Falcon512Signature::from_ref(signature.try_into().unwrap());
+    if signature.verify(
+        digest,
+        Falcon512Pubkey::from_ref(identity.try_into().unwrap()),
+    ) {
+        Ok(())
     } else {
         Err(VerifyError::SignatureInvalid)
     }
 }
 
-/// Verify an ML-DSA-44 advance signature with the verifier the program uses,
-/// with an empty context.
-pub fn verify_advance_signature_mldsa44(
-    public_key: &[u8; MLDSA44_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; MLDSA44_SIGNATURE_LEN] = signature
-        .try_into()
-        .map_err(|_| VerifyError::MalformedSignature("ml-dsa-44 signature must be 2420 bytes"))?;
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &MLDSA44,
-        nonce,
-        public_key,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
+/// The verifier the program uses, with an empty context.
+fn mldsa44(identity: &[u8], digest: &[u8; 32], signature: &[u8]) -> Result<(), VerifyError> {
     use solana_ml_dsa::ml_dsa_44::{Signature, VerifyingKey};
-    let key = VerifyingKey::<false>::from_bytes(public_key);
-    match key.verify(&digest, Signature::ref_from_bytes(sig_bytes).unwrap()) {
-        Ok(()) => Ok(digest),
-        Err(_) => Err(VerifyError::SignatureInvalid),
-    }
+    let key = VerifyingKey::<false>::from_bytes(identity.try_into().unwrap());
+    key.verify(digest, Signature::ref_from_bytes(signature).unwrap())
+        .map_err(|_| VerifyError::SignatureInvalid)
 }

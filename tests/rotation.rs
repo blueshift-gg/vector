@@ -9,9 +9,8 @@ use solana_winternitz::{
     xmss, SigningKey,
 };
 use vector_core::{
-    advance_vector_digest_with_fee_payer, create_advance_instruction,
-    create_rotating_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
-    Scheme, WINTERNITZ, XMSS,
+    advance_vector_digest, create_advance_instruction, create_rotating_passthrough_instruction,
+    create_withdraw_subinstruction, find_vector_pda, Scheme, WINTERNITZ, XMSS,
 };
 
 use crate::common::{
@@ -57,7 +56,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         Some(second.verifying_key().as_bytes()),
         std::slice::from_ref(&withdraw),
     );
-    let digest = advance_vector_digest_with_fee_payer(
+    let digest = advance_vector_digest(
         scheme,
         &NONCE,
         &identity,
@@ -136,7 +135,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         Some(third.verifying_key().as_bytes()),
         &[withdraw],
     );
-    let next_digest = advance_vector_digest_with_fee_payer(
+    let next_digest = advance_vector_digest(
         scheme,
         &digest,
         &identity,
@@ -243,7 +242,7 @@ fn rotate_validates_payload_without_enforcing_key_freshness() {
             .data
             .splice(2..2 + public_key.len(), key.iter().copied());
         passthrough.data[1] = flag;
-        let digest = advance_vector_digest_with_fee_payer(
+        let digest = advance_vector_digest(
             &XMSS,
             &NONCE,
             &identity,

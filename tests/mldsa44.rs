@@ -17,8 +17,8 @@ use solana_program_error::ProgramError;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_expand_mldsa44,
     create_initialize_mldsa44, create_passthrough_instruction, create_withdraw_subinstruction,
-    find_vector_pda, verify_advance_signature_mldsa44, MLDSA44, MLDSA44_EXPAND_STEPS,
-    MLDSA44_PUBKEY_LEN, MLDSA44_SIGNATURE_LEN,
+    find_vector_pda, verify_advance_signature, MLDSA44, MLDSA44_EXPAND_STEPS, MLDSA44_PUBKEY_LEN,
+    MLDSA44_SIGNATURE_LEN,
 };
 
 use crate::common::{
@@ -123,7 +123,7 @@ fn register_in_one_transaction() {
     // Registration is complete: an advance signed with the key verifies.
     let mut nonce = [0u8; 32];
     nonce.copy_from_slice(&data[..32]);
-    let digest = advance_vector_digest(&MLDSA44, &nonce, &pk, &[], &[]);
+    let digest = advance_vector_digest(&MLDSA44, &nonce, &pk, &[], &[], None);
     let advance_ix = create_advance_instruction(&MLDSA44, &pk, &sign(&digest, &sk));
     let advanced = mollusk.process_and_validate_instruction_chain(
         &[(&advance_ix, &[Check::success()])],
@@ -139,7 +139,7 @@ fn advance_before_expand_fails() {
     let (pk, sk) = keypair();
     let (vector, _) = find_vector_pda(&MLDSA44, &pk);
     let stored = stored_identity(&pk);
-    let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[]);
+    let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[], None);
     let advance_ix = create_advance_instruction(&MLDSA44, &pk, &sign(&digest, &sk));
     for length in [10_240, 20_480] {
         let mut account = build_vector_account(NONCE, &MLDSA44, &pk, 1, &stored);
@@ -171,10 +171,10 @@ fn advance_empty() {
         &stored,
     );
 
-    let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[]);
+    let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[], None);
     let signature = sign(&digest, &sk);
     assert_eq!(
-        verify_advance_signature_mldsa44(&pk, &NONCE, &[], &[], None, &signature),
+        verify_advance_signature(&MLDSA44, &pk, &NONCE, &[], &[], None, &signature),
         Ok(digest)
     );
     let advance_ix = create_advance_instruction(&MLDSA44, &pk, &signature);
@@ -205,7 +205,7 @@ fn advance_empty() {
     tampered[100] ^= 1;
     for invalid in [tampered, wrong_context] {
         assert_eq!(
-            verify_advance_signature_mldsa44(&pk, &NONCE, &[], &[], None, &invalid),
+            verify_advance_signature(&MLDSA44, &pk, &NONCE, &[], &[], None, &invalid),
             Err(vector_core::VerifyError::SignatureInvalid)
         );
         let bad_ix = create_advance_instruction(&MLDSA44, &pk, &invalid);
@@ -234,7 +234,7 @@ fn client_encoding_matches_typescript() {
             &MLDSA44, &pk, &receiver, 1234,
         )],
     );
-    let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[post]);
+    let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[post], None);
     assert_eq!(
         digest,
         [
@@ -249,7 +249,7 @@ fn advance_round_trips_spl_mint_authority() {
     let (pk, sk) = keypair();
     let stored = stored_identity(&pk);
     run_round_trip_spl(&MLDSA44, &pk, &stored, |nonce, pre, post| {
-        let digest = advance_vector_digest(&MLDSA44, nonce, &pk, pre, post);
+        let digest = advance_vector_digest(&MLDSA44, nonce, &pk, pre, post, None);
         create_advance_instruction(&MLDSA44, &pk, &sign(&digest, &sk))
     });
 }

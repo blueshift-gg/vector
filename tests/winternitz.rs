@@ -32,7 +32,7 @@ fn initialize_and_client_encoding() {
     let passthrough =
         create_rotating_passthrough_instruction(&WINTERNITZ, &identity, Some(&[7; 41]), &[close]);
     assert_eq!(
-        advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough]),
+        advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough], None),
         [
             210, 109, 131, 65, 120, 211, 163, 87, 63, 206, 151, 127, 180, 186, 236, 239, 209, 135,
             2, 181, 150, 1, 124, 79, 135, 90, 130, 26, 239, 219, 152, 223
@@ -123,6 +123,7 @@ fn signature_binds_close_and_rejects_replay() {
         &identity,
         &[],
         std::slice::from_ref(&passthrough),
+        None,
     );
     let signature = signer.sign(&digest).unwrap().to_bytes();
     let advance = create_advance_instruction(&WINTERNITZ, &identity, &signature);

@@ -191,7 +191,7 @@ pub fn run_round_trip_spl<F>(
     ];
     let advance_ix = sign_advance(&NONCE, &[], &post_ixs);
 
-    let next_nonce = advance_vector_digest(scheme, &NONCE, identity, &[], &post_ixs);
+    let next_nonce = advance_vector_digest(scheme, &NONCE, identity, &[], &post_ixs, None);
 
     let expected_vector_data =
         expected_advanced_data(next_nonce, scheme, identity, stored_identity);

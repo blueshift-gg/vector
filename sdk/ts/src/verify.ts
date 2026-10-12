@@ -1,11 +1,4 @@
-/**
- * Check an `advance` signature offline, the way the program will. Each
- * function returns the digest, which is the account's next nonce.
- *
- * Pass `feePayer` when it is also an account of one of the instructions: the
- * runtime then marks it a writable signer there, and the digest covers that
- * flag.
- */
+/** Check an `advance` signature offline, the way the program will. */
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
@@ -13,7 +6,7 @@ import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
 
-import { Scheme, FALCON_PUBKEY_LEN, MLDSA44_PUBKEY_LEN } from "./scheme.js";
+import { Scheme } from "./scheme.js";
 import { advanceVectorDigest } from "./digest.js";
 import { ED25519 } from "./schemes/ed25519.js";
 import { EIP191, eip191EnvelopeHash } from "./schemes/eip191.js";
@@ -60,36 +53,10 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/** Length gates shared by every scheme; throws before any crypto runs. */
-function checkInputs(
-  scheme: string,
-  nonce: Uint8Array,
-  identity: Uint8Array,
-  identityLen: number,
-  signature: Uint8Array,
-  signatureLen: number
-): void {
-  if (nonce.length !== 32) {
-    throw new MalformedSignatureError(
-      `${scheme}: nonce must be 32 bytes, got ${nonce.length}`
-    );
-  }
-  if (identity.length !== identityLen) {
-    throw new IdentityMismatchError(
-      `${scheme}: identity/pubkey must be ${identityLen} bytes, got ${identity.length}`
-    );
-  }
-  if (signature.length !== signatureLen) {
-    throw new MalformedSignatureError(
-      `${scheme}: signature must be ${signatureLen} bytes, got ${signature.length}`
-    );
-  }
-}
-
 /**
  * Turn Ethereum's 27/28 recovery byte into the 0/1 the program requires. Call
  * it when packaging a signature from Ethereum tooling into an advance; {@link
- * verifyAdvanceSignatureEip191} rejects 27/28, as the program does.
+ * verifyAdvanceSignature} rejects 27/28, as the program does.
  */
 export function normalizeEip191RecoveryByte(v: number): number {
   if (v >= 0 && v <= 3) return v;
@@ -109,85 +76,83 @@ function trimFalconSignature(signature: Uint8Array): Uint8Array {
   return signature.subarray(0, end);
 }
 
-/** Shared tail: recompute the digest, run `verify`, map false → throw. */
-function checkedDigest(
-  name: string,
+/**
+ * Verify an advance signature: recompute the digest and check `signature`
+ * over it with the scheme's verifier. Returns the digest, which is the
+ * account's next nonce.
+ *
+ * Pass `feePayer` when it is also an account of one of the instructions: the
+ * runtime then marks it a writable signer there, and the digest covers that
+ * flag. Winternitz and XMSS have no offline verifier.
+ */
+export function verifyAdvanceSignature(
   scheme: Scheme,
   identity: Uint8Array,
   nonce: Uint8Array,
-  pre: TransactionInstruction[],
-  post: TransactionInstruction[],
-  feePayer: Address | undefined,
-  verify: (digest: Uint8Array) => boolean
+  preInstructions: TransactionInstruction[],
+  postInstructions: TransactionInstruction[],
+  signature: Uint8Array,
+  feePayer?: Address
 ): Uint8Array {
-  const digest = advanceVectorDigest(scheme, nonce, identity, pre, post, feePayer);
+  const verify = VERIFIERS[scheme.id];
+  if (!verify) {
+    throw new IdentityMismatchError("this scheme has no offline verifier");
+  }
+  if (nonce.length !== 32) {
+    throw new MalformedSignatureError(`nonce must be 32 bytes, got ${nonce.length}`);
+  }
+  if (identity.length !== scheme.identityLen) {
+    throw new IdentityMismatchError(
+      `identity must be ${scheme.identityLen} bytes, got ${identity.length}`
+    );
+  }
+  if (signature.length !== scheme.signatureLen) {
+    throw new MalformedSignatureError(
+      `signature must be ${scheme.signatureLen} bytes, got ${signature.length}`
+    );
+  }
+
+  const digest = advanceVectorDigest(
+    scheme, nonce, identity, preInstructions, postInstructions, feePayer
+  );
   let ok = false;
   try {
-    ok = verify(digest);
-  } catch {
-    ok = false;
+    ok = verify(identity, digest, signature);
+  } catch (error) {
+    if (error instanceof VerifyError) throw error;
   }
-  if (!ok) throw new SignatureVerificationError(`${name}: ${SIGNATURE_INVALID}`);
+  if (!ok) throw new SignatureVerificationError(SIGNATURE_INVALID);
   return digest;
 }
 
-// ── Per-scheme verification ──────────────────────────────────────────
-
-/** Verify an Ed25519 advance signature. `pubkey` is the identity. */
-export function verifyAdvanceSignatureEd25519(
-  pubkey: Uint8Array,
-  nonce: Uint8Array,
-  preInstructions: TransactionInstruction[],
-  postInstructions: TransactionInstruction[],
-  signature: Uint8Array,
-  feePayer?: Address
-): Uint8Array {
-  checkInputs("ed25519", nonce, pubkey, 32, signature, ED25519.signatureLen);
-  return checkedDigest(
-    "ed25519", ED25519, pubkey, nonce, preInstructions, postInstructions,
-    feePayer, (digest) => ed25519.verify(signature, digest, pubkey)
-  );
-}
-
-/**
- * Verify a plain secp256k1 advance signature. A high-S signature is accepted,
- * as it is on chain.
- */
-export function verifyAdvanceSignatureSecp256k1(
-  compressedPubkey: Uint8Array,
-  nonce: Uint8Array,
-  preInstructions: TransactionInstruction[],
-  postInstructions: TransactionInstruction[],
-  signature: Uint8Array,
-  feePayer?: Address
-): Uint8Array {
-  checkInputs(
-    "secp256k1", nonce, compressedPubkey, SECP256K1.identityLen,
-    signature, SECP256K1.signatureLen
-  );
-  return checkedDigest(
-    "secp256k1", SECP256K1, compressedPubkey, nonce, preInstructions,
-    postInstructions, feePayer,
-    (digest) => secp256k1.verify(signature, digest, compressedPubkey, { lowS: false })
-  );
-}
+/** One check per scheme, by scheme byte. The lengths are already checked. */
+const VERIFIERS: Record<
+  number,
+  (identity: Uint8Array, digest: Uint8Array, signature: Uint8Array) => boolean
+> = {
+  [ED25519.id]: (identity, digest, signature) =>
+    ed25519.verify(signature, digest, identity),
+  // A high-S signature is accepted, as it is on chain.
+  [SECP256K1.id]: (identity, digest, signature) =>
+    secp256k1.verify(signature, digest, identity, { lowS: false }),
+  [EIP191.id]: verifyEip191,
+  [FALCON512.id]: (identity, digest, signature) =>
+    nobleFalcon.verify(trimFalconSignature(signature), digest, identity),
+  // The empty context, as on chain.
+  [MLDSA44.id]: (identity, digest, signature) =>
+    ml_dsa44.verify(signature, digest, identity),
+};
 
 /**
- * Verify an EIP-191 advance signature against an Ethereum address. `v` is the
- * raw recovery id; Ethereum's 27/28 form is rejected, as it is on chain. See
- * {@link normalizeEip191RecoveryByte}.
+ * Recover the signer of the EIP-191 envelope and compare it to the address.
+ * `v` is the raw recovery id; Ethereum's 27/28 form is rejected, as it is on
+ * chain. See {@link normalizeEip191RecoveryByte}.
  */
-export function verifyAdvanceSignatureEip191(
+function verifyEip191(
   ethAddress: Uint8Array,
-  nonce: Uint8Array,
-  preInstructions: TransactionInstruction[],
-  postInstructions: TransactionInstruction[],
-  signature: Uint8Array,
-  feePayer?: Address
-): Uint8Array {
-  checkInputs(
-    "eip191", nonce, ethAddress, EIP191.identityLen, signature, EIP191.signatureLen
-  );
+  digest: Uint8Array,
+  signature: Uint8Array
+): boolean {
   const v = signature[64];
   if (v === 27 || v === 28) {
     throw new MalformedSignatureError(
@@ -201,70 +166,14 @@ export function verifyAdvanceSignatureEip191(
       `eip191: recovery byte ${v} is not a valid v (expected 0..=3)`
     );
   }
-  const digest = advanceVectorDigest(
-    EIP191, nonce, ethAddress, preInstructions, postInstructions, feePayer
-  );
-  const envelope = eip191EnvelopeHash(digest);
-  let recoveredAddress: Uint8Array;
-  try {
-    const sig = secp256k1.Signature.fromBytes(signature.subarray(0, 64), "compact")
-      .addRecoveryBit(v);
-    const uncompressed = sig.recoverPublicKey(envelope).toBytes(false);
-    recoveredAddress = keccak_256(uncompressed.subarray(1)).subarray(12);
-  } catch {
-    throw new SignatureVerificationError(`eip191: ${SIGNATURE_INVALID}`);
-  }
-  if (!bytesEqual(recoveredAddress, ethAddress)) {
+  const recovered = secp256k1.Signature.fromBytes(signature.subarray(0, 64), "compact")
+    .addRecoveryBit(v)
+    .recoverPublicKey(eip191EnvelopeHash(digest))
+    .toBytes(false);
+  if (!bytesEqual(keccak_256(recovered.subarray(1)).subarray(12), ethAddress)) {
     throw new IdentityMismatchError(
       "eip191: recovered Ethereum address does not match the identity"
     );
   }
-  return digest;
-}
-
-/**
- * Verify a Falcon-512 advance signature. `signature` is the 666-byte
- * zero-padded form.
- */
-export function verifyAdvanceSignatureFalcon512(
-  wirePubkey: Uint8Array,
-  nonce: Uint8Array,
-  preInstructions: TransactionInstruction[],
-  postInstructions: TransactionInstruction[],
-  signature: Uint8Array,
-  feePayer?: Address
-): Uint8Array {
-  checkInputs(
-    "falcon512", nonce, wirePubkey, FALCON_PUBKEY_LEN,
-    signature, FALCON512.signatureLen
-  );
-  return checkedDigest(
-    "falcon512", FALCON512, wirePubkey, nonce, preInstructions,
-    postInstructions, feePayer,
-    (digest) => nobleFalcon.verify(trimFalconSignature(signature), digest, wirePubkey)
-  );
-}
-
-/**
- * Verify an ML-DSA-44 `advance` signature offline, given the 1,312-byte
- * public key (the identity) and the 2,420-byte signature, under the empty
- * context the program uses. Returns the recomputed digest on success.
- */
-export function verifyAdvanceSignatureMlDsa44(
-  publicKey: Uint8Array,
-  nonce: Uint8Array,
-  preInstructions: TransactionInstruction[],
-  postInstructions: TransactionInstruction[],
-  signature: Uint8Array,
-  feePayer?: Address
-): Uint8Array {
-  checkInputs(
-    "mldsa44", nonce, publicKey, MLDSA44_PUBKEY_LEN,
-    signature, MLDSA44.signatureLen
-  );
-  return checkedDigest(
-    "mldsa44", MLDSA44, publicKey, nonce, preInstructions,
-    postInstructions, feePayer,
-    (digest) => ml_dsa44.verify(signature, digest, publicKey)
-  );
+  return true;
 }

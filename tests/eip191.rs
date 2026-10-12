@@ -71,7 +71,7 @@ fn advance_empty() {
 
     let advance_ix = sign_advance_instruction_secp256k1_eip191(&key, &NONCE, &[], &[], None);
 
-    let next_nonce = advance_vector_digest(&EIP191, &NONCE, &identity, &[], &[]);
+    let next_nonce = advance_vector_digest(&EIP191, &NONCE, &identity, &[], &[], None);
     let expected_vector_data = expected_advanced_data(next_nonce, &EIP191, &identity, &identity);
 
     let accounts = vec![(vector, vector_account)];

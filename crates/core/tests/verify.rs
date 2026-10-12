@@ -10,13 +10,11 @@ use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use vector_core::{
-    advance_vector_digest_with_fee_payer, ed25519_pubkey, revocation_digest,
-    secp256k1_compressed_pubkey, secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
+    advance_vector_digest, ed25519_pubkey, revocation_digest, secp256k1_compressed_pubkey,
+    secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
     sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
-    sign_revocation_instruction_ed25519, verify_advance_signature_ed25519,
-    verify_advance_signature_falcon512, verify_advance_signature_secp256k1_ecdsa,
-    verify_advance_signature_secp256k1_eip191, VerifyError, ED25519, FALCON512,
-    FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN, SYSTEM_PROGRAM_ID,
+    sign_revocation_instruction_ed25519, verify_advance_signature, VerifyError, ED25519, EIP191,
+    FALCON512, FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN, SECP256K1, SYSTEM_PROGRAM_ID,
 };
 
 const NONCE: [u8; 32] = [0x01; 32];
@@ -61,7 +59,8 @@ fn ed25519_round_trip() {
     let (pre, post) = fixed_ix_lists();
 
     let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post, None);
-    let digest = verify_advance_signature_ed25519(
+    let digest = verify_advance_signature(
+        &ED25519,
         &pubkey,
         &NONCE,
         &pre,
@@ -71,8 +70,7 @@ fn ed25519_round_trip() {
     )
     .expect("round trip must verify");
 
-    let expected =
-        advance_vector_digest_with_fee_payer(&ED25519, &NONCE, &pubkey, &pre, &post, None);
+    let expected = advance_vector_digest(&ED25519, &NONCE, &pubkey, &pre, &post, None);
     assert_eq!(digest, expected, "returned digest is the next nonce");
 }
 
@@ -93,11 +91,12 @@ fn secp256k1_round_trip_and_high_s_twin() {
 
     let advance = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &pre, &post, None);
     let wire = signature_of(&advance);
-    verify_advance_signature_secp256k1_ecdsa(&pubkey, &NONCE, &pre, &post, None, wire)
+    verify_advance_signature(&SECP256K1, &pubkey, &NONCE, &pre, &post, None, wire)
         .expect("round trip must verify");
 
     let high_s = malleate_high_s(&k256::ecdsa::Signature::from_slice(wire).unwrap());
-    verify_advance_signature_secp256k1_ecdsa(
+    verify_advance_signature(
+        &SECP256K1,
         &pubkey,
         &NONCE,
         &pre,
@@ -116,7 +115,7 @@ fn eip191_round_trip_high_s_twin_and_legacy_v() {
 
     let advance = sign_advance_instruction_secp256k1_eip191(&key, &NONCE, &pre, &post, None);
     let wire = signature_of(&advance);
-    verify_advance_signature_secp256k1_eip191(&eth_address, &NONCE, &pre, &post, None, wire)
+    verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, wire)
         .expect("round trip must verify");
 
     // High-S twin: the recovery id's parity bit flips with the negated s,
@@ -125,7 +124,7 @@ fn eip191_round_trip_high_s_twin_and_legacy_v() {
     let low_s = k256::ecdsa::Signature::from_slice(&wire[..64]).unwrap();
     let mut malleated = malleate_high_s(&low_s).to_bytes().to_vec();
     malleated.push(wire[64] ^ 1);
-    verify_advance_signature_secp256k1_eip191(&eth_address, &NONCE, &pre, &post, None, &malleated)
+    verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, &malleated)
         .expect("high-S eip191 twin must verify offline, matching on-chain acceptance");
 
     // Legacy 27/28 recovery byte (what Ethereum tooling emits) is rejected
@@ -133,9 +132,8 @@ fn eip191_round_trip_high_s_twin_and_legacy_v() {
     // on-chain, so accepting it offline would green-light a dead artifact.
     let mut legacy = wire.to_vec();
     legacy[64] += 27;
-    let err =
-        verify_advance_signature_secp256k1_eip191(&eth_address, &NONCE, &pre, &post, None, &legacy)
-            .expect_err("legacy 27/28 form must be rejected");
+    let err = verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, &legacy)
+        .expect_err("legacy 27/28 form must be rejected");
     assert!(matches!(err, VerifyError::MalformedSignature(_)));
     assert!(
         err.to_string().contains("subtract 27"),
@@ -150,21 +148,22 @@ fn falcon512_round_trip() {
     wire.copy_from_slice(pk.as_bytes());
     let (pre, post) = fixed_ix_lists();
 
-    let digest = advance_vector_digest_with_fee_payer(&FALCON512, &NONCE, &wire, &pre, &post, None);
+    let digest = advance_vector_digest(&FALCON512, &NONCE, &wire, &pre, &post, None);
     // Zero-pad the variable-length detached signature to the 666-byte wire.
     let detached = pq_falcon::detached_sign(&digest, &sk);
     let mut signature = [0u8; FALCON512_SIGNATURE_LEN];
     signature[..detached.as_bytes().len()].copy_from_slice(detached.as_bytes());
 
-    let verified = verify_advance_signature_falcon512(&wire, &NONCE, &pre, &post, None, &signature)
-        .expect("round trip must verify");
+    let verified =
+        verify_advance_signature(&FALCON512, &wire, &NONCE, &pre, &post, None, &signature)
+            .expect("round trip must verify");
     assert_eq!(verified, digest);
 
     // Same signature against a tampered nonce must fail.
     let mut bad_nonce = NONCE;
     bad_nonce[0] ^= 0x01;
     assert_eq!(
-        verify_advance_signature_falcon512(&wire, &bad_nonce, &pre, &post, None, &signature),
+        verify_advance_signature(&FALCON512, &wire, &bad_nonce, &pre, &post, None, &signature),
         Err(VerifyError::SignatureInvalid),
     );
 }
@@ -182,7 +181,7 @@ fn tampering_any_committed_byte_fails_verification() {
     let sig = signature_of(&advance);
     let verify =
         |pubkey: &[u8; 32], nonce: &[u8; 32], pre: &[Instruction], post: &[Instruction]| {
-            verify_advance_signature_ed25519(pubkey, nonce, pre, post, None, sig)
+            verify_advance_signature(&ED25519, pubkey, nonce, pre, post, None, sig)
         };
 
     // Instruction data.
@@ -222,13 +221,14 @@ fn digest_matches_the_cross_language_pin() {
     let pubkey = ed25519_pubkey(&key);
     let (pre, post) = fixed_ix_lists();
 
-    let digest = advance_vector_digest_with_fee_payer(&ED25519, &NONCE, &pubkey, &pre, &post, None);
+    let digest = advance_vector_digest(&ED25519, &NONCE, &pubkey, &pre, &post, None);
     let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
     assert_eq!(hex, PINNED_DIGEST_HEX);
 
     // And the pinned digest is exactly what a signer commits to.
     let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post, None);
-    let verified = verify_advance_signature_ed25519(
+    let verified = verify_advance_signature(
+        &ED25519,
         &pubkey,
         &NONCE,
         &pre,
@@ -259,7 +259,8 @@ fn revocation_round_trip_and_cross_language_pin() {
     // A revocation is just an advance with empty pre/post, so it verifies
     // through the ordinary advance verifier with empty slices.
     let revocation = sign_revocation_instruction_ed25519(&key, &NONCE);
-    let digest = verify_advance_signature_ed25519(
+    let digest = verify_advance_signature(
+        &ED25519,
         &pubkey,
         &NONCE,
         &[],

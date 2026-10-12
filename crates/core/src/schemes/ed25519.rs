@@ -5,7 +5,7 @@ use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
 use solana_address::Address;
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest_with_fee_payer;
+use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
@@ -45,7 +45,7 @@ pub fn sign_advance_instruction_ed25519(
     fee_payer: Option<&Address>,
 ) -> Instruction {
     let identity = ed25519_pubkey(signing_key);
-    let digest = advance_vector_digest_with_fee_payer(
+    let digest = advance_vector_digest(
         &ED25519,
         nonce,
         &identity,

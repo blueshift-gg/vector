@@ -74,7 +74,7 @@ fn advance_empty() {
 
     let advance_ix = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &[], &[], None);
 
-    let next_nonce = advance_vector_digest(&SECP256K1, &NONCE, &identity, &[], &[]);
+    let next_nonce = advance_vector_digest(&SECP256K1, &NONCE, &identity, &[], &[], None);
     let expected_vector_data = expected_advanced_data(next_nonce, &SECP256K1, &identity, &identity);
 
     let accounts = vec![(vector, vector_account)];

@@ -6,7 +6,7 @@ use sha3::{Digest as Sha3Digest, Keccak256};
 use solana_address::Address;
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest_with_fee_payer;
+use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
@@ -74,7 +74,7 @@ pub fn sign_advance_instruction_secp256k1_eip191(
     fee_payer: Option<&Address>,
 ) -> Instruction {
     let identity = secp256k1_eip191_eth_address(signing_key);
-    let digest = advance_vector_digest_with_fee_payer(
+    let digest = advance_vector_digest(
         &EIP191,
         nonce,
         &identity,

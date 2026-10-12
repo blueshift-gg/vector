@@ -34,7 +34,7 @@ fn initialize_checks_key_length_and_pda() {
     let passthrough =
         create_rotating_passthrough_instruction(&XMSS, &identity, Some(&[7; 41]), &[withdraw]);
     assert_eq!(
-        advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough]),
+        advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough], None),
         [
             197, 9, 104, 199, 226, 33, 104, 145, 233, 107, 2, 80, 255, 243, 136, 141, 0, 5, 59,
             232, 196, 195, 142, 155, 237, 9, 45, 63, 61, 88, 239, 234
@@ -117,7 +117,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
         mollusk.sysvars.rent.minimum_balance(XMSS.account_len()),
         &stored,
     );
-    let digest = advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[]);
+    let digest = advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[], None);
     let signature = signer.sign(&digest).unwrap();
     let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
     let expected = expected_advanced_data(digest, &XMSS, &identity, &stored);
@@ -219,6 +219,7 @@ fn advance_binds_and_authorizes_withdrawal() {
         &identity,
         &[],
         std::slice::from_ref(&passthrough),
+        None,
     );
     let signature = signer.sign(&digest).unwrap();
     assert_eq!(signature.leaf(), 1);

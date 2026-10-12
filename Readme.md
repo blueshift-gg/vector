@@ -269,11 +269,11 @@ The `vector-core` crate provides off-chain helpers for constructing Vector trans
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
 - `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature. `create_multi_advance_instruction(&[(&scheme, identity, signature)])` does the same for several signers.
 - `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. For Winternitz and XMSS use `create_rotating_passthrough_instruction(&scheme, identity, next_public_key, sub_ixs)`.
-- `advance_vector_digest(&scheme, nonce, identity, pre, post)` / `advance_vector_digest_with_fee_payer(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify. With several signers, compute `advance_message(&[(&scheme, identity)], pre, post, fee_payer)` once, then `signer_digest(&message, nonce, &vector)` for each.
+- `advance_vector_digest(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify. With several signers, compute `advance_message(&[(&scheme, identity)], pre, post, fee_payer)` once, then `signer_digest(&message, nonce, &vector)` for each.
 - `sign_advance_instruction_ed25519(signing_key, nonce, pre, post, fee_payer)` — sign with Ed25519.
 - `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post, fee_payer)` — sign with EIP-191 (envelope, 65-byte sig).
 - `sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, pre, post, fee_payer)` — sign with plain secp256k1 ECDSA (64-byte sig).
-- `verify_advance_signature_ed25519(pubkey, nonce, pre, post, fee_payer, signature)` / `verify_advance_signature_secp256k1_ecdsa(...)` / `verify_advance_signature_secp256k1_eip191(...)` / `verify_advance_signature_falcon512(wire_pubkey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
+- `verify_advance_signature(&scheme, identity, nonce, pre, post, fee_payer, signature)` — verify an advance signature fully offline, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
 - `ed25519_pubkey` / `secp256k1_eip191_eth_address` / `secp256k1_compressed_pubkey` / `eth_address_from_pubkey` / `eip191_envelope_hash(digest)` — identity/envelope utilities.
 
 Falcon-512 and ML-DSA-44 signing are intentionally left to the caller (`solana-falcon512` and `solana-ml-dsa` are verify-only) — pair with an external signer such as `pqcrypto-falcon` or `fips204` (empty context) and feed the wire-format signature into `create_advance_instruction`.
@@ -295,7 +295,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer?)` — sign with plain secp256k1 ECDSA.
 - `signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer?)` — sign with Falcon-512 (post-quantum) via [`@noble/post-quantum/falcon.js`](https://github.com/paulmillr/noble-post-quantum); plus `falcon512Keygen`, `falcon512PublicKey`.
 - `signAdvanceInstructionMlDsa44(keypair, nonce, pre, post, feePayer?)` — sign with ML-DSA-44 (FIPS 204, post-quantum) via `@noble/post-quantum/ml-dsa.js`, empty context; plus `mldsa44Keygen`, `mldsa44PublicKey`.
-- `verifyAdvanceSignatureEd25519(pubkey, nonce, pre, post, signature, feePayer?)` / `verifyAdvanceSignatureSecp256k1(...)` / `verifyAdvanceSignatureEip191(...)` / `verifyAdvanceSignatureFalcon512(wirePubkey, ...)` / `verifyAdvanceSignatureMlDsa44(publicKey, ...)` — verify an advance signature fully offline; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
+- `verifyAdvanceSignature(scheme, identity, nonce, pre, post, signature, feePayer?)` — verify an advance signature fully offline, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `mldsa44Identity(publicKey)` / `secp256k1CompressedPubkey` / `ethAddressFromPrivateKey` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
 The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1, Falcon-512 and ML-DSA-44. Winternitz and XMSS signing are supplied by the caller. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
@@ -310,17 +310,17 @@ Everything below is native protocol behaviour — no extra programs, accounts, o
 
 ### Offline verification
 
-Both SDKs ship per-scheme verify functions that recompute the digest from the full instruction layout and check the signature exactly as the on-chain program will — no RPC. A PASS means the transaction will verify on-chain against the same nonce; the returned digest is the account's next nonce.
+Both SDKs ship a verify function that recomputes the digest from the full instruction layout and checks the signature exactly as the on-chain program will — no RPC. A PASS means the transaction will verify on-chain against the same nonce; the returned digest is the account's next nonce.
 
 ```rust
-use vector_core::verify_advance_signature_ed25519;
+use vector_core::{verify_advance_signature, ED25519};
 
-let next_nonce = verify_advance_signature_ed25519(
-    &pubkey, &nonce, &pre_ixs, &post_ixs, None, signature,
+let next_nonce = verify_advance_signature(
+    &ED25519, &pubkey, &nonce, &pre_ixs, &post_ixs, None, signature,
 )?;
 ```
 
-Two caveats, documented on the functions: Ed25519 is checked with `ed25519-dalek` offline while the chain runs `brine-ed25519` (only adversarially malformed signatures can be judged differently — honest signatures verify identically), and the fee payer affects the digest only when its key appears in a committed instruction (message-level flag promotion then folds it in as a writable signer).
+Two caveats: Ed25519 is checked with `ed25519-dalek` offline while the chain runs `brine-ed25519` (only adversarially malformed signatures can be judged differently — honest signatures verify identically), and the fee payer affects the digest only when its key appears in a committed instruction (message-level flag promotion then folds it in as a writable signer).
 
 ### Concurrency
 

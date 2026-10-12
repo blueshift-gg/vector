@@ -42,8 +42,7 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
 /// advance goes after `pre_instructions`. A passthrough is one of the pre or
 /// post instructions, so the message covers it.
 ///
-/// `fee_payer` only matters when it is also an account of one of the
-/// instructions: the sysvar then shows it as a writable signer there.
+/// `fee_payer` is as in [`advance_vector_digest`].
 pub fn advance_message(
     signers: &[(&Scheme, &[u8])],
     pre_instructions: &[Instruction],
@@ -118,7 +117,11 @@ pub fn signer_digest(message: &[u8; 32], nonce: &[u8; 32], vector: &Address) -> 
 }
 
 /// [`signer_digest`] for an advance with one signer.
-pub fn advance_vector_digest_with_fee_payer(
+///
+/// Pass `fee_payer` when it is also an account of one of the instructions:
+/// the runtime then marks it a writable signer there, and the digest covers
+/// that flag.
+pub fn advance_vector_digest(
     scheme: &Scheme,
     nonce: &[u8; 32],
     identity: &[u8],
@@ -135,28 +138,9 @@ pub fn advance_vector_digest_with_fee_payer(
     signer_digest(&message, nonce, &find_vector_pda(scheme, identity).0)
 }
 
-/// [`advance_vector_digest_with_fee_payer`] without a fee payer: use it when
-/// the fee payer is not an account of any instruction.
-pub fn advance_vector_digest(
-    scheme: &Scheme,
-    nonce: &[u8; 32],
-    identity: &[u8],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-) -> [u8; 32] {
-    advance_vector_digest_with_fee_payer(
-        scheme,
-        nonce,
-        identity,
-        pre_instructions,
-        post_instructions,
-        None,
-    )
-}
-
 /// The digest of an advance with nothing around it. Landing that advance only
 /// moves the nonce, which cancels everything signed against the old one. It
 /// must be the only instruction of its transaction.
 pub fn revocation_digest(scheme: &Scheme, nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {
-    advance_vector_digest(scheme, nonce, identity, &[], &[])
+    advance_vector_digest(scheme, nonce, identity, &[], &[], None)
 }

@@ -110,7 +110,7 @@ fn advance_empty() {
         &stored,
     );
 
-    let digest = advance_vector_digest(&FALCON512, &NONCE, &identity, &[], &[]);
+    let digest = advance_vector_digest(&FALCON512, &NONCE, &identity, &[], &[], None);
     let signature = sign(&digest, &sk);
     let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature);
 
@@ -138,7 +138,7 @@ fn advance_round_trips_spl_mint_authority() {
     let identity = wire;
     let stored = stored_identity(&wire);
     run_round_trip_spl(&FALCON512, &identity, &stored, |nonce, pre, post| {
-        let digest = advance_vector_digest(&FALCON512, nonce, &identity, pre, post);
+        let digest = advance_vector_digest(&FALCON512, nonce, &identity, pre, post, None);
         let signature = sign(&digest, &sk);
         create_advance_instruction(&FALCON512, &identity, &signature)
     });
@@ -176,6 +176,7 @@ fn close_via_advance() {
         &identity,
         &[],
         std::slice::from_ref(&passthrough_ix),
+        None,
     );
     let signature = sign(&digest, &sk);
     let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature);
@@ -236,6 +237,7 @@ fn withdraw_via_advance() {
         &identity,
         &[],
         std::slice::from_ref(&passthrough_ix),
+        None,
     );
     let signature = sign(&digest, &sk);
     let advance_ix = create_advance_instruction(&FALCON512, &identity, &signature);
