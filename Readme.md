@@ -32,7 +32,7 @@ Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving ev
 | Falcon-512 | `4` | 897-byte wire pubkey              | 666 bytes (zero-padded compressed) | 1024 B prepared pubkey | SHA-256 |
 | ML-DSA-44 | `5` | 1,312-byte public key | 2,420 bytes | 1,312 B pubkey + 20,544 B prepared key | SHA-256 |
 | Winternitz | `6` | 41-byte first public key | 849 bytes | 41 B current key | SHA-256 |
-| XMSS | `7` | 41-byte first public key | 1,037 bytes | 41 B current key | SHA-256 |
+| XMSS | `7` | 41-byte first public key | 1,037 bytes | 41 B current key + 4 B next leaf | SHA-256 |
 
 The scheme byte is a field of the account header and a PDA seed. The program reads it from the account and routes to that scheme, so an account is always handled by the scheme that created it. Only `Initialize`, which has no account yet, takes the byte in its instruction data. Zero is not a scheme, so a zeroed account that someone assigns to the program belongs to none.
 
@@ -99,7 +99,12 @@ Passthrough(next_public_key, [...actions])
 
 `create_rotating_passthrough_instruction` / `createRotatingPassthroughInstruction` builds it. The key follows the discriminator, so the signature that authorizes the actions also authorizes the key. The handler stores it before running the actions, with no extra instruction or CPI. Rotation changes only the stored public key; the PDA seed and bump remain fixed. The nonce advances through the ordinary `Advance` handler. Rotation stays within the account's signing scheme. For XMSS, pass no key to keep the current one.
 
-Callers manage key freshness, persistent signing state and rotation timing. The program does not track spent keys or XMSS leaves, or check that a replacement key differs. To retain control, Winternitz callers must give a fresh key in their one authorization, and an `Advance` with no `Passthrough` does not rotate; XMSS callers must rotate before exhausting the tree. Never sign different authorizations with the same Winternitz key or XMSS leaf. Failed salt sampling and abandoned authorizations consume signing attempts too.
+The program makes a signature that lands use its key up:
+
+- **Winternitz.** `Advance` erases the stored key, and fails unless a `Passthrough` for the account follows in the same transaction. That `Passthrough` stores the next key, so a Winternitz account that only co-signs still sends one, with no instructions.
+- **XMSS.** The account stores the lowest leaf that may sign next. `Advance` refuses a lower leaf and moves the counter past the leaf that signed; a signer may skip leaves. A new key starts again at leaf 0; the same key given again keeps its counter. The last leaf follows the Winternitz rule: its `Advance` needs a `Passthrough`, and that `Passthrough` must replace the key.
+
+What the program cannot see is signing off chain. Never sign different authorizations with the same Winternitz key or XMSS leaf: once one of them lands the key or leaf is dead, but until then two signatures are public. The program does not check that a replacement key is fresh, so callers still manage key freshness and persistent signing state. Failed salt sampling and abandoned authorizations consume signing attempts too.
 
 Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
 
@@ -127,7 +132,7 @@ data:     [0, sig_1 || ... || sig_n]
 
 The program verifies one signature per account, taking each signature's length from its account's scheme, and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature.
 
-A one-time key (Winternitz, XMSS) should sign last: its signature only lands if every other signer's does, and it must not be used for a second message.
+A one-time key (Winternitz, XMSS) should sign last: its signature only lands if every other signer's does, and it must not be used for a second message. A Winternitz account needs its `Passthrough` after the `Advance` even when it only co-signs.
 
 ## Instruction Set
 Every scheme has instructions 0–4. ML-DSA-44 also has `Expand` (5). Each instruction starts with its discriminator byte.
@@ -227,7 +232,8 @@ The seed is the SHA-256 of the key given to `Initialize`, for every scheme. It i
 | Secp256k1   | 101 B              | 33 B compressed pubkey                          |
 | Falcon-512  | 1092 B             | 1024 B prepared public key                      |
 | ML-DSA-44   | 21,924 B           | 1,312 B public key + 20,544 B prepared key |
-| Winternitz / XMSS | 109 B | 41 B current public key |
+| Winternitz | 109 B | 41 B current public key |
+| XMSS | 113 B | 41 B current public key + 4 B next leaf (u32 LE) |
 
 Two schemes cannot share a PDA: the scheme byte is one of the seeds, so the same identity bytes derive a different address under each scheme. The header's scheme byte is what the program routes on.
 
@@ -241,7 +247,8 @@ A Vector account is created via the `initialize` instruction, which allocates th
 | Falcon-512  | 897-byte wire pubkey      | `prepared[1024]` |
 | ML-DSA-44   | 1,312-byte public key     | `pk[1312] \|\| prepared[20544]`, over `initialize` + 2 × `expand` |
 | Secp256k1   | 33-byte compressed pubkey | the compressed pubkey verbatim              |
-| Winternitz / XMSS | 41-byte public key | the current 41-byte key |
+| Winternitz | 41-byte public key | the current 41-byte key, zeroed between its `Advance` and `Passthrough` |
+| XMSS | 41-byte public key | the current 41-byte key, then the next leaf |
 
 `initialize` allocates the full `68 + stored_identity_len` bytes, and every
 scheme but ML-DSA-44 registers in one call. An instruction can grow an account

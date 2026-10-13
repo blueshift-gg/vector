@@ -65,6 +65,12 @@ fn header(nonce: [u8; 32], scheme: &Scheme, identity: &[u8]) -> Vec<u8> {
     [&nonce[..], &vector_seed(identity), &[scheme.id, bump, 1, 0]].concat()
 }
 
+/// What an XMSS account stores: its key, then the lowest leaf that may sign
+/// next.
+pub fn xmss_stored(key: &[u8], next_leaf: u32) -> Vec<u8> {
+    [key, &next_leaf.to_le_bytes()].concat()
+}
+
 /// Build a fully-populated vector account for `identity`. `stored_identity`
 /// is what the account holds after its header (`scheme.stored_identity_len`).
 pub fn build_vector_account(

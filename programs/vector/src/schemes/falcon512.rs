@@ -34,7 +34,7 @@ unsafe impl SigningScheme for Falcon512 {
         FALCON_512_SIGNATURE_LEN
     }
 
-    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn advance(&mut self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         let prepared = Falcon512PreparedPubkey::try_from_slice(&self.prepared)
             .map_err(|_| ProgramError::InvalidAccountData)?;
         let signature = Falcon512Signature::try_from_slice(signature)

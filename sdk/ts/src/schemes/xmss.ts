@@ -11,7 +11,8 @@ export const XMSS: Scheme = {
   id: 7,
   signatureLen: XMSS_SIGNATURE_LEN,
   identityLen: XMSS_PUBKEY_LEN,
-  storedIdentityLen: XMSS_PUBKEY_LEN,
+  // The key, then the lowest leaf that may sign next (u32 LE).
+  storedIdentityLen: XMSS_PUBKEY_LEN + 4,
   nextKeyLen: XMSS_PUBKEY_LEN,
   nextKeyOptional: true,
 };

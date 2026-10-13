@@ -38,8 +38,16 @@ pub unsafe trait SigningScheme {
     /// Length of a signature in `Advance` data.
     fn signature_len(&self) -> usize;
 
-    /// `Advance`: verify `signature` over `digest`.
-    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError>;
+    /// `Advance`: verify `signature` over `digest`. A scheme whose key signs
+    /// a limited number of times records the use here.
+    fn advance(&mut self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError>;
+
+    /// The key cannot sign again. `Advance` then requires a `Passthrough`
+    /// later in the transaction, which is where the next key comes from.
+    /// Default: the key signs any number of times.
+    fn spent(&self) -> bool {
+        false
+    }
 
     /// `Passthrough`: take what the scheme needs off the front of the data
     /// and return the instructions after it. Default: nothing.

@@ -12,7 +12,7 @@ use vector_core::{
 };
 
 use crate::common::{
-    build_vector_account, expected_advanced_data, mollusk, process_transaction, NONCE,
+    build_vector_account, expected_advanced_data, mollusk, process_transaction, xmss_stored, NONCE,
 };
 
 #[test]
@@ -66,7 +66,7 @@ fn initialize_checks_key_length_and_pda() {
         .data;
     assert_eq!(&stored[32..64], &vector_core::vector_seed(&identity));
     assert_eq!(stored[64..68], [XMSS.id, bump, 1, 0]);
-    assert_eq!(&stored[68..], &public_key);
+    assert_eq!(&stored[68..], &xmss_stored(&public_key, 0));
 
     // A key of another length has another address, and the scheme refuses it.
     for length in [40, 42] {
@@ -107,7 +107,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
     let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
     let public_key = signer.verifying_key().to_bytes();
     let identity = public_key;
-    let stored = public_key.to_vec();
+    let stored = xmss_stored(&public_key, 0);
     let mollusk = mollusk();
     let (vector, _) = find_vector_pda(&XMSS, &identity);
     let account = build_vector_account(
@@ -120,7 +120,8 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
     let digest = advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[], None);
     let signature = signer.sign(&digest).unwrap();
     let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
-    let expected = expected_advanced_data(digest, &XMSS, &identity, &stored);
+    // Leaf 0 signed, so leaf 1 is the lowest that may sign next.
+    let expected = expected_advanced_data(digest, &XMSS, &identity, &xmss_stored(&public_key, 1));
     let result = mollusk.process_and_validate_instruction_chain(
         &[(
             &advance,
@@ -198,7 +199,7 @@ fn advance_binds_and_authorizes_withdrawal() {
     let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
     let public_key = signer.verifying_key().to_bytes();
     let identity = public_key;
-    let stored = public_key.to_vec();
+    let stored = xmss_stored(&public_key, 0);
     // Abandoned authorizations spend leaves even when no transaction lands.
     signer.sign(&[0; 32]).unwrap();
 
@@ -239,7 +240,8 @@ fn advance_binds_and_authorizes_withdrawal() {
         ],
     );
 
-    let expected = expected_advanced_data(digest, &XMSS, &identity, &stored);
+    // Leaf 0 was abandoned and leaf 1 signed: a signer may skip leaves.
+    let expected = expected_advanced_data(digest, &XMSS, &identity, &xmss_stored(&public_key, 2));
     process_transaction(
         &mollusk,
         &[&advance, &passthrough],

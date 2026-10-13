@@ -64,6 +64,11 @@ impl<'a> Transaction<'a> {
         Self { data }
     }
 
+    /// Number of instructions.
+    pub fn num_instructions(&self) -> Result<usize, ProgramError> {
+        self.read_u16(0)
+    }
+
     /// Index of the instruction being executed.
     pub fn current_index(&self) -> Result<usize, ProgramError> {
         let footer = self

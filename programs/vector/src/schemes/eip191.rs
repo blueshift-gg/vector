@@ -28,7 +28,7 @@ unsafe impl SigningScheme for Eip191 {
         65
     }
 
-    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn advance(&mut self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         let (rs, v) = signature
             .split_first_chunk::<64>()
             .filter(|(_, v)| v.len() == 1)

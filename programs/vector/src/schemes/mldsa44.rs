@@ -51,7 +51,7 @@ unsafe impl SigningScheme for MlDsa44 {
         SIGNATURE_LEN
     }
 
-    fn advance(&self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn advance(&mut self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
         let signature = Signature::ref_from_bytes(signature)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         PreparedKey::ref_from_bytes(&self.prepared)

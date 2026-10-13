@@ -2,6 +2,7 @@ use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 use solana_nostd_sha256::hashv;
 
 use crate::{
+    instructions::Passthrough,
     state::VectorAccount,
     transaction::{check_instructions_sysvar, top_level_only, Transaction},
 };
@@ -19,6 +20,8 @@ use crate::{
 /// > For each account, verify its signature over
 /// >   `SHA256(message || nonce || address)`
 /// > Store that digest as the account's next nonce
+/// > If the signature used the key up, require a later `Passthrough` for
+/// >   the account: that is where its next key comes from
 ///
 /// Accounts:
 ///
@@ -87,6 +90,9 @@ impl<'a> Advance<'a> {
             let digest = hashv(&[&message, &account.nonce, &address]);
             identity.advance(&digest, signature)?;
             account.nonce = digest;
+            if identity.spent() {
+                check_passthrough_follows(self.instructions_sysvar, &address)?;
+            }
         }
 
         // The data was signatures and nothing else.
@@ -110,4 +116,26 @@ impl<'a> Advance<'a> {
         }
         Ok(hashv(&[&data[..signatures_start], &data[signatures_end..]]))
     }
+}
+
+/// A later instruction of this transaction is a `Passthrough` for `vector`.
+/// The transaction lands whole or not at all, so the account's next key is
+/// stored if this signature is used.
+fn check_passthrough_follows(
+    instructions_sysvar: &AccountView,
+    vector: &[u8; 32],
+) -> ProgramResult {
+    let data = instructions_sysvar.try_borrow()?;
+    let transaction = Transaction::new(&data);
+
+    for index in transaction.current_index()? + 1..transaction.num_instructions()? {
+        let instruction = transaction.instruction(index)?;
+        if instruction.program_id == crate::ID.as_ref()
+            && instruction.data.first() == Some(Passthrough::DISCRIMINATOR)
+            && instruction.accounts.first().map(|meta| &meta[1..]) == Some(vector)
+        {
+            return Ok(());
+        }
+    }
+    Err(ProgramError::InvalidInstructionData)
 }
