@@ -196,7 +196,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .find(|(key, _)| *key == vector)
         .unwrap()
         .1
-        .data[66..]
+        .data[68..]
         .copy_from_slice(first.verifying_key().as_bytes());
     let rejected = process_transaction(
         &mollusk,

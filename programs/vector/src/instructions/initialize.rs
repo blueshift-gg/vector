@@ -89,7 +89,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
 }
 
 impl<'a> Initialize<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &0;
+    pub const DISCRIMINATOR: &'a u8 = &2;
 
     pub fn process(&mut self) -> ProgramResult {
         let (payer, vector) = (self.payer, &mut *self.vector);
@@ -136,6 +136,7 @@ impl<'a> Initialize<'a> {
         account.seed = self.seed;
         account.scheme = self.scheme;
         account.bump = self.bump;
+        account.version = VectorAccount::VERSION;
         scheme.initialize(self.key, identity)
     }
 }

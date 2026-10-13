@@ -8,21 +8,23 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 
 // ── Constants ────────────────────────────────────────────────────────
 
-export const INITIALIZE_DISCRIMINATOR = 0;
-export const ADVANCE_DISCRIMINATOR = 1;
-export const CLOSE_DISCRIMINATOR = 2;
+export const ADVANCE_DISCRIMINATOR = 0;
+export const PASSTHROUGH_DISCRIMINATOR = 1;
+export const INITIALIZE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
-export const PASSTHROUGH_DISCRIMINATOR = 4;
+export const CLOSE_DISCRIMINATOR = 4;
 
 /** The Vector program: one program for every signing scheme. */
 export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
 /**
- * The account header: `nonce[32] || seed[32] || scheme[1] || bump[1]`. The
- * seed is the SHA-256 of the key the account was created with. The scheme's
- * identity bytes follow.
+ * The account header: `nonce[32] || seed[32] || scheme[1] || bump[1] ||
+ * version[1] || pad[1]`. The seed is the SHA-256 of the key the account was
+ * created with. The scheme's identity bytes follow.
  */
-export const VECTOR_HEADER_LEN = 66;
+export const VECTOR_HEADER_LEN = 68;
+/** The account layout the program writes and accepts. */
+export const VECTOR_ACCOUNT_VERSION = 1;
 export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
 
 // Falcon-512 wire sizes — mirror `solana-falcon512` constants.
@@ -80,12 +82,13 @@ export function vectorAccountLen(scheme: Scheme): number {
 
 // ── VectorAccount ────────────────────────────────────────────────────
 
-/** Header of a vector account. Scheme identity follows at offset 66. */
+/** Header of a vector account. Scheme identity follows at offset 68. */
 export interface VectorAccount {
   nonce: Uint8Array; // 32 bytes
   seed: Uint8Array; // 32 bytes
   scheme: number; // 1 byte
   bump: number; // 1 byte
+  version: number; // 1 byte
 }
 
 export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
@@ -99,6 +102,7 @@ export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
     seed: data.slice(32, 64),
     scheme: data[64],
     bump: data[65],
+    version: data[66],
   };
 }
 
@@ -108,6 +112,7 @@ export function serializeVectorAccountHeader(account: VectorAccount): Uint8Array
   buf.set(account.seed, 32);
   buf[64] = account.scheme;
   buf[65] = account.bump;
+  buf[66] = account.version;
   return buf;
 }
 

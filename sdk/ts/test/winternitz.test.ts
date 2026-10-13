@@ -19,11 +19,11 @@ test("Winternitz account and rotation digest match Rust", () => {
   const [pda, bump] = findVectorPda(WINTERNITZ, identity);
   expect(pda.toString()).toBe("Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y");
   expect(bump).toBe(255);
-  expect(vectorAccountLen(WINTERNITZ)).toBe(107);
+  expect(vectorAccountLen(WINTERNITZ)).toBe(109);
 
   const initialize = createInitializeWinternitz(receiver, publicKey);
   expect(initialize.keys[1].pubkey.toString()).toBe(pda.toString());
-  expect(Array.from(initialize.data)).toEqual([0, WINTERNITZ.id, ...publicKey]);
+  expect(Array.from(initialize.data)).toEqual([2, WINTERNITZ.id, ...publicKey]);
   for (const length of [40, 42]) {
     expect(() => createInitializeWinternitz(receiver, new Uint8Array(length))).toThrow();
   }
@@ -33,7 +33,7 @@ test("Winternitz account and rotation digest match Rust", () => {
     createCloseSubinstruction(WINTERNITZ, identity, receiver),
   ]);
   // The next key follows the discriminator.
-  expect(Array.from(passthrough.data.subarray(0, 42))).toEqual([4, ...nextKey]);
+  expect(Array.from(passthrough.data.subarray(0, 42))).toEqual([1, ...nextKey]);
   expect(() => createPassthroughInstruction(WINTERNITZ, identity, [])).toThrow();
   // A Winternitz key signs once, so there is always a next key.
   expect(() => createRotatingPassthroughInstruction(WINTERNITZ, identity, null, [])).toThrow();
@@ -46,6 +46,6 @@ test("Winternitz account and rotation digest match Rust", () => {
     WINTERNITZ, new Uint8Array(32).fill(255), identity, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "d26d834178d3a3573fce977fb4baecefd18702b596017c4f875a821aefdb98df"
+    "2bce9f103929bb5a73dc85a80588ab5f641da32a4190d030ddca28fe2b333210"
   );
 });

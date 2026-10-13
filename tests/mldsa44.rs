@@ -41,7 +41,6 @@ fn sign(digest: &[u8; 32], sk: &ml_dsa_44::PrivateKey) -> [u8; MLDSA44_SIGNATURE
 fn stored_identity(public_key: &[u8; MLDSA44_PUBKEY_LEN]) -> Vec<u8> {
     use solana_ml_dsa::ml_dsa_44::VerifyingKey;
     let mut out = public_key.to_vec();
-    out.extend_from_slice(&[0; 2]);
     out.extend_from_slice(
         VerifyingKey::<false>::from_bytes(public_key)
             .prepare()
@@ -82,8 +81,9 @@ fn register_in_one_transaction() {
     assert_eq!(foreign.resulting_accounts, accounts);
     let mut malformed = expand_ix.clone();
     malformed.data.push(0);
-    let mut header = vec![0; 66];
+    let mut header = vec![0; 68];
     header[64] = MLDSA44.id;
+    header[66] = 1;
     let mut owned = Account::new(1_000_000_000, 0, &vector_core::PROGRAM_ID);
     owned.data = header;
     let rejected = mollusk.process_instruction(&malformed, &[(vector, owned)]);
@@ -110,8 +110,8 @@ fn register_in_one_transaction() {
     // header whose nonce the program derived on chain.
     let registered = accounts.iter().find(|(k, _)| *k == vector).unwrap().clone();
     let data = &registered.1.data;
-    assert_eq!(data[64..66], [MLDSA44.id, bump]);
-    assert_eq!(&data[66..], &stored_identity(&pk)[..]);
+    assert_eq!(data[64..68], [MLDSA44.id, bump, 1, 0]);
+    assert_eq!(&data[68..], &stored_identity(&pk)[..]);
 
     // A third expand is refused.
     let full = mollusk.process_instruction(&expand_ix, std::slice::from_ref(&registered));
@@ -238,8 +238,8 @@ fn client_encoding_matches_typescript() {
     assert_eq!(
         digest,
         [
-            135, 57, 194, 0, 133, 233, 189, 249, 35, 65, 234, 64, 227, 180, 163, 98, 176, 58, 247,
-            242, 231, 154, 85, 229, 175, 69, 68, 181, 60, 233, 105, 215
+            254, 171, 216, 95, 41, 213, 16, 66, 106, 49, 187, 173, 239, 72, 203, 79, 148, 11, 182,
+            110, 163, 13, 122, 45, 63, 192, 87, 230, 139, 5, 251, 32
         ]
     );
 }

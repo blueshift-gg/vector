@@ -28,9 +28,9 @@ export const MLDSA44_SECRET_KEY_LEN = 2560;
 export const MLDSA44_EXPAND_STEPS = 2;
 /** Discriminator of the program's one extra instruction. */
 export const MLDSA44_EXPAND_DISCRIMINATOR = 5;
-/** `pk[1312] || pad[2] || prepared[20544]`. */
+/** `pk[1312] || prepared[20544]`. */
 export const MLDSA44_STORED_IDENTITY_LEN =
-  MLDSA44_PUBKEY_LEN + 2 + MLDSA44_PREPARED_KEY_LEN;
+  MLDSA44_PUBKEY_LEN + MLDSA44_PREPARED_KEY_LEN;
 
 /** ML-DSA-44 — the identity is the public key (1,312 bytes). */
 export const MLDSA44: Scheme = {

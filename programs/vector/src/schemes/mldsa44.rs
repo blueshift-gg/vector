@@ -18,7 +18,6 @@ type PreparedKey = PreparedVerifyingKey<false>;
 #[repr(C)]
 pub struct MlDsa44 {
     public_key: [u8; PUBLIC_KEY_LEN],
-    _pad: [u8; 2],
     /// The key's matrix expanded, so that verifying does not redo it.
     prepared: [u8; PreparedKey::BYTE_LEN],
 }
@@ -37,7 +36,6 @@ unsafe impl SigningScheme for MlDsa44 {
             .get_mut(..PREPARED)
             .ok_or(ProgramError::AccountDataTooSmall)?;
         head[..PUBLIC_KEY_LEN].copy_from_slice(public_key.as_bytes());
-        head[PUBLIC_KEY_LEN..].fill(0);
         prepare_rows(identity, 0)
     }
 

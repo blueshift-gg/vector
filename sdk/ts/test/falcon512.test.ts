@@ -59,7 +59,7 @@ describe("vector-falcon512", () => {
     (connection as any)._rpcWebSocket?.close();
   });
 
-  // Falcon-512 is single-step: its 1090-byte account fits one CPI
+  // Falcon-512 is single-step: its 1092-byte account fits one CPI
   // CreateAccount, so `initialize` registers it in a single call (the
   // wire pubkey is hashed + prepared on-chain at init).
   test("initialize falcon512 vector account", async () => {

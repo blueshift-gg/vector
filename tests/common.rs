@@ -62,7 +62,7 @@ pub fn process_transaction(
 /// The account header for `identity` at `nonce`.
 fn header(nonce: [u8; 32], scheme: &Scheme, identity: &[u8]) -> Vec<u8> {
     let (_, bump) = find_vector_pda(scheme, identity);
-    [&nonce[..], &vector_seed(identity), &[scheme.id, bump]].concat()
+    [&nonce[..], &vector_seed(identity), &[scheme.id, bump, 1, 0]].concat()
 }
 
 /// Build a fully-populated vector account for `identity`. `stored_identity`

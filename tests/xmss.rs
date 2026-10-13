@@ -36,8 +36,8 @@ fn initialize_checks_key_length_and_pda() {
     assert_eq!(
         advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough], None),
         [
-            197, 9, 104, 199, 226, 33, 104, 145, 233, 107, 2, 80, 255, 243, 136, 141, 0, 5, 59,
-            232, 196, 195, 142, 155, 237, 9, 45, 63, 61, 88, 239, 234
+            119, 36, 30, 204, 237, 43, 13, 129, 134, 249, 41, 77, 119, 115, 69, 212, 1, 150, 172,
+            4, 213, 66, 154, 116, 192, 139, 199, 238, 5, 254, 86, 156
         ],
     );
     let accounts = [
@@ -65,8 +65,8 @@ fn initialize_checks_key_length_and_pda() {
         .1
         .data;
     assert_eq!(&stored[32..64], &vector_core::vector_seed(&identity));
-    assert_eq!(stored[64..66], [XMSS.id, bump]);
-    assert_eq!(&stored[66..], &public_key);
+    assert_eq!(stored[64..68], [XMSS.id, bump, 1, 0]);
+    assert_eq!(&stored[68..], &public_key);
 
     // A key of another length has another address, and the scheme refuses it.
     for length in [40, 42] {
@@ -148,7 +148,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
         &[(vector, advanced)],
     );
 
-    for offset in [0, 66, account.data.len() - 1] {
+    for offset in [0, 68, account.data.len() - 1] {
         let mut changed = account.clone();
         changed.data[offset] ^= 1;
         mollusk.process_and_validate_instruction_chain(

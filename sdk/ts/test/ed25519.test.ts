@@ -13,6 +13,7 @@ import {
 } from "@solana/web3.js";
 import {
   ED25519,
+  VECTOR_ACCOUNT_VERSION,
   ed25519Identity,
   findVectorPda,
   fetchVectorAccount,
@@ -67,6 +68,7 @@ describe("vector-ed25519", () => {
       ED25519_IDENTITY
     );
     expect(account.bump).toBe(vectorBump);
+    expect(account.version).toBe(VECTOR_ACCOUNT_VERSION);
 
     currentNonce = new Uint8Array(account.nonce);
   });

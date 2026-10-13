@@ -30,7 +30,7 @@ Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving ev
 | Secp256k1  | `3` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | SHA-256          |
 | EIP-191    | `2` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | EIP-191 + SHA-256|
 | Falcon-512 | `4` | 897-byte wire pubkey              | 666 bytes (zero-padded compressed) | 1024 B prepared pubkey | SHA-256 |
-| ML-DSA-44 | `5` | 1,312-byte public key | 2,420 bytes | 1,312 B pubkey + 2 B pad + 20,544 B prepared key | SHA-256 |
+| ML-DSA-44 | `5` | 1,312-byte public key | 2,420 bytes | 1,312 B pubkey + 20,544 B prepared key | SHA-256 |
 | Winternitz | `6` | 41-byte first public key | 849 bytes | 41 B current key | SHA-256 |
 | XMSS | `7` | 41-byte first public key | 1,037 bytes | 41 B current key | SHA-256 |
 
@@ -62,7 +62,7 @@ Vector supports the post-quantum [Falcon-512](https://falcon-sign.info/) lattice
 
 Wire pubkeys are 897 bytes, and the wire pubkey is the client identity. Like every scheme, the PDA seed is its SHA-256.
 
-To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a 1024-byte form with the forward NTT and modular inverse pre-baked) in the account's identity region. The account stores only that prepared form; after the 66-byte header it sits at an even account offset, so the verifier can borrow it zero-copy (a 1024-byte stack copy would overflow the BPF frame). The prepared form is computed once at `initialize` (~60k CUs); subsequent `advance` calls only pay the signature-verify cost (173k–184k CUs, depending on the key and signature).
+To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a 1024-byte form with the forward NTT and modular inverse pre-baked) in the account's identity region. The account stores only that prepared form; after the 68-byte header it sits at an even account offset, so the verifier can borrow it zero-copy (a 1024-byte stack copy would overflow the BPF frame). The prepared form is computed once at `initialize` (~60k CUs); subsequent `advance` calls only pay the signature-verify cost (173k–184k CUs, depending on the key and signature).
 
 Falcon signatures are variable-length (compressed Huffman); the wire format zero-pads to 666 bytes so the signature length is constant.
 
@@ -70,7 +70,7 @@ Falcon signatures are variable-length (compressed Huffman); the wire format zero
 
 Vector verifies [ML-DSA-44 (FIPS 204)](https://csrc.nist.gov/pubs/fips/204/final) through [`solana-ml-dsa`](https://github.com/blueshift-gg/solana-ml-dsa), using SHAKE128/256 and an empty context. The 1,312-byte public key is the identity and is hashed for the PDA seed. Rust callers supply signatures from an external signer; the TypeScript SDK uses Noble's `ml_dsa44`.
 
-The program prepares the key on chain once, following Falcon's approach. The 21,924-byte account holds the 66-byte header, then `public_key[1312] || pad[2] || prepared_key[20544]`. Registration is `Initialize` followed by two permissionless `Expand` instructions; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
+The program prepares the key on chain once, following Falcon's approach. The 21,924-byte account holds the 68-byte header, then `public_key[1312] || prepared_key[20544]`. Registration is `Initialize` followed by two permissionless `Expand` instructions; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
 
 Registration takes about 1.1M CU and a subsequent `Advance` about 264K CU in local SBPF tests. Registration and the 2,420-byte signature require [V1 transactions](https://solana.com/upgrades/larger-transaction-sizes); callers supply the transaction limits. The SDK builds instructions and does not submit transactions. The workspace pins `solana-ml-dsa` to a git revision; publish the crate with its required `solana-shake` revision and depend on the release before deploying.
 
@@ -122,7 +122,7 @@ One `Advance` takes any number of signers, of any schemes:
 
 ```
 accounts: [vector_1, ..., vector_n, instructions_sysvar]
-data:     [1, sig_1 || ... || sig_n]
+data:     [0, sig_1 || ... || sig_n]
 ```
 
 The program verifies one signature per account, taking each signature's length from its account's scheme, and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature.
@@ -134,11 +134,11 @@ Every scheme has instructions 0–4. ML-DSA-44 also has `Expand` (5). Each instr
 
 | Disc | Name        | Top-Level Callable? | Authorisation                                |
 |------|-------------|---------------------|----------------------------------------------|
-| `0`  | Initialize  | yes | payer funds creation |
-| `1`  | Advance     | **only** top-level (CPI guarded) | offchain signature over the canonical digest |
-| `2`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
+| `0`  | Advance     | **only** top-level (CPI guarded) | offchain signature over the canonical digest |
+| `1`  | Passthrough | **only** top-level (CPI guarded) | a sibling Advance for the same vector PDA earlier in the same transaction |
+| `2`  | Initialize  | yes | payer funds creation |
 | `3`  | Withdraw    | only via Passthrough reentry | inherited from the authorising Advance       |
-| `4`  | Passthrough | **only** top-level (CPI guarded) | a sibling Advance for the same vector PDA earlier in the same transaction |
+| `4`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
 | `5`  | Expand | yes | none: grows the account by one 10,240-byte step and fills it from the stored key; ML-DSA-44 only |
 
 `Advance` carries only signatures, one per account — its handler verifies each, installs the digest as the next nonce, and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler scans the instructions sysvar and refuses to run unless a prior `Advance` for the same vector PDA appears earlier in the transaction. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
@@ -204,42 +204,46 @@ One simple way to mitigate this is to require Vector users to place an ownership
 
 ## Account Layout
 
-A Vector account is a PDA at `["vector", [scheme], seed]`, with a fixed 66-byte header followed by the scheme's identity bytes:
+A Vector account is a PDA at `["vector", [scheme], seed]`, with a fixed 68-byte header followed by the scheme's identity bytes:
 
 ```
 nonce:    [u8; 32]  // offset  0 — current state nonce
 seed:     [u8; 32]  // offset 32 — sha256 of the key the account was created with
 scheme:   u8        // offset 64 — scheme byte
 bump:     u8        // offset 65 — PDA bump seed
-identity: [u8; N]   // offset 66 — N = stored identity length
+version:  u8        // offset 66 — account layout, currently 1
+pad:      u8        // offset 67 — zero
+identity: [u8; N]   // offset 68 — N = stored identity length
 ```
+
+The program refuses an account whose version it does not know, so a later layout can take the next number. The pad keeps the identity at a multiple of 4, where Falcon-512 and ML-DSA-44 read their prepared key in place.
 
 The seed is the SHA-256 of the key given to `Initialize`, for every scheme. It is stored so the account can sign as itself without re-deriving it. For Winternitz/XMSS it is the hash of the first key, also after rotation.
 
-| Scheme      | Total Account Size | Identity Bytes (offset 66)                      |
+| Scheme      | Total Account Size | Identity Bytes (offset 68)                      |
 |-------------|--------------------|-------------------------------------------------|
-| Ed25519     | 98 B               | 32 B public key                                 |
-| EIP-191     | 86 B               | 20 B ETH address                                |
-| Secp256k1   | 99 B               | 33 B compressed pubkey                          |
-| Falcon-512  | 1090 B             | 1024 B prepared public key                      |
-| ML-DSA-44   | 21,924 B           | 1,312 B public key + 2 B pad + 20,544 B prepared key |
-| Winternitz / XMSS | 107 B | 41 B current public key |
+| Ed25519     | 100 B              | 32 B public key                                 |
+| EIP-191     | 88 B               | 20 B ETH address                                |
+| Secp256k1   | 101 B              | 33 B compressed pubkey                          |
+| Falcon-512  | 1092 B             | 1024 B prepared public key                      |
+| ML-DSA-44   | 21,924 B           | 1,312 B public key + 20,544 B prepared key |
+| Winternitz / XMSS | 109 B | 41 B current public key |
 
 Two schemes cannot share a PDA: the scheme byte is one of the seeds, so the same identity bytes derive a different address under each scheme. The header's scheme byte is what the program routes on.
 
 ## Initialization
-A Vector account is created via the `initialize` instruction, which allocates the `66 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...key]` (the only instruction that carries the scheme byte), where `key` is the identity:
+A Vector account is created via the `initialize` instruction, which allocates the `68 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...key]` (the only instruction that carries the scheme byte), where `key` is the identity:
 
 | Scheme      | `key`                     | Stored Identity                              |
 |-------------|---------------------------|----------------------------------------------|
 | Ed25519     | 32-byte pubkey            | the pubkey verbatim                          |
 | EIP-191     | 20-byte ETH address       | the address verbatim                        |
 | Falcon-512  | 897-byte wire pubkey      | `prepared[1024]` |
-| ML-DSA-44   | 1,312-byte public key     | `pk[1312] \|\| pad[2] \|\| prepared[20544]`, over `initialize` + 2 × `expand` |
+| ML-DSA-44   | 1,312-byte public key     | `pk[1312] \|\| prepared[20544]`, over `initialize` + 2 × `expand` |
 | Secp256k1   | 33-byte compressed pubkey | the compressed pubkey verbatim              |
 | Winternitz / XMSS | 41-byte public key | the current 41-byte key |
 
-`initialize` allocates the full `66 + stored_identity_len` bytes, and every
+`initialize` allocates the full `68 + stored_identity_len` bytes, and every
 scheme but ML-DSA-44 registers in one call. An instruction can grow an account
 by at most 10,240 bytes, so ML-DSA-44's `initialize` creates that much and two
 `expand` instructions grow and fill the rest; the three fit one transaction.
@@ -283,7 +287,7 @@ Falcon-512 and ML-DSA-44 signing are intentionally left to the caller (`solana-f
 The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`):
 
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
-- `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 66-byte header.
+- `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 68-byte header.
 - `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` / `createInitializeMlDsa44(payer, publicKey)` — convenience wrappers; `createExpandMlDsa44(publicKey)` and `createRegisterMlDsa44Instructions(payer, publicKey)` build ML-DSA-44's three-instruction registration.
 - `createInitializeInstruction(payer, scheme, identity)` — generic init builder.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.

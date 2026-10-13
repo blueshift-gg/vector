@@ -77,7 +77,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
 }
 
 impl<'a> Passthrough<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &4;
+    pub const DISCRIMINATOR: &'a u8 = &1;
 
     pub fn process(&mut self) -> ProgramResult {
         let address = self.vector.address().to_bytes();

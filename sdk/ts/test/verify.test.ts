@@ -200,7 +200,7 @@ describe("sign → verify round trips", () => {
       MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
     );
     expect(Buffer.from(pinned).toString("hex")).toBe(
-      "8739c20085e9bdf92341ea40e3b4a362b03af7f2e79a55e5af4544b53ce969d7"
+      "feabd85f29d510426a31bbadef48cb4f940bb66ea30d7a2d3fc057e68b05fb20"
     );
   });
 });
@@ -293,7 +293,7 @@ describe("eip191 recovery byte", () => {
  * index footer), its half of the pin breaks.
  */
 const PINNED_DIGEST_HEX =
-  "8c8e6e1064304f4e7888cc65f52a4c17b28c6fdf996a1ea23bbbd8aaec2c857d";
+  "60e745d8e318a4862ebdf99be084f1e0d07f3431c88887620d9b89fb0201cc0d";
 
 describe("cross-language digest pin", () => {
   test("digest matches the constant pinned by the Rust suite", () => {
@@ -320,7 +320,7 @@ describe("cross-language digest pin", () => {
  * implementation drifts, its half of the pin breaks.
  */
 const PINNED_REVOCATION_DIGEST_HEX =
-  "3f7291877735e12ec808503e2b4895876344b611f82b81c9a55c7695a42f3360";
+  "be718a414d49cddd497fb38c1e4b5ba19cfb3c5062cf00136293915f1675dd54";
 
 describe("revocation (inert advance)", () => {
   test("round trip + cross-language pin", () => {

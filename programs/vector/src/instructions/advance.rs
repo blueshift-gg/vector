@@ -66,7 +66,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Advance<'a> {
 }
 
 impl<'a> Advance<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &1;
+    pub const DISCRIMINATOR: &'a u8 = &0;
 
     pub fn process(&mut self) -> ProgramResult {
         let message = self.message()?;

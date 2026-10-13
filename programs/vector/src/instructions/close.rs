@@ -50,7 +50,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Close<'a> {
 }
 
 impl<'a> Close<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &2;
+    pub const DISCRIMINATOR: &'a u8 = &4;
 
     pub fn process(&mut self) -> ProgramResult {
         let lamports = self
