@@ -1,10 +1,11 @@
-use pinocchio::{error::ProgramError, AccountView, ProgramResult};
+use pinocchio::{
+    error::ProgramError, sysvars::instructions::Instructions, AccountView, ProgramResult,
+};
 use solana_nostd_sha256::hashv;
 
 use crate::{
-    instructions::Passthrough,
+    instructions::{top_level_only, Passthrough},
     state::VectorAccount,
-    transaction::{check_instructions_sysvar, top_level_only, Transaction},
 };
 
 /// # Advance
@@ -54,11 +55,10 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Advance<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
 
-        // Account Checks
+        // Account Checks: `Instructions` checks the sysvar's address.
         if vectors.is_empty() {
             return Err(ProgramError::NotEnoughAccountKeys);
         }
-        check_instructions_sysvar(instructions_sysvar)?;
 
         Ok(Self {
             vectors,
@@ -105,16 +105,17 @@ impl<'a> Advance<'a> {
     /// The SHA-256 of the transaction with this instruction's signatures
     /// cut out: everything after its discriminator.
     fn message(&self) -> Result<[u8; 32], ProgramError> {
+        let instructions = Instructions::try_from(self.instructions_sysvar)?;
         let data = self.instructions_sysvar.try_borrow()?;
-        let transaction = Transaction::new(&data);
-        let advance = transaction.instruction(transaction.current_index()?)?;
+        let advance = instructions.load_instruction_at(instructions.load_current_index().into())?;
+        let (_, signatures) = advance
+            .get_instruction_data()
+            .split_first()
+            .ok_or(ProgramError::InvalidAccountData)?;
 
-        let signatures_start = advance.data_offset + 1;
-        let signatures_end = advance.data_offset + advance.data.len();
-        if signatures_start > signatures_end {
-            return Err(ProgramError::InvalidAccountData);
-        }
-        Ok(hashv(&[&data[..signatures_start], &data[signatures_end..]]))
+        let start = signatures.as_ptr() as usize - data.as_ptr() as usize;
+        let end = start + signatures.len();
+        Ok(hashv(&[&data[..start], &data[end..]]))
     }
 }
 
@@ -125,14 +126,16 @@ fn check_passthrough_follows(
     instructions_sysvar: &AccountView,
     vector: &[u8; 32],
 ) -> ProgramResult {
-    let data = instructions_sysvar.try_borrow()?;
-    let transaction = Transaction::new(&data);
+    let instructions = Instructions::try_from(instructions_sysvar)?;
 
-    for index in transaction.current_index()? + 1..transaction.num_instructions()? {
-        let instruction = transaction.instruction(index)?;
-        if instruction.program_id == crate::ID.as_ref()
-            && instruction.data.first() == Some(Passthrough::DISCRIMINATOR)
-            && instruction.accounts.first().map(|meta| &meta[1..]) == Some(vector)
+    for index in usize::from(instructions.load_current_index()) + 1..instructions.num_instructions()
+    {
+        let instruction = instructions.load_instruction_at(index)?;
+        if instruction.get_program_id() == &crate::ID
+            && instruction.get_instruction_data().first() == Some(Passthrough::DISCRIMINATOR)
+            && instruction
+                .get_instruction_account_at(0)
+                .is_ok_and(|meta| meta.key.as_array() == vector)
         {
             return Ok(());
         }

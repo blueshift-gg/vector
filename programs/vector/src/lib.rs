@@ -16,7 +16,6 @@ pub use instructions::*;
 pub mod scheme;
 pub mod schemes;
 pub mod state;
-pub mod transaction;
 
 // The clients use this crate as a library, for its types and constants.
 #[cfg(not(feature = "no-entrypoint"))]

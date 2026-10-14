@@ -4,13 +4,13 @@ use pinocchio::{
     cpi::{invoke_signed_with_slice, Seed, Signer},
     error::ProgramError,
     instruction::{InstructionAccount, InstructionView},
+    sysvars::instructions::Instructions,
     AccountView, ProgramResult,
 };
 
 use crate::{
-    instructions::Advance,
+    instructions::{top_level_only, Advance},
     state::{VectorAccount, VECTOR_SEED},
-    transaction::{check_instructions_sysvar, top_level_only, Transaction},
 };
 
 /// # Passthrough
@@ -63,9 +63,6 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
         let [vector, instructions_sysvar, remaining @ ..] = accounts else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
-
-        // Account Checks
-        check_instructions_sysvar(instructions_sysvar)?;
 
         Ok(Self {
             vector,
@@ -159,14 +156,17 @@ impl<'a> Passthrough<'a> {
 /// An earlier instruction of this transaction is an `Advance` that lists
 /// `vector`. It ran, so the account's signature was verified.
 fn check_advanced(instructions_sysvar: &AccountView, vector: &[u8; 32]) -> ProgramResult {
-    let data = instructions_sysvar.try_borrow()?;
-    let transaction = Transaction::new(&data);
+    let instructions = Instructions::try_from(instructions_sysvar)?;
 
-    for index in 0..transaction.current_index()? {
-        let instruction = transaction.instruction(index)?;
-        if instruction.program_id == crate::ID.as_ref()
-            && instruction.data.first() == Some(Advance::DISCRIMINATOR)
-            && instruction.accounts.iter().any(|meta| &meta[1..] == vector)
+    for index in 0..instructions.load_current_index().into() {
+        let instruction = instructions.load_instruction_at(index)?;
+        if instruction.get_program_id() == &crate::ID
+            && instruction.get_instruction_data().first() == Some(Advance::DISCRIMINATOR)
+            && (0..instruction.num_account_metas()).any(|i| {
+                instruction
+                    .get_instruction_account_at(i)
+                    .is_ok_and(|meta| meta.key.as_array() == vector)
+            })
         {
             return Ok(());
         }
