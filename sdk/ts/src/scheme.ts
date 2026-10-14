@@ -19,12 +19,12 @@ export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamf
 
 /**
  * The account header: `nonce[32] || seed[32] || scheme[1] || bump[1] ||
- * version[1] || pad[1]`. The seed is the SHA-256 of the key the account was
- * created with. The scheme's identity bytes follow.
+ * system_bump[1] || pad[1]`. The seed is the SHA-256 of the key the account
+ * was created with. The scheme's identity bytes follow.
  */
 export const VECTOR_HEADER_LEN = 68;
-/** The account layout the program writes and accepts. */
-export const VECTOR_ACCOUNT_VERSION = 1;
+/** What one instruction can allocate; a bigger account takes more `initialize` calls. */
+export const MAX_PERMITTED_DATA_INCREASE = 10_240;
 export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
 
 // Falcon-512 wire sizes — mirror `solana-falcon512` constants.
@@ -88,7 +88,7 @@ export interface VectorAccount {
   seed: Uint8Array; // 32 bytes
   scheme: number; // 1 byte
   bump: number; // 1 byte
-  version: number; // 1 byte
+  systemBump: number; // 1 byte
 }
 
 export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
@@ -102,7 +102,7 @@ export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
     seed: data.slice(32, 64),
     scheme: data[64],
     bump: data[65],
-    version: data[66],
+    systemBump: data[66],
   };
 }
 
@@ -112,7 +112,7 @@ export function serializeVectorAccountHeader(account: VectorAccount): Uint8Array
   buf.set(account.seed, 32);
   buf[64] = account.scheme;
   buf[65] = account.bump;
-  buf[66] = account.version;
+  buf[66] = account.systemBump;
   return buf;
 }
 
@@ -140,6 +140,14 @@ export function findVectorPda(
     [VECTOR_PDA_SEED, Uint8Array.of(scheme.id), vectorSeed(identity)],
     PROGRAM_ID
   );
+}
+
+/**
+ * Derive the vector account's system PDA, `[vector]`, and its bump. It
+ * belongs to the System program; `SystemPassthrough` signs as it.
+ */
+export function findSystemPda(vector: Address): [Address, number] {
+  return findProgramAddressSync([vector.toBytes()], PROGRAM_ID);
 }
 
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");

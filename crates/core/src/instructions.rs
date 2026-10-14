@@ -1,6 +1,7 @@
 //! Instruction builders for every scheme. Each scheme's own helpers, such as
 //! `create_initialize_ed25519`, are in [`crate::schemes`].
 
+use pinocchio::account::MAX_PERMITTED_DATA_INCREASE;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 
@@ -41,6 +42,24 @@ pub fn create_initialize_instruction(
         ],
         data,
     }
+}
+
+/// Every `initialize` that creates the account for `identity`: the first
+/// carries the key, and each later one grows the account by what one
+/// instruction can allocate until it is complete. One instruction for every
+/// scheme but ML-DSA-44, which takes three. They fit one transaction.
+pub fn create_initialize_instructions(
+    payer: &Address,
+    scheme: &Scheme,
+    identity: &[u8],
+) -> Vec<Instruction> {
+    let first = create_initialize_instruction(payer, scheme, identity);
+    let mut grow = first.clone();
+    grow.data.truncate(1);
+    let calls = scheme.account_len().div_ceil(MAX_PERMITTED_DATA_INCREASE);
+    std::iter::once(first)
+        .chain(std::iter::repeat_n(grow, calls - 1))
+        .collect()
 }
 
 /// Build an `advance` for one signer. It verifies the signature and moves the

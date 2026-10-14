@@ -5,7 +5,7 @@ use pinocchio::{
     cpi::{Seed, Signer},
     error::ProgramError,
     sysvars::{rent::Rent, slot_hashes, Sysvar},
-    AccountView, Address, ProgramResult,
+    AccountView, Address, ProgramResult, Resize,
 };
 use pinocchio_system::{
     create_program_account_with_minimum_balance_signed, instructions::Transfer,
@@ -27,12 +27,16 @@ use crate::{
 /// account that is closed and created again in a later slot starts somewhere
 /// new.
 ///
-/// > Create the account at the address for this scheme and key
-/// > Fund it for its full size
-/// > Write the header and the scheme's identity bytes
+/// An instruction can allocate 10,240 bytes, so a bigger account (ML-DSA-44)
+/// takes more than one call. The first creates it and writes what fits;
+/// each later call grows it and fills in the rest from the stored key, until
+/// it is complete. The account tells the two apart: the first finds it not
+/// yet the program's.
 ///
-/// An instruction can allocate 10,240 bytes. A scheme with a bigger account
-/// (ML-DSA-44) is created at that size and finished with `Expand`.
+/// > First call: create the account at the address for this scheme and key,
+/// >   fund it for its full size, write the header and what fits of the
+/// >   identity
+/// > Later calls: grow the account, fill in the new bytes
 ///
 /// Accounts:
 ///
@@ -42,14 +46,20 @@ use crate::{
 ///
 /// Parameters:
 ///
-/// - scheme: u8
-/// - key: the public key or address, as the scheme takes it
+/// - first call: scheme: u8, then the key, as the scheme takes it
+/// - later calls: none
 ///
 /// Account Checks:
-/// - Vector: at the address derived from the scheme and the key
+/// - Vector: first call, at the address derived from the scheme and the
+///   key; later calls, owned by the program and not complete
 /// - Key: the scheme validates it as it writes the identity
 /// - Payer, SystemProgram: no need to check since the create CPI fails
-pub struct Initialize<'a> {
+pub enum Initialize<'a> {
+    Create(Create<'a>),
+    Grow(&'a mut AccountView),
+}
+
+pub struct Create<'a> {
     payer: &'a AccountView,
     vector: &'a mut AccountView,
     scheme: u8,
@@ -65,6 +75,14 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
         let [payer, vector, _system_program] = accounts else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
+
+        if vector.owned_by(&crate::ID) {
+            if !data.is_empty() {
+                return Err(ProgramError::AccountAlreadyInitialized);
+            }
+            return Ok(Self::Grow(vector));
+        }
+
         let [scheme, key @ ..] = data else {
             return Err(ProgramError::InvalidInstructionData);
         };
@@ -77,14 +95,14 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
             return Err(ProgramError::InvalidAccountData);
         }
 
-        Ok(Self {
+        Ok(Self::Create(Create {
             payer,
             vector,
             scheme: *scheme,
             key,
             seed,
             bump,
-        })
+        }))
     }
 }
 
@@ -92,6 +110,15 @@ impl<'a> Initialize<'a> {
     pub const DISCRIMINATOR: &'a u8 = &2;
 
     pub fn process(&mut self) -> ProgramResult {
+        match self {
+            Self::Create(create) => create.process(),
+            Self::Grow(vector) => grow(vector),
+        }
+    }
+}
+
+impl Create<'_> {
+    fn process(&mut self) -> ProgramResult {
         let (payer, vector) = (self.payer, &mut *self.vector);
         let scheme = schemes::scheme(self.scheme)?;
 
@@ -129,6 +156,9 @@ impl<'a> Initialize<'a> {
             .invoke()?;
         }
 
+        let (_, system_bump) =
+            Address::find_program_address(&[vector.address().as_ref()], &crate::ID);
+
         // Write the header, then as much of the identity as fits.
         let mut data = vector.try_borrow_mut()?;
         let (account, identity) = VectorAccount::split(&mut data)?;
@@ -136,9 +166,27 @@ impl<'a> Initialize<'a> {
         account.seed = self.seed;
         account.scheme = self.scheme;
         account.bump = self.bump;
-        account.version = VectorAccount::VERSION;
+        account.system_bump = system_bump;
         scheme.initialize(self.key, identity)
     }
+}
+
+/// Grow the account by what one instruction can allocate, up to its full
+/// length, and let the scheme fill in the new bytes. What is written depends
+/// only on the key already stored.
+fn grow(vector: &mut AccountView) -> ProgramResult {
+    let scheme = VectorAccount::scheme(&vector.try_borrow()?)?;
+
+    let old_len = vector.data_len();
+    let full_len = VectorAccount::HEADER_LEN + scheme.identity_len();
+    if old_len >= full_len {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    vector.resize(full_len.min(old_len + MAX_PERMITTED_DATA_INCREASE))?;
+
+    let mut data = vector.try_borrow_mut()?;
+    let (_, identity) = VectorAccount::split(&mut data)?;
+    scheme.grow(identity, old_len.saturating_sub(VectorAccount::HEADER_LEN))
 }
 
 /// The newest entry of the slot hashes sysvar: a slot (u64) and its hash.

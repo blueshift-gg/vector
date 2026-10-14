@@ -20,9 +20,13 @@ pub const VECTOR_SEED: &[u8] = b"vector";
 /// seed:   [u8; 32]  // offset 32 — sha256 of the key it was created with
 /// scheme:  u8       // offset 64 — the scheme of the identity that follows
 /// bump:    u8       // offset 65 — PDA bump seed
-/// version: u8       // offset 66 — the layout of the account, `VERSION`
+/// system_bump: u8   // offset 66 — bump of the account's system PDA
 /// _pad:    u8       // offset 67
 /// ```
+///
+/// The system PDA, `[vector address, system_bump]`, belongs to the System
+/// program: `SystemPassthrough` signs as it, for what only a system account
+/// can do.
 ///
 /// The pad keeps the identity at a multiple of 4 in the account: Falcon-512
 /// and ML-DSA-44 read their prepared key in place.
@@ -33,15 +37,11 @@ pub struct VectorAccount {
     pub seed: [u8; 32],
     pub scheme: u8,
     pub bump: u8,
-    pub version: u8,
+    pub system_bump: u8,
     _pad: u8,
 }
 
 impl VectorAccount {
-    /// The only layout there is. A program that changes the layout gives it
-    /// the next number, and can then tell the accounts apart.
-    pub const VERSION: u8 = 1;
-
     /// Length of the header. The identity follows it.
     pub const HEADER_LEN: usize = size_of::<Self>();
 
@@ -55,14 +55,11 @@ impl VectorAccount {
 
     /// The scheme of an account, from its header. The program takes the
     /// scheme from here and never from the caller, so the identity is always
-    /// read as the scheme that wrote it. Fails on a layout it does not know.
+    /// read as the scheme that wrote it.
     pub fn scheme(data: &[u8]) -> Result<&'static dyn Scheme, ProgramError> {
         let id = *data
             .get(offset_of!(Self, scheme))
             .ok_or(ProgramError::AccountDataTooSmall)?;
-        if data.get(offset_of!(Self, version)) != Some(&Self::VERSION) {
-            return Err(ProgramError::InvalidAccountData);
-        }
         schemes::scheme(id).map_err(|_| ProgramError::InvalidAccountData)
     }
 

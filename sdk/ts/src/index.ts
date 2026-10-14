@@ -44,15 +44,11 @@ export type { Falcon512Keypair } from "./schemes/falcon512.js";
 export {
   MLDSA44,
   MLDSA44_SECRET_KEY_LEN,
-  MLDSA44_EXPAND_STEPS,
-  MLDSA44_EXPAND_DISCRIMINATOR,
   MLDSA44_STORED_IDENTITY_LEN,
   mldsa44Identity,
   mldsa44Keygen,
   mldsa44PublicKey,
   createInitializeMlDsa44,
-  createExpandMlDsa44,
-  createRegisterMlDsa44Instructions,
   signAdvanceInstructionMlDsa44,
 } from "./schemes/mldsa44.js";
 export type { MlDsa44Keypair } from "./schemes/mldsa44.js";

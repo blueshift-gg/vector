@@ -13,7 +13,7 @@ type PreparedKey = PreparedVerifyingKey<false>;
 /// ML-DSA-44 (FIPS 204) with an empty context.
 ///
 /// The account is too big to create in one instruction, so it is created
-/// short and `Expand` grows it. The prepared key is filled in row by row as
+/// short and later `Initialize` calls grow it. The prepared key is filled in row by row as
 /// the account becomes long enough to hold each row.
 #[repr(C)]
 pub struct MlDsa44 {
@@ -39,11 +39,7 @@ unsafe impl SigningScheme for MlDsa44 {
         prepare_rows(identity, 0)
     }
 
-    /// Fails once the account is complete.
-    fn expand(identity: &mut [u8], from: usize) -> Result<(), ProgramError> {
-        if from >= size_of::<Self>() {
-            return Err(ProgramError::InvalidAccountData);
-        }
+    fn grow(identity: &mut [u8], from: usize) -> Result<(), ProgramError> {
         prepare_rows(identity, from)
     }
 

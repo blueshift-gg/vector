@@ -4,14 +4,12 @@ import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
 
 import {
   Scheme,
-  findVectorPda,
   MLDSA44_PUBKEY_LEN,
   MLDSA44_SIGNATURE_LEN,
   MLDSA44_PREPARED_KEY_LEN,
-  PROGRAM_ID,
 } from "../scheme.js";
 import {
-  createInitializeInstruction,
+  createInitializeInstructions,
   createAdvanceInstruction,
 } from "../instructions.js";
 import { advanceVectorDigest } from "../digest.js";
@@ -24,10 +22,6 @@ export {
 
 /** ML-DSA-44 secret key length (FIPS 204 Table 2). */
 export const MLDSA44_SECRET_KEY_LEN = 2560;
-/** `expand` instructions after `initialize` to reach the full account. */
-export const MLDSA44_EXPAND_STEPS = 2;
-/** Discriminator of the program's one extra instruction. */
-export const MLDSA44_EXPAND_DISCRIMINATOR = 5;
 /** `pk[1312] || prepared[20544]`. */
 export const MLDSA44_STORED_IDENTITY_LEN =
   MLDSA44_PUBKEY_LEN + MLDSA44_PREPARED_KEY_LEN;
@@ -73,45 +67,15 @@ export function mldsa44PublicKey(secretKey: Uint8Array): Uint8Array {
 }
 
 /**
- * Create an ML-DSA-44 account. It is created short: follow with {@link
- * MLDSA44_EXPAND_STEPS} {@link createExpandMlDsa44} instructions. {@link
- * createRegisterMlDsa44Instructions} builds all three.
+ * Create an ML-DSA-44 account: three `initialize` instructions. Put them in
+ * one transaction (a V1 transaction: the key alone is 1,313 bytes of
+ * instruction data) with a 1.4M compute budget.
  */
 export function createInitializeMlDsa44(
   payer: Address,
   publicKey: Uint8Array
-): TransactionInstruction {
-  const identity = mldsa44Identity(publicKey);
-  return createInitializeInstruction(payer, MLDSA44, identity);
-}
-
-/**
- * Grow the account by one step. Anyone can send it; it fails once the account
- * is complete.
- */
-export function createExpandMlDsa44(publicKey: Uint8Array): TransactionInstruction {
-  const [vectorPda] = findVectorPda(MLDSA44, mldsa44Identity(publicKey));
-  return new TransactionInstruction({
-    programId: PROGRAM_ID,
-    keys: [{ pubkey: vectorPda, isSigner: false, isWritable: true }],
-    data: Buffer.from([MLDSA44_EXPAND_DISCRIMINATOR]),
-  });
-}
-
-/**
- * The whole registration: `initialize` then two `expand`. Put all three in
- * one transaction (a V1 transaction: the key alone is 1,313 bytes of
- * instruction data) with a 1.4M compute budget.
- */
-export function createRegisterMlDsa44Instructions(
-  payer: Address,
-  publicKey: Uint8Array
 ): TransactionInstruction[] {
-  const expand = () => createExpandMlDsa44(publicKey);
-  return [
-    createInitializeMlDsa44(payer, publicKey),
-    ...Array.from({ length: MLDSA44_EXPAND_STEPS }, expand),
-  ];
+  return createInitializeInstructions(payer, MLDSA44, mldsa44Identity(publicKey));
 }
 
 /**

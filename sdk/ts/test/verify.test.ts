@@ -20,9 +20,9 @@ import {
   eip191Identity,
   falcon512Keygen,
   mldsa44Keygen,
-  createRegisterMlDsa44Instructions,
+  createInitializeMlDsa44,
+  INITIALIZE_DISCRIMINATOR,
   MLDSA44,
-  MLDSA44_EXPAND_DISCRIMINATOR,
   createPassthroughInstruction,
   createWithdrawSubinstruction,
   findVectorPda,
@@ -177,15 +177,13 @@ describe("sign → verify round trips", () => {
       verifyAdvanceSignature(MLDSA44, keypair.publicKey, NONCE, pre, post, tampered)
     ).toThrow(SignatureVerificationError);
 
-    // Registration is initialize plus two expands on the same PDA.
-    const register = createRegisterMlDsa44Instructions(addr(0x33), keypair.publicKey);
+    // Registration is three initialize calls; only the first carries the key.
+    const register = createInitializeMlDsa44(addr(0x33), keypair.publicKey);
     expect(register.length).toBe(3);
     expect(register[0].data.length).toBe(2 + MLDSA44.identityLen);
-    for (const expand of register.slice(1)) {
-      expect(Array.from(expand.data)).toEqual([MLDSA44_EXPAND_DISCRIMINATOR]);
-      expect(expand.keys.length).toBe(1);
-      expect(expand.keys[0].pubkey.equals(register[0].keys[1].pubkey)).toBe(true);
-      expect(expand.keys[0].isWritable).toBe(true);
+    for (const grow of register.slice(1)) {
+      expect(Array.from(grow.data)).toEqual([INITIALIZE_DISCRIMINATOR]);
+      expect(grow.keys).toEqual(register[0].keys);
     }
 
     // Shared with tests/mldsa44.rs: identity, PDA and digest.

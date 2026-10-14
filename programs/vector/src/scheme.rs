@@ -20,15 +20,15 @@ use pinocchio::error::ProgramError;
 pub unsafe trait SigningScheme {
     /// `Initialize`: validate `key` and write the identity. The buffer is
     /// shorter than `Self` when the account could not be created at full
-    /// size; [`expand`](Self::expand) then finishes the job.
+    /// size; [`grow`](Self::grow) then finishes the job.
     fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError>
     where
         Self: Sized;
 
-    /// `Expand`: the account grew, and `identity` was `from` bytes long
-    /// before. Fill in what fits now. Default: the scheme's account is
-    /// created whole, so there is nothing to expand.
-    fn expand(_identity: &mut [u8], _from: usize) -> Result<(), ProgramError>
+    /// A later `Initialize`: the account grew, and `identity` was `from`
+    /// bytes long before. Fill in what fits now. Default: the scheme's
+    /// account is created whole, so it never grows.
+    fn grow(_identity: &mut [u8], _from: usize) -> Result<(), ProgramError>
     where
         Self: Sized,
     {
@@ -56,8 +56,8 @@ pub unsafe trait SigningScheme {
     }
 }
 
-/// A scheme before there is an identity of it to call: what `Initialize` and
-/// `Expand` need, and how to read an identity back.
+/// A scheme before there is an identity of it to call: what `Initialize`
+/// needs, and how to read an identity back.
 pub trait Scheme {
     /// Length of the identity, the bytes after the account's header.
     fn identity_len(&self) -> usize;
@@ -65,8 +65,8 @@ pub trait Scheme {
     /// [`SigningScheme::initialize`].
     fn initialize(&self, key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError>;
 
-    /// [`SigningScheme::expand`].
-    fn expand(&self, identity: &mut [u8], from: usize) -> Result<(), ProgramError>;
+    /// [`SigningScheme::grow`].
+    fn grow(&self, identity: &mut [u8], from: usize) -> Result<(), ProgramError>;
 
     /// View a complete account's identity bytes as the scheme's identity.
     fn load<'a>(&self, identity: &'a mut [u8]) -> Result<&'a mut dyn SigningScheme, ProgramError>;
@@ -82,8 +82,8 @@ impl<T: SigningScheme + 'static> Scheme for PhantomData<T> {
         T::initialize(key, identity)
     }
 
-    fn expand(&self, identity: &mut [u8], from: usize) -> Result<(), ProgramError> {
-        T::expand(identity, from)
+    fn grow(&self, identity: &mut [u8], from: usize) -> Result<(), ProgramError> {
+        T::grow(identity, from)
     }
 
     fn load<'a>(&self, identity: &'a mut [u8]) -> Result<&'a mut dyn SigningScheme, ProgramError> {

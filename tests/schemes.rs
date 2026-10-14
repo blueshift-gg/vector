@@ -7,8 +7,8 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
 use vector_core::{
-    create_expand_mldsa44, create_initialize_instruction, create_rotating_passthrough_instruction,
-    find_vector_pda, WINTERNITZ, XMSS,
+    create_initialize_instruction, create_initialize_mldsa44,
+    create_rotating_passthrough_instruction, find_vector_pda, WINTERNITZ, XMSS,
 };
 
 use crate::common::{build_vector_account, mollusk, NONCE};
@@ -63,18 +63,28 @@ fn initialize_derives_the_address_from_the_scheme_it_is_given() {
     }
 }
 
-/// `Expand` exists for ML-DSA-44 only, and the account's header decides.
+/// Only ML-DSA-44 grows after its first `Initialize`, and the account's
+/// header decides.
 #[test]
 fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     let mollusk = mollusk();
     let (vector, _) = find_vector_pda(&WINTERNITZ, &KEY);
     let account = build_vector_account(NONCE, &WINTERNITZ, &KEY, 10_000_000, &KEY);
-    let mut expand = create_expand_mldsa44(&[0; 1312]);
-    expand.accounts[0].pubkey = vector;
-    let result = mollusk.process_instruction(&expand, &[(vector, account.clone())]);
+    let payer = Address::new_unique();
+    let mut grow = create_initialize_mldsa44(&payer, &[0; 1312])[1].clone();
+    grow.accounts[1].pubkey = vector;
+    let (system, system_account) = keyed_account_for_system_program();
+    let result = mollusk.process_instruction(
+        &grow,
+        &[
+            (payer, Account::new(1_000_000_000, 0, &system)),
+            (vector, account.clone()),
+            (system, system_account),
+        ],
+    );
     assert_eq!(
         result.program_result,
-        ProgramResult::Failure(ProgramError::InvalidInstructionData)
+        ProgramResult::Failure(ProgramError::InvalidAccountData)
     );
 
     // Anyone can assign a zeroed account to the program. It belongs to no

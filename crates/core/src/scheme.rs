@@ -71,3 +71,9 @@ pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
         &PROGRAM_ID,
     )
 }
+
+/// Derive the vector account's system PDA, `[vector]`, and its bump. It
+/// belongs to the System program; `SystemPassthrough` signs as it.
+pub fn find_system_pda(vector: &Address) -> (Address, u8) {
+    Address::find_program_address(&[vector.as_ref()], &PROGRAM_ID)
+}

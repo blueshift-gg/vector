@@ -12,9 +12,11 @@ import {
 import {
   Scheme,
   findVectorPda,
+  vectorAccountLen,
   writeU16LE,
   writeU64LE,
   PROGRAM_ID,
+  MAX_PERMITTED_DATA_INCREASE,
   INITIALIZE_DISCRIMINATOR,
   ADVANCE_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
@@ -52,6 +54,28 @@ export function createInitializeInstruction(
     ],
     data: Buffer.from(data),
   });
+}
+
+/**
+ * Every `initialize` that creates the account for `identity`: the first
+ * carries the key, and each later one grows the account by what one
+ * instruction can allocate until it is complete. One instruction for every
+ * scheme but ML-DSA-44, which takes three. They fit one transaction.
+ */
+export function createInitializeInstructions(
+  payer: Address,
+  scheme: Scheme,
+  identity: Uint8Array
+): TransactionInstruction[] {
+  const first = createInitializeInstruction(payer, scheme, identity);
+  const calls = Math.ceil(vectorAccountLen(scheme) / MAX_PERMITTED_DATA_INCREASE);
+  const grow = () =>
+    new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: first.keys,
+      data: Buffer.from([INITIALIZE_DISCRIMINATOR]),
+    });
+  return [first, ...Array.from({ length: calls - 1 }, grow)];
 }
 
 // ── Advance ──────────────────────────────────────────────────────────

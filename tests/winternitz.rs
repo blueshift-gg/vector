@@ -66,7 +66,8 @@ fn initialize_and_client_encoding() {
         .1
         .data;
     assert_eq!(&stored[32..64], &vector_core::vector_seed(&identity));
-    assert_eq!(stored[64..68], [WINTERNITZ.id, bump, 1, 0]);
+    let (_, system_bump) = vector_core::find_system_pda(&vector);
+    assert_eq!(stored[64..68], [WINTERNITZ.id, bump, system_bump, 0]);
     assert_eq!(&stored[68..], &public_key);
 
     // A key of another length has another address, and the scheme refuses it.
@@ -140,8 +141,6 @@ fn signature_binds_close_and_rejects_replay() {
     tampered[winternitz::SIGNATURE_LEN - 1] ^= 1;
     let mut wrong_key = account.clone();
     wrong_key.data[68] ^= 1;
-    let mut wrong_version = account.clone();
-    wrong_version.data[66] = 2;
     let mut advanced = account.clone();
     advanced.data = expected.clone();
 
@@ -170,12 +169,6 @@ fn signature_binds_close_and_rejects_replay() {
             wrong_key,
             passthrough.clone(),
             ProgramError::MissingRequiredSignature,
-        ),
-        (
-            signature.as_slice(),
-            wrong_version,
-            passthrough.clone(),
-            ProgramError::InvalidAccountData,
         ),
         (
             signature.as_slice(),

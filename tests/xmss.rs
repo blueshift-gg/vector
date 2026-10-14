@@ -65,7 +65,8 @@ fn initialize_checks_key_length_and_pda() {
         .1
         .data;
     assert_eq!(&stored[32..64], &vector_core::vector_seed(&identity));
-    assert_eq!(stored[64..68], [XMSS.id, bump, 1, 0]);
+    let (_, system_bump) = vector_core::find_system_pda(&vector);
+    assert_eq!(stored[64..68], [XMSS.id, bump, system_bump, 0]);
     assert_eq!(&stored[68..], &xmss_stored(&public_key, 0));
 
     // A key of another length has another address, and the scheme refuses it.

@@ -41,7 +41,6 @@ pub fn process_instruction(
         Some((Initialize::DISCRIMINATOR, data)) => {
             Initialize::try_from((data, accounts))?.process()
         }
-        Some((Expand::DISCRIMINATOR, data)) => Expand::try_from((data, accounts))?.process(),
         Some((Withdraw::DISCRIMINATOR, data)) => Withdraw::try_from((data, accounts))?.process(),
         Some((Close::DISCRIMINATOR, data)) => Close::try_from((data, accounts))?.process(),
 

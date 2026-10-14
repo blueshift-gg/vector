@@ -15,8 +15,8 @@ use spl_token_interface::{
     state::{Account as TokenAccount, AccountState, Mint},
 };
 use vector_core::{
-    advance_vector_digest, create_passthrough_instruction, find_vector_pda, vector_seed, Scheme,
-    PROGRAM_ID,
+    advance_vector_digest, create_passthrough_instruction, find_system_pda, find_vector_pda,
+    vector_seed, Scheme, PROGRAM_ID,
 };
 
 /// Initial nonce used for advance/close digests across the suite.
@@ -61,8 +61,14 @@ pub fn process_transaction(
 
 /// The account header for `identity` at `nonce`.
 fn header(nonce: [u8; 32], scheme: &Scheme, identity: &[u8]) -> Vec<u8> {
-    let (_, bump) = find_vector_pda(scheme, identity);
-    [&nonce[..], &vector_seed(identity), &[scheme.id, bump, 1, 0]].concat()
+    let (vector, bump) = find_vector_pda(scheme, identity);
+    let (_, system_bump) = find_system_pda(&vector);
+    [
+        &nonce[..],
+        &vector_seed(identity),
+        &[scheme.id, bump, system_bump, 0],
+    ]
+    .concat()
 }
 
 /// What an XMSS account stores: its key, then the lowest leaf that may sign

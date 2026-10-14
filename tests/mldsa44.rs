@@ -1,9 +1,9 @@
 //! ML-DSA-44 tests.
 //!
 //! The identity is the 1,312-byte public key. The account stores it and the
-//! key's 20,544-byte expanded form. Registration is `initialize` (10,240
-//! bytes: key, row 0) then two `expand` (20,480: rows 1, 2; 21,924: row 3,
-//! `tr`), all three in one transaction.
+//! key's 20,544-byte expanded form. Registration is three `initialize`
+//! (10,240 bytes: key, row 0; 20,480: rows 1, 2; 21,924: row 3, `tr`), all
+//! in one transaction.
 
 use fips204::ml_dsa_44;
 use fips204::traits::{SerDes, Signer};
@@ -15,10 +15,9 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
 use vector_core::{
-    advance_vector_digest, create_advance_instruction, create_expand_mldsa44,
-    create_initialize_mldsa44, create_passthrough_instruction, create_withdraw_subinstruction,
-    find_vector_pda, verify_advance_signature, MLDSA44, MLDSA44_EXPAND_STEPS, MLDSA44_PUBKEY_LEN,
-    MLDSA44_SIGNATURE_LEN,
+    advance_vector_digest, create_advance_instruction, create_initialize_mldsa44,
+    create_passthrough_instruction, create_withdraw_subinstruction, find_system_pda,
+    find_vector_pda, verify_advance_signature, MLDSA44, MLDSA44_PUBKEY_LEN, MLDSA44_SIGNATURE_LEN,
 };
 
 use crate::common::{
@@ -62,10 +61,10 @@ fn register_in_one_transaction() {
     );
     let (vector, bump) = find_vector_pda(&MLDSA44, &pk);
 
-    let init_ix = create_initialize_mldsa44(&payer, &pk);
-    let expand_ix = create_expand_mldsa44(&pk);
-    assert_eq!(MLDSA44_EXPAND_STEPS, 2);
+    let register = create_initialize_mldsa44(&payer, &pk);
+    assert_eq!(register.len(), 3);
     assert_eq!(MLDSA44.account_len(), 21_924);
+    let grow = &register[1];
 
     let accounts = vec![
         (payer, payer_account),
@@ -73,28 +72,18 @@ fn register_in_one_transaction() {
         (system_program, system_program_account),
     ];
 
-    let foreign = mollusk.process_instruction(&expand_ix, &accounts);
+    // A later call carries no key: on an account that does not exist yet,
+    // there is nothing to create it from.
+    let early = mollusk.process_instruction(grow, &accounts);
     assert_eq!(
-        foreign.program_result,
-        mollusk_svm::result::ProgramResult::Failure(ProgramError::InvalidAccountOwner)
-    );
-    assert_eq!(foreign.resulting_accounts, accounts);
-    let mut malformed = expand_ix.clone();
-    malformed.data.push(0);
-    let mut header = vec![0; 68];
-    header[64] = MLDSA44.id;
-    header[66] = 1;
-    let mut owned = Account::new(1_000_000_000, 0, &vector_core::PROGRAM_ID);
-    owned.data = header;
-    let rejected = mollusk.process_instruction(&malformed, &[(vector, owned)]);
-    assert_eq!(
-        rejected.program_result,
+        early.program_result,
         mollusk_svm::result::ProgramResult::Failure(ProgramError::InvalidInstructionData)
     );
+    assert_eq!(early.resulting_accounts, accounts);
 
     let result = process_transaction(
         &mollusk,
-        &[&init_ix, &expand_ix.clone(), &expand_ix.clone()],
+        &register.iter().collect::<Vec<_>>(),
         &accounts,
         &[],
     );
@@ -110,11 +99,12 @@ fn register_in_one_transaction() {
     // header whose nonce the program derived on chain.
     let registered = accounts.iter().find(|(k, _)| *k == vector).unwrap().clone();
     let data = &registered.1.data;
-    assert_eq!(data[64..68], [MLDSA44.id, bump, 1, 0]);
+    let (_, system_bump) = find_system_pda(&vector);
+    assert_eq!(data[64..68], [MLDSA44.id, bump, system_bump, 0]);
     assert_eq!(&data[68..], &stored_identity(&pk)[..]);
 
-    // A third expand is refused.
-    let full = mollusk.process_instruction(&expand_ix, std::slice::from_ref(&registered));
+    // A fourth call is refused.
+    let full = mollusk.process_instruction(grow, &accounts);
     assert_eq!(
         full.program_result,
         mollusk_svm::result::ProgramResult::Failure(ProgramError::InvalidAccountData)
@@ -133,7 +123,7 @@ fn register_in_one_transaction() {
 }
 
 #[test]
-fn advance_before_expand_fails() {
+fn advance_before_complete_fails() {
     let mut mollusk = mollusk();
     mollusk.compute_budget.compute_unit_limit = TRANSACTION_CU_LIMIT;
     let (pk, sk) = keypair();

@@ -70,7 +70,7 @@ Falcon signatures are variable-length (compressed Huffman); the wire format zero
 
 Vector verifies [ML-DSA-44 (FIPS 204)](https://csrc.nist.gov/pubs/fips/204/final) through [`solana-ml-dsa`](https://github.com/blueshift-gg/solana-ml-dsa), using SHAKE128/256 and an empty context. The 1,312-byte public key is the identity and is hashed for the PDA seed. Rust callers supply signatures from an external signer; the TypeScript SDK uses Noble's `ml_dsa44`.
 
-The program prepares the key on chain once, following Falcon's approach. The 21,924-byte account holds the 68-byte header, then `public_key[1312] || prepared_key[20544]`. Registration is `Initialize` followed by two permissionless `Expand` instructions; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
+The program prepares the key on chain once, following Falcon's approach. The 21,924-byte account holds the 68-byte header, then `public_key[1312] || prepared_key[20544]`. Registration is three `Initialize` calls: the first creates the account and carries the key, the next two are permissionless and grow it; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
 
 Registration takes about 1.1M CU and a subsequent `Advance` about 264K CU in local SBPF tests. Registration and the 2,420-byte signature require [V1 transactions](https://solana.com/upgrades/larger-transaction-sizes); callers supply the transaction limits. The SDK builds instructions and does not submit transactions. The workspace pins `solana-ml-dsa` to a git revision; publish the crate with its required `solana-shake` revision and depend on the release before deploying.
 
@@ -135,16 +135,15 @@ The program verifies one signature per account, taking each signature's length f
 A one-time key (Winternitz, XMSS) should sign last: its signature only lands if every other signer's does, and it must not be used for a second message. A Winternitz account needs its `Passthrough` after the `Advance` even when it only co-signs.
 
 ## Instruction Set
-Every scheme has instructions 0–4. ML-DSA-44 also has `Expand` (5). Each instruction starts with its discriminator byte.
+Each instruction starts with its discriminator byte.
 
 | Disc | Name        | Top-Level Callable? | Authorisation                                |
 |------|-------------|---------------------|----------------------------------------------|
 | `0`  | Advance     | **only** top-level (CPI guarded) | offchain signature over the canonical digest |
 | `1`  | Passthrough | **only** top-level (CPI guarded) | a sibling Advance for the same vector PDA earlier in the same transaction |
-| `2`  | Initialize  | yes | payer funds creation |
+| `2`  | Initialize  | yes | payer funds creation; later calls grow an account too big for one (ML-DSA-44) |
 | `3`  | Withdraw    | only via Passthrough reentry | inherited from the authorising Advance       |
 | `4`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
-| `5`  | Expand | yes | none: grows the account by one 10,240-byte step and fills it from the stored key; ML-DSA-44 only |
 
 `Advance` carries only signatures, one per account — its handler verifies each, installs the digest as the next nonce, and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler scans the instructions sysvar and refuses to run unless a prior `Advance` for the same vector PDA appears earlier in the transaction. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
 
@@ -216,12 +215,12 @@ nonce:    [u8; 32]  // offset  0 — current state nonce
 seed:     [u8; 32]  // offset 32 — sha256 of the key the account was created with
 scheme:   u8        // offset 64 — scheme byte
 bump:     u8        // offset 65 — PDA bump seed
-version:  u8        // offset 66 — account layout, currently 1
+system_bump: u8     // offset 66 — bump of the account's system PDA
 pad:      u8        // offset 67 — zero
 identity: [u8; N]   // offset 68 — N = stored identity length
 ```
 
-The program refuses an account whose version it does not know, so a later layout can take the next number. The pad keeps the identity at a multiple of 4, where Falcon-512 and ML-DSA-44 read their prepared key in place.
+The system PDA is `[vector address, system_bump]` under the program and belongs to the System program. The pad keeps the identity at a multiple of 4, where Falcon-512 and ML-DSA-44 read their prepared key in place.
 
 The seed is the SHA-256 of the key given to `Initialize`, for every scheme. It is stored so the account can sign as itself without re-deriving it. For Winternitz/XMSS it is the hash of the first key, also after rotation.
 
@@ -245,19 +244,20 @@ A Vector account is created via the `initialize` instruction, which allocates th
 | Ed25519     | 32-byte pubkey            | the pubkey verbatim                          |
 | EIP-191     | 20-byte ETH address       | the address verbatim                        |
 | Falcon-512  | 897-byte wire pubkey      | `prepared[1024]` |
-| ML-DSA-44   | 1,312-byte public key     | `pk[1312] \|\| prepared[20544]`, over `initialize` + 2 × `expand` |
+| ML-DSA-44   | 1,312-byte public key     | `pk[1312] \|\| prepared[20544]`, over 3 × `initialize` |
 | Secp256k1   | 33-byte compressed pubkey | the compressed pubkey verbatim              |
 | Winternitz | 41-byte public key | the current 41-byte key, zeroed between its `Advance` and `Passthrough` |
 | XMSS | 41-byte public key | the current 41-byte key, then the next leaf |
 
 `initialize` allocates the full `68 + stored_identity_len` bytes, and every
 scheme but ML-DSA-44 registers in one call. An instruction can grow an account
-by at most 10,240 bytes, so ML-DSA-44's `initialize` creates that much and two
-`expand` instructions grow and fill the rest; the three fit one transaction.
+by at most 10,240 bytes, so ML-DSA-44's first `initialize` creates that much
+and two more, with no data, grow and fill the rest; the three fit one
+transaction.
 An address that already holds lamports can still be initialized: the payer
 funds only the shortfall.
 
-For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte address must be non-zero. For Secp256k1, the compressed pubkey must start with `0x02` or `0x03`. For Falcon-512, the wire pubkey is validated and expanded into the 1024-byte prepared form at init time. For ML-DSA-44, the public key is stored verbatim and expanded across `initialize` and `expand`.
+For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte address must be non-zero. For Secp256k1, the compressed pubkey must start with `0x02` or `0x03`. For Falcon-512, the wire pubkey is validated and expanded into the 1024-byte prepared form at init time. For ML-DSA-44, the public key is stored verbatim and expanded across the three `initialize` calls.
 
 The initial nonce is derived entirely onchain using the `sol_get_sysvar` syscall to read the most recent slot hash and height from the `SlotHashes` sysvar: `sha256(seed || latest_slot_entry)`. If an account is closed and the same identity is later re-initialized, the nonce differs, as the slot hash changes in every slot. Replaying a prior signature chain would require the account to be opened, used, closed, reopened and replayed all within the same slot. Do not create and close an account in the same slot.
 
@@ -275,8 +275,9 @@ Because the signed digest commits to the entire transaction, the recipient and s
 The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It depends on the program crate itself, so the program ID, the account header, the discriminators and each scheme's stored size come from the program and cannot drift. It exposes `PROGRAM_ID` and a `Scheme` descriptor (`id`, `signature_len`, `identity_len`, `stored_identity_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", [scheme], sha256(identity)]`).
-- `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; `create_expand_mldsa44(public_key)` builds ML-DSA-44's two follow-up instructions.
-- `create_initialize_instruction(payer, &scheme, identity)` — generic init-instruction builder.
+- `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; ML-DSA-44's returns its three instructions.
+- `create_initialize_instruction(payer, &scheme, identity)` — generic init-instruction builder; `create_initialize_instructions` returns every call the scheme needs.
+- `find_system_pda(&vector)` — the account's system PDA.
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
 - `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature. `create_multi_advance_instruction(&[(&scheme, identity, signature)])` does the same for several signers.
 - `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. For Winternitz and XMSS use `create_rotating_passthrough_instruction(&scheme, identity, next_public_key, sub_ixs)`.
@@ -295,8 +296,9 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
 - `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 68-byte header.
-- `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` / `createInitializeMlDsa44(payer, publicKey)` — convenience wrappers; `createExpandMlDsa44(publicKey)` and `createRegisterMlDsa44Instructions(payer, publicKey)` build ML-DSA-44's three-instruction registration.
-- `createInitializeInstruction(payer, scheme, identity)` — generic init builder.
+- `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` / `createInitializeMlDsa44(payer, publicKey)` — convenience wrappers; ML-DSA-44's returns its three instructions.
+- `createInitializeInstruction(payer, scheme, identity)` — generic init builder; `createInitializeInstructions` returns every call the scheme needs.
+- `findSystemPda(vector)` — the account's system PDA.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.
 - `createAdvanceInstruction(scheme, identity, signature)` — assemble from precomputed signature (signature only, no embedded payload). `createMultiAdvanceInstruction([{ scheme, identity, signature }])` does the same for several signers.
 - `createPassthroughInstruction(scheme, identity, subIxs)` — assemble the passthrough instruction that replays `subIxs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. For Winternitz and XMSS use `createRotatingPassthroughInstruction(scheme, identity, nextPublicKey, subIxs)`.
