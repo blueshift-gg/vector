@@ -20,6 +20,7 @@ import {
   createInitializeEd25519,
   createCloseSubinstruction,
   createPassthroughInstruction,
+  createSystemPassthroughInstruction,
   createWithdrawSubinstruction,
   signAdvanceInstructionEd25519,
   advanceVectorDigest,
@@ -139,6 +140,52 @@ describe("vector-ed25519", () => {
     expect(Number(after!.lamports)).toBe(
       Number(startingLamports) - Number(withdrawAmount)
     );
+  });
+
+  test("system passthrough transfers from the system PDA", async () => {
+    const [systemPda] = findSystemPda(vectorPda);
+    await sendAndConfirmTransaction(
+      connection,
+      new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: feePayer.address,
+          toPubkey: systemPda,
+          lamports: 5_000_000,
+        })
+      ),
+      [feePayer]
+    );
+    const receiver = (await Keypair.generate()).address;
+
+    const pay = SystemProgram.transfer({
+      fromPubkey: systemPda,
+      toPubkey: receiver,
+      lamports: 2_000_000,
+    });
+    const passthroughIx = createSystemPassthroughInstruction(
+      ED25519,
+      ED25519_IDENTITY,
+      [pay]
+    );
+    const advanceIx = signAdvanceInstructionEd25519(
+      SIGNER_KEY,
+      currentNonce,
+      [],
+      [passthroughIx],
+      feePayer.address
+    );
+    await sendTx(connection, new Transaction().add(advanceIx, passthroughIx), [feePayer]);
+    currentNonce = advanceVectorDigest(
+      ED25519,
+      currentNonce,
+      ED25519_IDENTITY,
+      [],
+      [passthroughIx],
+      feePayer.address
+    );
+
+    expect(Number(await connection.getBalance(systemPda))).toBe(3_000_000);
+    expect(Number(await connection.getBalance(receiver))).toBe(2_000_000);
   });
 
   test("close vector account via advance", async () => {

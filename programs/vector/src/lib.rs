@@ -36,6 +36,9 @@ pub fn process_instruction(
         Some((Passthrough::DISCRIMINATOR, data)) => {
             Passthrough::try_from((data, accounts))?.process()
         }
+        Some((SystemPassthrough::DISCRIMINATOR, data)) => {
+            SystemPassthrough::try_from((data, accounts))?.process()
+        }
 
         // Account lifecycle.
         Some((Initialize::DISCRIMINATOR, data)) => {

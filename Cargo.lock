@@ -3484,6 +3484,7 @@ dependencies = [
  "solana-program-error",
  "solana-program-option",
  "solana-program-pack",
+ "solana-system-interface",
  "solana-winternitz",
  "spl-token-interface",
  "tempfile",

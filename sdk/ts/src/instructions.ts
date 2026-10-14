@@ -11,6 +11,7 @@ import {
 
 import {
   Scheme,
+  findSystemPda,
   findVectorPda,
   vectorAccountLen,
   writeU16LE,
@@ -21,6 +22,7 @@ import {
   ADVANCE_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
+  SYSTEM_PASSTHROUGH_DISCRIMINATOR,
   WITHDRAW_DISCRIMINATOR,
 } from "./scheme.js";
 
@@ -158,10 +160,73 @@ export function createMultiAdvanceInstruction(
  * signs each of them. It needs an `advance` for the same account earlier in
  * the transaction. That advance's signature covers the whole transaction, so
  * there is no second signature here.
+ *
+ * It points at the `advance` as the transaction's first instruction, with
+ * this account first; {@link setAdvancePosition} points it elsewhere.
+ *
+ * Data: `[disc, advance_index(u8), account_index(u8), num_ixs(u8), {num_accounts(u8),
+ * data_len(u16 LE), data}...]`.
  */
 export function createPassthroughInstruction(
   scheme: Scheme,
   identity: Uint8Array,
+  subInstructions: TransactionInstruction[]
+): TransactionInstruction {
+  const [vectorPda] = findVectorPda(scheme, identity);
+  return passthroughInstruction(
+    PASSTHROUGH_DISCRIMINATOR,
+    [
+      { pubkey: vectorPda, isSigner: false, isWritable: true },
+      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    vectorPda,
+    subInstructions
+  );
+}
+
+/**
+ * {@link createPassthroughInstruction}, signing as the account's system PDA
+ * ({@link findSystemPda}) instead of the account: for what only a system
+ * account can do, such as a System `Transfer`.
+ */
+export function createSystemPassthroughInstruction(
+  scheme: Scheme,
+  identity: Uint8Array,
+  subInstructions: TransactionInstruction[]
+): TransactionInstruction {
+  const [vectorPda] = findVectorPda(scheme, identity);
+  const [systemPda] = findSystemPda(vectorPda);
+  return passthroughInstruction(
+    SYSTEM_PASSTHROUGH_DISCRIMINATOR,
+    [
+      { pubkey: vectorPda, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
+      { pubkey: systemPda, isSigner: false, isWritable: false },
+    ],
+    systemPda,
+    subInstructions
+  );
+}
+
+/**
+ * Point a passthrough at its `advance`: `advanceIndex` is that instruction's
+ * index in the transaction, `accountIndex` this account's index in it.
+ * Needed when other instructions come before the `advance`, or the account
+ * is not its first signer.
+ */
+export function setAdvancePosition(
+  passthrough: TransactionInstruction,
+  advanceIndex: number,
+  accountIndex: number
+): void {
+  passthrough.data[1] = advanceIndex;
+  passthrough.data[2] = accountIndex;
+}
+
+function passthroughInstruction(
+  discriminator: number,
+  keys: { pubkey: Address; isSigner: boolean; isWritable: boolean }[],
+  signer: Address,
   subInstructions: TransactionInstruction[]
 ): TransactionInstruction {
   if (subInstructions.length > 255) {
@@ -170,35 +235,27 @@ export function createPassthroughInstruction(
     );
   }
 
-  const [vectorPda] = findVectorPda(scheme, identity);
-
-  const keys = [
-    { pubkey: vectorPda, isSigner: false, isWritable: true },
-    { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
-  ];
   for (const ix of subInstructions) {
     keys.push({ pubkey: ix.programId, isSigner: false, isWritable: false });
     for (const meta of ix.keys) {
       // Only the PDA receives its signer privilege during CPI.
       keys.push({
         pubkey: meta.pubkey,
-        isSigner: meta.isSigner && !meta.pubkey.equals(vectorPda),
+        isSigner: meta.isSigner && !meta.pubkey.equals(signer),
         isWritable: meta.isWritable,
       });
     }
   }
 
-  // [disc(1)][num_ixs(u8)][per ix: num_accounts(u8) data_len(u16 LE) data]
-  let dataLen = 1 + 1;
+  let dataLen = 4;
   for (const ix of subInstructions) {
     dataLen += 1 + 2 + ix.data.length;
   }
 
   const data = new Uint8Array(dataLen);
-  let off = 0;
-
-  data[off++] = PASSTHROUGH_DISCRIMINATOR;
-  data[off++] = subInstructions.length;
+  data[0] = discriminator;
+  data[3] = subInstructions.length;
+  let off = 4;
 
   for (const ix of subInstructions) {
     if (ix.keys.length > 255) {

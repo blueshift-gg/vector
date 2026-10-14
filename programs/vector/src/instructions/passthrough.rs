@@ -5,7 +5,7 @@ use pinocchio::{
     error::ProgramError,
     instruction::{InstructionAccount, InstructionView},
     sysvars::instructions::Instructions,
-    AccountView, ProgramResult,
+    AccountView, Address, ProgramResult,
 };
 
 use crate::{
@@ -20,11 +20,13 @@ use crate::{
 /// calls `Withdraw` and `Close` on itself.
 ///
 /// It checks no signature. It requires an earlier `Advance` in the same
-/// transaction that lists the account. `Advance` verifies a signature for
-/// every account it lists, and that signature is over the whole transaction,
-/// this instruction included.
+/// transaction that lists the account, and the data says where: the
+/// `Advance`'s index in the transaction, and the account's index in it.
+/// `Advance` verifies a signature for every account it lists, and that
+/// signature is over the whole transaction, this instruction included.
 ///
-/// > Find an earlier `Advance` that lists the account
+/// > Check the `Advance` at `advance_index` lists the account at
+/// >   `account_index`
 /// > Invoke each instruction, signing as the account
 ///
 /// Accounts:
@@ -35,6 +37,8 @@ use crate::{
 ///
 /// Parameters:
 ///
+/// - advance_index: u8, usually 0
+/// - account_index: u8
 /// - num_instructions: u8
 /// - for each instruction: num_accounts: u8, data_len: u16, data
 ///
@@ -44,59 +48,133 @@ use crate::{
 pub struct Passthrough<'a> {
     vector: &'a mut AccountView,
     instructions_sysvar: &'a AccountView,
+    /// `SystemPassthrough`: the account's system PDA, which signs instead.
+    system: Option<&'a AccountView>,
     remaining: &'a [AccountView],
+    advance_index: usize,
+    account_index: usize,
     instructions: &'a [u8],
 }
 
 impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
     type Error = ProgramError;
 
-    fn try_from(
-        (instructions, accounts): (&'a [u8], &'a mut [AccountView]),
-    ) -> Result<Self, Self::Error> {
-        top_level_only()?;
-
+    fn try_from((data, accounts): (&'a [u8], &'a mut [AccountView])) -> Result<Self, Self::Error> {
         let [vector, instructions_sysvar, remaining @ ..] = accounts else {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
+        Self::new(data, vector, instructions_sysvar, None, remaining)
+    }
+}
 
-        Ok(Self {
-            vector,
-            instructions_sysvar,
-            remaining,
-            instructions,
-        })
+/// # SystemPassthrough
+///
+/// `Passthrough`, signing as the account's system PDA instead of the
+/// account: `[vector address, system_bump]`, owned by the System program.
+/// It is for what only a system account can do, such as `Transfer`,
+/// `Allocate` or `Assign`. The account itself does not sign.
+///
+/// Accounts:
+///
+/// 1. vector
+/// 2. instructions_sysvar
+/// 3. system: the account's system PDA
+/// 4. then, for each instruction: its program and its accounts
+///
+/// Parameters: as `Passthrough`
+///
+/// Account Checks:
+/// - Vector: owned by the program, listed in an earlier `Advance`
+/// - InstructionsSysvar: the instructions sysvar
+/// - System: no need to check since the runtime refuses its signature when
+///   it is not the PDA of the seeds
+pub struct SystemPassthrough<'a>(Passthrough<'a>);
+
+impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for SystemPassthrough<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a mut [AccountView])) -> Result<Self, Self::Error> {
+        let [vector, instructions_sysvar, system, remaining @ ..] = accounts else {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        };
+        Passthrough::new(data, vector, instructions_sysvar, Some(system), remaining).map(Self)
+    }
+}
+
+impl<'a> SystemPassthrough<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &5;
+
+    pub fn process(&mut self) -> ProgramResult {
+        self.0.process()
     }
 }
 
 impl<'a> Passthrough<'a> {
     pub const DISCRIMINATOR: &'a u8 = &1;
 
+    fn new(
+        data: &'a [u8],
+        vector: &'a mut AccountView,
+        instructions_sysvar: &'a AccountView,
+        system: Option<&'a AccountView>,
+        remaining: &'a [AccountView],
+    ) -> Result<Self, ProgramError> {
+        top_level_only()?;
+
+        let [advance_index, account_index, instructions @ ..] = data else {
+            return Err(ProgramError::InvalidInstructionData);
+        };
+
+        Ok(Self {
+            vector,
+            instructions_sysvar,
+            system,
+            remaining,
+            advance_index: (*advance_index).into(),
+            account_index: (*account_index).into(),
+            instructions,
+        })
+    }
+
     pub fn process(&mut self) -> ProgramResult {
         let address = self.vector.address().to_bytes();
-
         // The seeds come from the account itself, so the signature below can
         // only ever be the account's own.
-        let (seed, scheme, bump) = {
+        let account = {
             let mut data = VectorAccount::borrow(self.vector)?;
-            let (account, _) = VectorAccount::split(&mut data)?;
-            (account.seed, [account.scheme], [account.bump])
+            *VectorAccount::split(&mut data)?.0
         };
-        check_advanced(self.instructions_sysvar, &address)?;
+        check_advanced(
+            self.instructions_sysvar,
+            &address,
+            self.advance_index,
+            self.account_index,
+        )?;
 
-        let seeds = [
-            Seed::from(VECTOR_SEED),
-            Seed::from(&scheme),
-            Seed::from(&seed),
-            Seed::from(&bump),
-        ];
-        self.invoke(self.instructions, &[Signer::from(&seeds)])
+        match self.system {
+            None => {
+                let (scheme, bump) = ([account.scheme], [account.bump]);
+                let seeds = [
+                    Seed::from(VECTOR_SEED),
+                    Seed::from(&scheme),
+                    Seed::from(&account.seed),
+                    Seed::from(&bump),
+                ];
+                self.invoke(self.vector.address(), &[Signer::from(&seeds)])
+            }
+            Some(system) => {
+                let bump = [account.system_bump];
+                let seeds = [Seed::from(&address), Seed::from(&bump)];
+                self.invoke(system.address(), &[Signer::from(&seeds)])
+            }
+        }
     }
 
     /// Invoke each instruction in the data, taking its program and accounts
-    /// from the remaining accounts in order. All of both must be used.
-    fn invoke(&self, mut data: &[u8], signers: &[Signer]) -> ProgramResult {
-        let vector = self.vector.address();
+    /// from the remaining accounts in order, with `signer` signing. All of
+    /// both must be used.
+    fn invoke(&self, signer: &Address, signers: &[Signer]) -> ProgramResult {
+        let mut data = self.instructions;
         let mut accounts = self.remaining;
 
         for _ in 0..read::<1>(&mut data)?[0] {
@@ -115,12 +193,12 @@ impl<'a> Passthrough<'a> {
             };
             accounts = rest;
 
-            // The account signs wherever it appears.
+            // The signer signs wherever it appears.
             let metas: Vec<InstructionAccount> = instruction_accounts
                 .iter()
                 .map(|account| {
                     let mut meta = InstructionAccount::from(account);
-                    meta.is_signer |= account.address() == vector;
+                    meta.is_signer |= account.address() == signer;
                     meta
                 })
                 .collect();
@@ -143,25 +221,29 @@ impl<'a> Passthrough<'a> {
     }
 }
 
-/// An earlier instruction of this transaction is an `Advance` that lists
-/// `vector`. It ran, so the account's signature was verified.
-fn check_advanced(instructions_sysvar: &AccountView, vector: &[u8; 32]) -> ProgramResult {
+/// The instruction at `advance_index` is an earlier `Advance` whose account
+/// at `account_index` is `vector`. It ran, so the account's signature was
+/// verified.
+fn check_advanced(
+    instructions_sysvar: &AccountView,
+    vector: &[u8; 32],
+    advance_index: usize,
+    account_index: usize,
+) -> ProgramResult {
     let instructions = Instructions::try_from(instructions_sysvar)?;
-
-    for index in 0..instructions.load_current_index().into() {
-        let instruction = instructions.load_instruction_at(index)?;
-        if instruction.get_program_id() == &crate::ID
-            && instruction.get_instruction_data().first() == Some(Advance::DISCRIMINATOR)
-            && (0..instruction.num_account_metas()).any(|i| {
-                instruction
-                    .get_instruction_account_at(i)
-                    .is_ok_and(|meta| meta.key.as_array() == vector)
-            })
-        {
-            return Ok(());
-        }
+    if advance_index >= instructions.load_current_index().into() {
+        return Err(ProgramError::MissingRequiredSignature);
     }
-    Err(ProgramError::MissingRequiredSignature)
+    let advance = instructions.load_instruction_at(advance_index)?;
+    let listed = advance.get_program_id() == &crate::ID
+        && advance.get_instruction_data().first() == Some(Advance::DISCRIMINATOR)
+        && advance
+            .get_instruction_account_at(account_index)
+            .is_ok_and(|meta| meta.key.as_array() == vector);
+    if !listed {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    Ok(())
 }
 
 /// Take the next `N` bytes off the front of `data`.

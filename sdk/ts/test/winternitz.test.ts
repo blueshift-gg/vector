@@ -48,6 +48,6 @@ test("Winternitz account and rotation digest match Rust", () => {
     WINTERNITZ, new Uint8Array(32).fill(255), identity, nextKey, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "d30644411e7779b98ddfc3682e26ef18cc514debee76d9b764b90cf112b2811e"
+    "7b005d9858200a4b1c9da8ce24ab84fb94b062b154647dce44cb86344c567f6c"
   );
 });

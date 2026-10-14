@@ -33,3 +33,6 @@ mod schemes;
 
 #[cfg(test)]
 mod multi;
+
+#[cfg(test)]
+mod passthrough;

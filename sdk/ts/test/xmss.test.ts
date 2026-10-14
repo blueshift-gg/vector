@@ -48,6 +48,6 @@ test("XMSS account and rotation digest match Rust", () => {
     XMSS, new Uint8Array(32).fill(255), identity, nextKey, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "3a44cef01ba71f113784c0f39f8fe36b30e955ad43667c6239b747a25acf72e8"
+    "6100ab3797a6be0c34ca9595368e59f07de8f41ca94042422a27ea3ab10b9684"
   );
 });

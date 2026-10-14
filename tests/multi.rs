@@ -14,7 +14,8 @@ use solana_program_error::ProgramError;
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
-    sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, ED25519, SECP256K1,
+    set_advance_position, sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme,
+    ED25519, SECP256K1,
 };
 
 use crate::common::{
@@ -70,10 +71,12 @@ impl World {
     fn alice_and_bob(&self) -> (Vec<Instruction>, [u8; 32], [u8; 32]) {
         let alice = ed25519_pubkey(&self.alice);
         let bob = secp256k1_compressed_pubkey(&self.bob);
-        let post = [
+        let mut post = [
             self.withdraw(&ED25519, &alice, 1_000_000_000),
             self.withdraw(&SECP256K1, &bob, 2_000_000_000),
         ];
+        // Bob is the `Advance`'s second account.
+        set_advance_position(&mut post[1], 0, 1);
         let message = advance_message(
             &[
                 AdvanceSigner::new(&ED25519, &alice),

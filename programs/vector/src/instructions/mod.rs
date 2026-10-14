@@ -4,7 +4,7 @@ pub mod advance;
 pub use advance::Advance;
 
 pub mod passthrough;
-pub use passthrough::Passthrough;
+pub use passthrough::{Passthrough, SystemPassthrough};
 
 pub mod initialize;
 pub use initialize::Initialize;

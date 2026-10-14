@@ -13,6 +13,7 @@ export const PASSTHROUGH_DISCRIMINATOR = 1;
 export const INITIALIZE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
 export const CLOSE_DISCRIMINATOR = 4;
+export const SYSTEM_PASSTHROUGH_DISCRIMINATOR = 5;
 
 /** The Vector program: one program for every signing scheme. */
 export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");

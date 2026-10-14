@@ -6,9 +6,9 @@ use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 
 use crate::scheme::{
-    find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR, INITIALIZE_DISCRIMINATOR,
-    INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, SYSTEM_PROGRAM_ID,
-    WITHDRAW_DISCRIMINATOR,
+    find_system_pda, find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR,
+    INITIALIZE_DISCRIMINATOR, INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID,
+    SYSTEM_PASSTHROUGH_DISCRIMINATOR, SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
 };
 
 /// Build an `initialize` instruction for `identity`, the key the account is
@@ -153,13 +153,68 @@ pub fn create_multi_advance_instruction(signers: &[(AdvanceSigner, &[u8])]) -> I
 /// advance's signature covers the whole transaction, this instruction
 /// included, so there is no second signature here.
 ///
+/// It points at the `advance` as the transaction's first instruction, with
+/// this account first; [`set_advance_position`] points it elsewhere.
+///
 /// Accounts: `[vector_pda(writable), instructions_sysvar, sub_ix_program,
 /// ...sub_ix accounts...]` repeated per sub-instruction.
-/// Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
-/// {num_accounts(u8), data_len(u16 LE), data}...]`.
+/// Data: `[PASSTHROUGH_DISCRIMINATOR, advance_index(u8), account_index(u8),
+/// num_ixs(u8), {num_accounts(u8), data_len(u16 LE), data}...]`.
 pub fn create_passthrough_instruction(
     scheme: &Scheme,
     identity: &[u8],
+    instructions: &[Instruction],
+) -> Instruction {
+    let (vector, _) = find_vector_pda(scheme, identity);
+    passthrough_instruction(
+        PASSTHROUGH_DISCRIMINATOR,
+        vec![
+            AccountMeta::new(vector, false),
+            AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
+        ],
+        &vector,
+        instructions,
+    )
+}
+
+/// [`create_passthrough_instruction`], signing as the account's system PDA
+/// ([`find_system_pda`]) instead of the account: for what only a system
+/// account can do, such as a System `Transfer`.
+///
+/// Accounts: `[vector_pda, instructions_sysvar, system_pda, ...]`, then as
+/// [`create_passthrough_instruction`].
+pub fn create_system_passthrough_instruction(
+    scheme: &Scheme,
+    identity: &[u8],
+    instructions: &[Instruction],
+) -> Instruction {
+    let (vector, _) = find_vector_pda(scheme, identity);
+    let (system, _) = find_system_pda(&vector);
+    passthrough_instruction(
+        SYSTEM_PASSTHROUGH_DISCRIMINATOR,
+        vec![
+            AccountMeta::new_readonly(vector, false),
+            AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
+            AccountMeta::new_readonly(system, false),
+        ],
+        &system,
+        instructions,
+    )
+}
+
+/// Point a passthrough at its `advance`: `advance_index` is that
+/// instruction's index in the transaction, `account_index` this account's
+/// index in it. Needed when other instructions come before the `advance`, or
+/// the account is not its first signer.
+pub fn set_advance_position(passthrough: &mut Instruction, advance_index: u8, account_index: u8) {
+    passthrough.data[1] = advance_index;
+    passthrough.data[2] = account_index;
+}
+
+fn passthrough_instruction(
+    discriminator: u8,
+    mut accounts: Vec<AccountMeta>,
+    signer: &Address,
     instructions: &[Instruction],
 ) -> Instruction {
     assert!(
@@ -168,30 +223,16 @@ pub fn create_passthrough_instruction(
         u8::MAX,
     );
 
-    let (vector_pda, _bump) = find_vector_pda(scheme, identity);
-
-    let flattened_accounts: usize = instructions.iter().map(|ix| 1 + ix.accounts.len()).sum();
-    let mut accounts = Vec::with_capacity(2 + flattened_accounts);
-    accounts.push(AccountMeta::new(vector_pda, false));
-    accounts.push(AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false));
     for ix in instructions {
         accounts.push(AccountMeta::new_readonly(ix.program_id, false));
         accounts.extend(ix.accounts.iter().cloned().map(|mut meta| {
             // The PDA receives its signer privilege during CPI.
-            meta.is_signer &= meta.pubkey != vector_pda;
+            meta.is_signer &= meta.pubkey != *signer;
             meta
         }));
     }
 
-    let payload_len: usize = 1
-        + 1
-        + instructions
-            .iter()
-            .map(|ix| 1 + 2 + ix.data.len())
-            .sum::<usize>();
-    let mut data = Vec::with_capacity(payload_len);
-    data.push(PASSTHROUGH_DISCRIMINATOR);
-    data.push(instructions.len() as u8);
+    let mut data = vec![discriminator, 0, 0, instructions.len() as u8];
     for ix in instructions {
         assert!(
             ix.accounts.len() <= u8::MAX as usize,
@@ -207,7 +248,6 @@ pub fn create_passthrough_instruction(
         data.extend_from_slice(&(ix.data.len() as u16).to_le_bytes());
         data.extend_from_slice(&ix.data);
     }
-    debug_assert_eq!(data.len(), payload_len);
 
     Instruction {
         program_id: PROGRAM_ID,
