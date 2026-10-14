@@ -86,8 +86,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
 /// Account Checks:
 /// - Vector: owned by the program, listed in an earlier `Advance`
 /// - InstructionsSysvar: the instructions sysvar
-/// - System: no need to check since the runtime refuses its signature when
-///   it is not the PDA of the seeds
+/// - System: the PDA of `[vector address, system_bump]`
 pub struct SystemPassthrough<'a>(Passthrough<'a>);
 
 impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for SystemPassthrough<'a> {
@@ -164,6 +163,10 @@ impl<'a> Passthrough<'a> {
             }
             Some(system) => {
                 let bump = [account.system_bump];
+                let pda = Address::create_program_address(&[&address, &bump], &crate::ID)?;
+                if system.address() != &pda {
+                    return Err(ProgramError::InvalidSeeds);
+                }
                 let seeds = [Seed::from(&address), Seed::from(&bump)];
                 self.invoke(system.address(), &[Signer::from(&seeds)])
             }

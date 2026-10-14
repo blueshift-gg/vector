@@ -6,7 +6,7 @@ use mollusk_svm::{
 };
 use solana_account::Account;
 use solana_address::Address;
-use solana_instruction::{error::InstructionError, Instruction};
+use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use solana_system_interface::instruction::transfer;
 use vector_core::{
@@ -73,6 +73,12 @@ impl World {
             &self.accounts,
             &[],
         );
+        if result.program_result == TransactionProgramResult::Success {
+            println!(
+                "ed25519 advance + passthrough at {advance_index}: {} CUs",
+                result.compute_units_consumed
+            );
+        }
         (result.program_result, result.resulting_accounts)
     }
 
@@ -105,8 +111,7 @@ fn system_passthrough_signs_as_the_system_pda() {
     let (result, _) = world.run(vec![passthrough], 0);
     assert!(matches!(result, TransactionProgramResult::Failure(1, _)));
 
-    // Another system account is not the PDA of the seeds, so its signature
-    // is refused.
+    // Another system account is not the account's system PDA.
     let other = Address::new_unique();
     let mut wrong = create_system_passthrough_instruction(
         &ED25519,
@@ -125,7 +130,7 @@ fn system_passthrough_signs_as_the_system_pda() {
     let (result, accounts) = world.run(vec![wrong], 0);
     assert_eq!(
         result,
-        TransactionProgramResult::UnknownError(1, InstructionError::PrivilegeEscalation)
+        TransactionProgramResult::Failure(1, ProgramError::InvalidSeeds)
     );
     assert_eq!(World::lamports(&accounts, &other), 1_000_000);
 }
