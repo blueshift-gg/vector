@@ -14,7 +14,6 @@ export const XMSS: Scheme = {
   // The key, then the lowest leaf that may sign next (u32 LE).
   storedIdentityLen: XMSS_PUBKEY_LEN + 4,
   nextKeyLen: XMSS_PUBKEY_LEN,
-  nextKeyOptional: true,
 };
 
 /** Initialize a stable account with its first signing key. */

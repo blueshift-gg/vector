@@ -81,8 +81,9 @@ export function createInitializeInstructions(
 // ── Advance ──────────────────────────────────────────────────────────
 
 /**
- * Build an `advance` for one signer. It verifies the signature and moves the
- * nonce; pair it with {@link createPassthroughInstruction} to act.
+ * Build an `advance` for one signer, whose key never changes. It verifies the
+ * signature and moves the nonce; pair it with {@link
+ * createPassthroughInstruction} to act.
  */
 export function createAdvanceInstruction(
   scheme: Scheme,
@@ -95,15 +96,43 @@ export function createAdvanceInstruction(
 }
 
 /**
+ * {@link createAdvanceInstruction} for Winternitz and XMSS, whose key rotates:
+ * `nextKey` is the key that signs next, and the signature covers it (see
+ * `rotatingAdvanceVectorDigest`). Persist that signer before authorizing this
+ * instruction.
+ */
+export function createRotatingAdvanceInstruction(
+  scheme: Scheme,
+  identity: Uint8Array,
+  nextKey: Uint8Array,
+  advanceVectorSignature: Uint8Array
+): TransactionInstruction {
+  return createMultiAdvanceInstruction([
+    { scheme, identity, nextKey, signature: advanceVectorSignature },
+  ]);
+}
+
+/**
  * Build an `advance` instruction for several signers. Every signer signs
  * its own `signerDigest` of the one `advanceMessage`.
  *
  * Accounts: `[vector_pda(writable)..., instructions_sysvar]`.
- * Data: `[ADVANCE_DISCRIMINATOR, signature...]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, nextKey..., signature...]`.
  */
 export function createMultiAdvanceInstruction(
-  signers: { scheme: Scheme; identity: Uint8Array; signature: Uint8Array }[]
+  signers: {
+    scheme: Scheme;
+    identity: Uint8Array;
+    nextKey?: Uint8Array;
+    signature: Uint8Array;
+  }[]
 ): TransactionInstruction {
+  const nextKeys = signers.map(({ scheme, nextKey = new Uint8Array() }) => {
+    if (nextKey.length !== scheme.nextKeyLen) {
+      throw new Error(`Next key must be ${scheme.nextKeyLen} bytes`);
+    }
+    return nextKey;
+  });
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
@@ -116,6 +145,7 @@ export function createMultiAdvanceInstruction(
     ],
     data: Buffer.concat([
       Uint8Array.of(ADVANCE_DISCRIMINATOR),
+      ...nextKeys,
       ...signers.map((s) => s.signature),
     ]),
   });
@@ -130,56 +160,6 @@ export function createMultiAdvanceInstruction(
  * there is no second signature here.
  */
 export function createPassthroughInstruction(
-  scheme: Scheme,
-  identity: Uint8Array,
-  subInstructions: TransactionInstruction[]
-): TransactionInstruction {
-  if (scheme.nextKeyLen !== 0) {
-    throw new Error(
-      "This scheme's key rotates: use createRotatingPassthroughInstruction"
-    );
-  }
-  return passthroughInstruction(scheme, identity, subInstructions);
-}
-
-/**
- * {@link createPassthroughInstruction} for Winternitz and XMSS, whose key
- * rotates. `nextPublicKey` is the key that signs the next transaction, and
- * the signature covers it. Persist that signer first. `identity` stays the
- * first key.
- *
- * A Winternitz key signs once, so it must be replaced every time. An XMSS key
- * may be kept with `null` until its tree runs out.
- */
-export function createRotatingPassthroughInstruction(
-  scheme: Scheme,
-  identity: Uint8Array,
-  nextPublicKey: Uint8Array | null,
-  subInstructions: TransactionInstruction[]
-): TransactionInstruction {
-  if (scheme.nextKeyLen === 0) {
-    throw new Error("This scheme's key does not rotate");
-  }
-  if (nextPublicKey === null && !scheme.nextKeyOptional) {
-    throw new Error("This scheme's key signs once");
-  }
-  if (nextPublicKey !== null && nextPublicKey.length !== scheme.nextKeyLen) {
-    throw new Error(`Next key must be ${scheme.nextKeyLen} bytes`);
-  }
-  const ix = passthroughInstruction(scheme, identity, subInstructions);
-  return new TransactionInstruction({
-    programId: ix.programId,
-    keys: ix.keys,
-    data: Buffer.concat([
-      ix.data.subarray(0, 1),
-      scheme.nextKeyOptional ? Uint8Array.of(nextPublicKey ? 1 : 0) : new Uint8Array(),
-      nextPublicKey ?? new Uint8Array(),
-      ix.data.subarray(1),
-    ]),
-  });
-}
-
-function passthroughInstruction(
   scheme: Scheme,
   identity: Uint8Array,
   subInstructions: TransactionInstruction[]

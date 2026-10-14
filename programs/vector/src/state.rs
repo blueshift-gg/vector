@@ -4,10 +4,7 @@ use core::mem::{offset_of, size_of};
 
 use pinocchio::{account::RefMut, error::ProgramError, AccountView};
 
-use crate::{
-    scheme::{Scheme, SigningScheme},
-    schemes,
-};
+use crate::{scheme::Scheme, schemes};
 
 /// First seed of every vector account's address:
 /// `["vector", [scheme], seed, [bump]]`.
@@ -74,12 +71,5 @@ impl VectorAccount {
             unsafe { &mut *header.as_mut_ptr().cast::<Self>() },
             identity,
         ))
-    }
-
-    /// View a complete account's data as its header and its identity.
-    pub fn load(data: &mut [u8]) -> Result<(&mut Self, &mut dyn SigningScheme), ProgramError> {
-        let scheme = Self::scheme(data)?;
-        let (header, identity) = Self::split(data)?;
-        Ok((header, scheme.load(identity)?))
     }
 }

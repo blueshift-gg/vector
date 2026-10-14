@@ -6,8 +6,8 @@ use solana_address::Address;
 use solana_program_error::ProgramError;
 use solana_winternitz::winternitz;
 use vector_core::{
-    advance_vector_digest, create_advance_instruction, create_close_subinstruction,
-    create_initialize_winternitz, create_rotating_passthrough_instruction, find_vector_pda,
+    create_close_subinstruction, create_initialize_winternitz, create_passthrough_instruction,
+    create_rotating_advance_instruction, find_vector_pda, rotating_advance_vector_digest,
     PROGRAM_ID, WINTERNITZ,
 };
 
@@ -29,13 +29,20 @@ fn initialize_and_client_encoding() {
     assert_eq!(bump, 255);
     let receiver = Address::new_from_array([9; 32]);
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
-    let passthrough =
-        create_rotating_passthrough_instruction(&WINTERNITZ, &identity, Some(&[7; 41]), &[close]);
+    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[close]);
     assert_eq!(
-        advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough], None),
+        rotating_advance_vector_digest(
+            &WINTERNITZ,
+            &NONCE,
+            &identity,
+            &[7; 41],
+            &[],
+            &[passthrough],
+            None
+        ),
         [
-            43, 206, 159, 16, 57, 41, 187, 90, 115, 220, 133, 168, 5, 136, 171, 95, 100, 29, 163,
-            42, 65, 144, 208, 48, 221, 202, 40, 254, 43, 51, 50, 16
+            211, 6, 68, 65, 30, 119, 121, 185, 141, 223, 195, 104, 46, 38, 239, 24, 204, 81, 77,
+            235, 238, 118, 217, 183, 100, 185, 12, 241, 18, 178, 129, 30
         ],
     );
 
@@ -111,32 +118,24 @@ fn signature_binds_close_and_rejects_replay() {
     let receiver = Address::new_unique();
     let other = Address::new_unique();
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
-    // Keeps the current key: the test is about the signature, not rotation.
-    let passthrough = create_rotating_passthrough_instruction(
-        &WINTERNITZ,
-        &identity,
-        Some(&public_key),
-        &[close],
-    );
-    let digest = advance_vector_digest(
+    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[close]);
+    let next_key = [7; 41];
+    let digest = rotating_advance_vector_digest(
         &WINTERNITZ,
         &NONCE,
         &identity,
+        &next_key,
         &[],
         std::slice::from_ref(&passthrough),
         None,
     );
     let signature = signer.sign(&digest).unwrap().to_bytes();
-    let advance = create_advance_instruction(&WINTERNITZ, &identity, &signature);
-    let expected = expected_advanced_data(digest, &WINTERNITZ, &identity, &stored);
+    let advance =
+        create_rotating_advance_instruction(&WINTERNITZ, &identity, &next_key, &signature);
+    let expected = expected_advanced_data(digest, &WINTERNITZ, &identity, &next_key);
 
     let other_close = create_close_subinstruction(&WINTERNITZ, &identity, &other);
-    let changed_action = create_rotating_passthrough_instruction(
-        &WINTERNITZ,
-        &identity,
-        Some(&public_key),
-        &[other_close],
-    );
+    let changed_action = create_passthrough_instruction(&WINTERNITZ, &identity, &[other_close]);
     let mut tampered = signature;
     tampered[winternitz::SIGNATURE_LEN - 1] ^= 1;
     let mut wrong_key = account.clone();
@@ -177,7 +176,7 @@ fn signature_binds_close_and_rejects_replay() {
             ProgramError::MissingRequiredSignature,
         ),
     ] {
-        let invalid = create_advance_instruction(&WINTERNITZ, &identity, bytes);
+        let invalid = create_rotating_advance_instruction(&WINTERNITZ, &identity, &next_key, bytes);
         process_transaction(
             &mollusk,
             &[&invalid, &action],

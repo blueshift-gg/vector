@@ -62,31 +62,82 @@ pub fn create_initialize_instructions(
         .collect()
 }
 
-/// Build an `advance` for one signer. It verifies the signature and moves the
-/// nonce; pair it with [`create_passthrough_instruction`] to act.
+/// One signer of an `advance`: its account, and for a scheme whose key
+/// rotates (Winternitz, XMSS), the key that signs next.
+#[derive(Clone, Copy, Debug)]
+pub struct AdvanceSigner<'a> {
+    pub scheme: &'a Scheme,
+    /// The key the account was created with.
+    pub identity: &'a [u8],
+    /// The key that signs next; empty for a scheme whose key never changes.
+    pub next_key: &'a [u8],
+}
+
+impl<'a> AdvanceSigner<'a> {
+    /// A signer whose key never changes.
+    pub fn new(scheme: &'a Scheme, identity: &'a [u8]) -> Self {
+        Self {
+            scheme,
+            identity,
+            next_key: &[],
+        }
+    }
+}
+
+/// Build an `advance` for one signer, whose key never changes. It verifies
+/// the signature and moves the nonce; pair it with
+/// [`create_passthrough_instruction`] to act.
 pub fn create_advance_instruction(
     scheme: &Scheme,
     identity: &[u8],
     advance_vector_signature: &[u8],
 ) -> Instruction {
-    create_multi_advance_instruction(&[(scheme, identity, advance_vector_signature)])
+    create_multi_advance_instruction(&[(
+        AdvanceSigner::new(scheme, identity),
+        advance_vector_signature,
+    )])
 }
 
-/// Build an `advance` for several signers, each a `(scheme, identity,
-/// signature)`. Every signer signs its own
+/// [`create_advance_instruction`] for Winternitz and XMSS, whose key
+/// rotates: `next_key` is the key that signs next, and the signature covers
+/// it (see [`rotating_advance_vector_digest`](crate::rotating_advance_vector_digest)).
+/// Persist that signer before authorizing this instruction.
+pub fn create_rotating_advance_instruction(
+    scheme: &Scheme,
+    identity: &[u8],
+    next_key: &[u8],
+    advance_vector_signature: &[u8],
+) -> Instruction {
+    let signer = AdvanceSigner {
+        scheme,
+        identity,
+        next_key,
+    };
+    create_multi_advance_instruction(&[(signer, advance_vector_signature)])
+}
+
+/// Build an `advance` for several signers, each with its signature. Every
+/// signer signs its own
 /// [`signer_digest`](crate::signer_digest) of the one
 /// [`advance_message`](crate::advance_message).
 ///
 /// Accounts: `[vector_pda(writable)..., instructions_sysvar]`. Data:
-/// `[ADVANCE_DISCRIMINATOR, signature...]`.
-pub fn create_multi_advance_instruction(signers: &[(&Scheme, &[u8], &[u8])]) -> Instruction {
+/// `[ADVANCE_DISCRIMINATOR, next_key..., signature...]`.
+pub fn create_multi_advance_instruction(signers: &[(AdvanceSigner, &[u8])]) -> Instruction {
     let mut accounts = Vec::with_capacity(signers.len() + 1);
     let mut data = vec![ADVANCE_DISCRIMINATOR];
-    for (scheme, identity, _) in signers {
-        accounts.push(AccountMeta::new(find_vector_pda(scheme, identity).0, false));
+    for (signer, _) in signers {
+        assert_eq!(
+            signer.next_key.len(),
+            signer.scheme.next_key_len,
+            "next key length mismatch"
+        );
+        let (vector, _) = find_vector_pda(signer.scheme, signer.identity);
+        accounts.push(AccountMeta::new(vector, false));
+        data.extend_from_slice(signer.next_key);
     }
     accounts.push(AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false));
-    for (_, _, signature) in signers {
+    for (_, signature) in signers {
         data.extend_from_slice(signature);
     }
     Instruction {
@@ -107,48 +158,6 @@ pub fn create_multi_advance_instruction(signers: &[(&Scheme, &[u8], &[u8])]) -> 
 /// Data: `[PASSTHROUGH_DISCRIMINATOR, num_ixs(u8),
 /// {num_accounts(u8), data_len(u16 LE), data}...]`.
 pub fn create_passthrough_instruction(
-    scheme: &Scheme,
-    identity: &[u8],
-    instructions: &[Instruction],
-) -> Instruction {
-    assert_eq!(
-        scheme.next_key_len, 0,
-        "this scheme's key rotates: use create_rotating_passthrough_instruction",
-    );
-    passthrough_instruction(scheme, identity, instructions)
-}
-
-/// [`create_passthrough_instruction`] for Winternitz and XMSS, whose key
-/// rotates. `next_public_key` is the key that signs the next transaction; it
-/// follows the discriminator and is covered by the signature like the rest.
-/// Persist that signer before authorizing this instruction. `identity` stays
-/// the first key.
-///
-/// A Winternitz key signs once, so it must be replaced every time. An XMSS
-/// key may be kept with `None` until its tree runs out.
-pub fn create_rotating_passthrough_instruction(
-    scheme: &Scheme,
-    identity: &[u8],
-    next_public_key: Option<&[u8]>,
-    instructions: &[Instruction],
-) -> Instruction {
-    assert_ne!(scheme.next_key_len, 0, "this scheme's key does not rotate");
-    let mut prefix = Vec::new();
-    if scheme.next_key_optional {
-        prefix.push(next_public_key.is_some() as u8);
-    } else {
-        assert!(next_public_key.is_some(), "this scheme's key signs once");
-    }
-    if let Some(key) = next_public_key {
-        assert_eq!(key.len(), scheme.next_key_len, "next key length mismatch");
-        prefix.extend_from_slice(key);
-    }
-    let mut instruction = passthrough_instruction(scheme, identity, instructions);
-    instruction.data.splice(1..1, prefix);
-    instruction
-}
-
-fn passthrough_instruction(
     scheme: &Scheme,
     identity: &[u8],
     instructions: &[Instruction],

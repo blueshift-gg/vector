@@ -35,7 +35,6 @@ export const FALCON512: Scheme = {
   identityLen: FALCON_PUBKEY_LEN,
   storedIdentityLen: FALCON_PREPARED_PUBKEY_LEN,
   nextKeyLen: 0,
-  nextKeyOptional: false,
 };
 
 /** Falcon-512 keypair: 1281-byte secret + 897-byte wire pubkey. */

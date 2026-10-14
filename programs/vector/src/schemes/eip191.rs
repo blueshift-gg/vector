@@ -13,6 +13,8 @@ pub struct Eip191 {
 }
 
 unsafe impl SigningScheme for Eip191 {
+    const SIGNATURE_LEN: usize = 65;
+
     fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
         let address: &[u8; 20] = key
             .try_into()
@@ -24,11 +26,12 @@ unsafe impl SigningScheme for Eip191 {
         Ok(())
     }
 
-    fn signature_len(&self) -> usize {
-        65
-    }
-
-    fn advance(&mut self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn advance(
+        &mut self,
+        digest: &[u8; 32],
+        signature: &[u8],
+        _next_key: &[u8],
+    ) -> Result<(), ProgramError> {
         let (rs, v) = signature
             .split_first_chunk::<64>()
             .filter(|(_, v)| v.len() == 1)

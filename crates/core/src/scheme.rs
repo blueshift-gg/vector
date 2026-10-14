@@ -38,11 +38,9 @@ pub struct Scheme {
     /// Bytes the on-chain account stores after its header: the size of the
     /// scheme's identity struct in the program.
     pub stored_identity_len: usize,
-    /// Length of the key a `passthrough` carries for a scheme whose key
+    /// Length of the key an `advance` carries for a scheme whose key
     /// rotates (Winternitz, XMSS): the key that signs next. Zero otherwise.
     pub next_key_len: usize,
-    /// The next key may be left out, keeping the current one (XMSS).
-    pub next_key_optional: bool,
 }
 
 impl Scheme {

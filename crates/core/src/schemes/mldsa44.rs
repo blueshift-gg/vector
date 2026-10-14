@@ -18,7 +18,6 @@ pub const MLDSA44: Scheme = Scheme {
     identity_len: MLDSA44_PUBKEY_LEN,
     stored_identity_len: size_of::<vector::schemes::mldsa44::MlDsa44>(),
     next_key_len: 0,
-    next_key_optional: false,
 };
 
 /// Create an ML-DSA-44 account: three `initialize` instructions, for one

@@ -18,7 +18,6 @@ pub const XMSS: Scheme = Scheme {
     identity_len: XMSS_PUBKEY_LEN,
     stored_identity_len: size_of::<vector::schemes::xmss::Xmss>(),
     next_key_len: XMSS_PUBKEY_LEN,
-    next_key_optional: true,
 };
 
 /// Initialize a stable account with its first signing key.

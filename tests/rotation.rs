@@ -9,9 +9,9 @@ use solana_winternitz::{
     xmss, SigningKey,
 };
 use vector_core::{
-    advance_message, advance_vector_digest, create_advance_instruction,
-    create_multi_advance_instruction, create_rotating_passthrough_instruction,
-    create_withdraw_subinstruction, find_vector_pda, signer_digest, Scheme, WINTERNITZ, XMSS,
+    advance_message, create_multi_advance_instruction, create_passthrough_instruction,
+    create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
+    rotating_advance_vector_digest, signer_digest, AdvanceSigner, Scheme, WINTERNITZ, XMSS,
 };
 
 use crate::common::{
@@ -55,23 +55,21 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         (receiver, Account::new(1_000_000, 0, &Address::default())),
     ];
     let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, 3_000_000);
-    // The key changes before the CPI, which still signs as the same account.
-    let passthrough = create_rotating_passthrough_instruction(
-        scheme,
-        &identity,
-        Some(second.verifying_key().as_bytes()),
-        std::slice::from_ref(&withdraw),
-    );
-    let digest = advance_vector_digest(
+    let passthrough = create_passthrough_instruction(scheme, &identity, &[withdraw]);
+    // The key changes in the `Advance`; the CPI still signs as the same
+    // account.
+    let next_key = second.verifying_key().as_bytes().to_vec();
+    let digest = rotating_advance_vector_digest(
         scheme,
         &NONCE,
         &identity,
+        &next_key,
         &[],
         std::slice::from_ref(&passthrough),
         None,
     );
     let signature = wire(first.sign(&digest).unwrap());
-    let advance = create_advance_instruction(scheme, &identity, &signature);
+    let advance = create_rotating_advance_instruction(scheme, &identity, &next_key, &signature);
 
     // Without an `Advance`, nothing rotates and nothing moves.
     let result = process_transaction(&mollusk, &[&passthrough], &accounts, &[]);
@@ -81,13 +79,13 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     );
     assert_eq!(result.resulting_accounts, accounts);
     // The signature covers the next key: another one does not verify.
-    let changed = create_rotating_passthrough_instruction(
+    let changed = create_rotating_advance_instruction(
         scheme,
         &identity,
-        Some(third.verifying_key().as_bytes()),
-        &[withdraw],
+        third.verifying_key().as_bytes(),
+        &signature,
     );
-    let result = process_transaction(&mollusk, &[&advance.clone(), &changed], &accounts, &[]);
+    let result = process_transaction(&mollusk, &[&changed, &passthrough], &accounts, &[]);
     assert_eq!(
         result.program_result,
         TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
@@ -135,23 +133,20 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     // The next key signs exactly once. A failed action must roll back both
     // the new key and nonce, allowing these exact bytes to be retried.
     let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, 3_000_000);
-    let passthrough = create_rotating_passthrough_instruction(
-        scheme,
-        &identity,
-        Some(third.verifying_key().as_bytes()),
-        &[withdraw],
-    );
-    let next_digest = advance_vector_digest(
+    let passthrough = create_passthrough_instruction(scheme, &identity, &[withdraw]);
+    let next_key = third.verifying_key().as_bytes().to_vec();
+    let next_digest = rotating_advance_vector_digest(
         scheme,
         &digest,
         &identity,
+        &next_key,
         &[],
         std::slice::from_ref(&passthrough),
         None,
     );
     let next_signature = wire(second.sign(&next_digest).unwrap());
     let next_transaction = [
-        create_advance_instruction(scheme, &identity, &next_signature),
+        create_rotating_advance_instruction(scheme, &identity, &next_key, &next_signature),
         passthrough,
     ];
     let failed = process_transaction(
@@ -216,66 +211,6 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     );
 }
 
-#[test]
-fn rotate_validates_payload_without_enforcing_key_freshness() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut signer = xmss::SigningKey::create(directory.path().join("signer.key")).unwrap();
-    let public_key = signer.verifying_key().to_bytes();
-    let identity = public_key;
-    let (vector, _) = find_vector_pda(&XMSS, &identity);
-    let stored = xmss_stored(&public_key, 0);
-    let mollusk = mollusk();
-    let accounts = [(
-        vector,
-        build_vector_account(
-            NONCE,
-            &XMSS,
-            &identity,
-            mollusk.sysvars.rent.minimum_balance(XMSS.account_len()),
-            &stored,
-        ),
-    )];
-    // `1` then a key of the right length, or the data is malformed.
-    for (flag, key) in [
-        (1, vec![0; 40]),
-        (1, vec![0; 42]),
-        (2, public_key.to_vec()),
-        (1, public_key.to_vec()),
-    ] {
-        let mut passthrough =
-            create_rotating_passthrough_instruction(&XMSS, &identity, Some(&public_key), &[]);
-        passthrough
-            .data
-            .splice(2..2 + public_key.len(), key.iter().copied());
-        passthrough.data[1] = flag;
-        let digest = advance_vector_digest(
-            &XMSS,
-            &NONCE,
-            &identity,
-            &[],
-            std::slice::from_ref(&passthrough),
-            None,
-        );
-        let signature = signer.sign(&digest).unwrap();
-        let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
-        let result = process_transaction(&mollusk, &[&advance, &passthrough], &accounts, &[]);
-        if flag == 1 && key == public_key {
-            assert_eq!(result.program_result, TransactionProgramResult::Success);
-            let mut expected = accounts.clone();
-            // The same key again keeps its used leaves used.
-            let stored = xmss_stored(&public_key, signature.leaf() + 1);
-            expected[0].1.data = expected_advanced_data(digest, &XMSS, &identity, &stored);
-            assert_eq!(result.resulting_accounts, expected);
-        } else {
-            assert_eq!(
-                result.program_result,
-                TransactionProgramResult::Failure(1, ProgramError::InvalidInstructionData)
-            );
-            assert_eq!(result.resulting_accounts, accounts);
-        }
-    }
-}
-
 /// Fills with a fixed stream: these keys are for tests only.
 fn fill(
     state: &mut u64,
@@ -292,11 +227,12 @@ fn fill(
 }
 
 #[test]
-fn winternitz_signature_needs_a_passthrough_and_its_key_signs_once() {
+fn winternitz_key_signs_once() {
     let mut state = 1;
     let key = hazmat::winternitz::SecretKey::generate(fill(&mut state)).unwrap();
     let next = hazmat::winternitz::SecretKey::generate(fill(&mut state)).unwrap();
     let identity = key.verifying_key().to_bytes();
+    let next_key = next.verifying_key().to_bytes();
     let (vector, _) = find_vector_pda(&WINTERNITZ, &identity);
     let mollusk = mollusk();
     let rent = mollusk
@@ -307,45 +243,63 @@ fn winternitz_signature_needs_a_passthrough_and_its_key_signs_once() {
         vector,
         build_vector_account(NONCE, &WINTERNITZ, &identity, rent, &identity),
     )];
+    let mut send = |next_key: &[u8]| {
+        let digest = rotating_advance_vector_digest(
+            &WINTERNITZ,
+            &NONCE,
+            &identity,
+            next_key,
+            &[],
+            &[],
+            None,
+        );
+        let signature = key.sign_at(0, &digest, fill(&mut state)).unwrap();
+        let advance = create_rotating_advance_instruction(
+            &WINTERNITZ,
+            &identity,
+            next_key,
+            signature.as_bytes(),
+        );
+        let result = process_transaction(&mollusk, &[&advance], &accounts, &[]);
+        (result.program_result, result.resulting_accounts, digest)
+    };
 
-    // Alone, the signature would land and leave its key in place.
-    let digest = advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[], None);
-    let signature = key.sign_at(0, &digest, fill(&mut state)).unwrap();
-    let advance = create_advance_instruction(&WINTERNITZ, &identity, signature.as_bytes());
-    let result = process_transaction(&mollusk, &[&advance], &accounts, &[]);
+    // Keeping the key would let it sign again.
+    let (result, resulting, _) = send(&identity);
     assert_eq!(
-        result.program_result,
+        result,
         TransactionProgramResult::Failure(0, ProgramError::InvalidInstructionData)
     );
-    assert_eq!(result.resulting_accounts, accounts);
+    assert_eq!(resulting, accounts);
+
+    // A co-signer needs nothing but its `Advance`: the key is replaced there.
+    let (result, resulting, digest) = send(&next_key);
+    assert_eq!(result, TransactionProgramResult::Success);
+    assert_eq!(
+        resulting[0].1.data,
+        expected_advanced_data(digest, &WINTERNITZ, &identity, &next_key)
+    );
 
     // Listed twice in one `Advance`, the key would sign two digests. The
-    // first signature uses the key up, so the second does not verify.
-    let passthrough = create_rotating_passthrough_instruction(
-        &WINTERNITZ,
-        &identity,
-        Some(next.verifying_key().as_bytes()),
-        &[],
-    );
-    let signer = (&WINTERNITZ, &identity[..]);
-    let message = advance_message(
-        &[signer, signer],
-        &[],
-        std::slice::from_ref(&passthrough),
-        None,
-    );
+    // second borrow of the account fails.
+    let signer = AdvanceSigner {
+        scheme: &WINTERNITZ,
+        identity: &identity,
+        next_key: &next_key,
+    };
+    let message = advance_message(&[signer, signer], &[], &[], None);
     let first = signer_digest(&message, &NONCE, &vector);
     let second = signer_digest(&message, &first, &vector);
     let first = key.sign_at(0, &first, fill(&mut state)).unwrap();
     let second = key.sign_at(0, &second, fill(&mut state)).unwrap();
     let twice = create_multi_advance_instruction(&[
-        (&WINTERNITZ, &identity, first.as_bytes()),
-        (&WINTERNITZ, &identity, second.as_bytes()),
+        (signer, first.as_bytes()),
+        (signer, second.as_bytes()),
     ]);
-    let result = process_transaction(&mollusk, &[&twice, &passthrough], &accounts, &[]);
+    let result = process_transaction(&mollusk, &[&twice], &accounts, &[]);
     assert_eq!(
         result.program_result,
-        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+        TransactionProgramResult::Failure(0, ProgramError::AccountBorrowFailed)
     );
     assert_eq!(result.resulting_accounts, accounts);
 }
@@ -366,59 +320,47 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
             build_vector_account(NONCE, &XMSS, &identity, rent, &stored),
         )]
     };
-    let mut send = |next_leaf, leaf, passthrough: Option<&solana_instruction::Instruction>| {
-        let post = passthrough.map_or(&[][..], std::slice::from_ref);
-        let digest = advance_vector_digest(&XMSS, &NONCE, &identity, &[], post, None);
+    let mut send = |next_leaf, leaf, next_key: &[u8]| {
+        let digest =
+            rotating_advance_vector_digest(&XMSS, &NONCE, &identity, next_key, &[], &[], None);
         let signature = key.sign_at(leaf, &digest, fill(&mut state)).unwrap();
-        let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
-        let transaction: Vec<_> = [&advance].into_iter().chain(passthrough).collect();
-        let result = process_transaction(&mollusk, &transaction, &account(next_leaf), &[]);
+        let advance =
+            create_rotating_advance_instruction(&XMSS, &identity, next_key, signature.as_bytes());
+        let result = process_transaction(&mollusk, &[&advance], &account(next_leaf), &[]);
         (
             result.program_result,
             result.resulting_accounts[0].1.data.clone(),
             digest,
         )
     };
+    let next_key = next.verifying_key().to_bytes();
 
     // A leaf below the counter has signed already, whatever the nonce says.
-    let (result, data, _) = send(5, 4, None);
+    let (result, data, _) = send(5, 4, &identity);
     assert_eq!(
         result,
         TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
     );
     assert_eq!(data, account(5)[0].1.data);
-    let (result, data, digest) = send(5, 5, None);
+    // Keeping the key moves the counter past the leaf.
+    let (result, data, digest) = send(5, 5, &identity);
     assert_eq!(result, TransactionProgramResult::Success);
     assert_eq!(
         data,
         expected_advanced_data(digest, &XMSS, &identity, &xmss_stored(&identity, 6))
     );
 
-    // The last leaf leaves a key that cannot sign: it must be replaced in
-    // the same transaction.
+    // After the last leaf the key cannot sign again: it must be replaced.
     let last = xmss::LEAVES - 1;
-    let keep = create_rotating_passthrough_instruction(&XMSS, &identity, None, &[]);
-    let replace = create_rotating_passthrough_instruction(
-        &XMSS,
-        &identity,
-        Some(next.verifying_key().as_bytes()),
-        &[],
-    );
-    let (result, ..) = send(last, last, None);
+    let (result, ..) = send(last, last, &identity);
     assert_eq!(
         result,
         TransactionProgramResult::Failure(0, ProgramError::InvalidInstructionData)
     );
-    let (result, ..) = send(last, last, Some(&keep));
-    assert_eq!(
-        result,
-        TransactionProgramResult::Failure(1, ProgramError::InvalidInstructionData)
-    );
-    let (result, data, digest) = send(last, last, Some(&replace));
+    let (result, data, digest) = send(last, last, &next_key);
     assert_eq!(result, TransactionProgramResult::Success);
-    let stored = xmss_stored(next.verifying_key().as_bytes(), 0);
     assert_eq!(
         data,
-        expected_advanced_data(digest, &XMSS, &identity, &stored)
+        expected_advanced_data(digest, &XMSS, &identity, &xmss_stored(&next_key, 0))
     );
 }

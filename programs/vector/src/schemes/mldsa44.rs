@@ -29,6 +29,8 @@ const PREPARED: usize = offset_of!(MlDsa44, prepared);
 const _: () = assert!((VectorAccount::HEADER_LEN + PREPARED).is_multiple_of(4));
 
 unsafe impl SigningScheme for MlDsa44 {
+    const SIGNATURE_LEN: usize = SIGNATURE_LEN;
+
     fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
         let public_key = VerifyingKey::<false>::ref_from_bytes(key)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
@@ -43,11 +45,12 @@ unsafe impl SigningScheme for MlDsa44 {
         prepare_rows(identity, from)
     }
 
-    fn signature_len(&self) -> usize {
-        SIGNATURE_LEN
-    }
-
-    fn advance(&mut self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn advance(
+        &mut self,
+        digest: &[u8; 32],
+        signature: &[u8],
+        _next_key: &[u8],
+    ) -> Result<(), ProgramError> {
         let signature = Signature::ref_from_bytes(signature)
             .map_err(|_| ProgramError::InvalidInstructionData)?;
         PreparedKey::ref_from_bytes(&self.prepared)

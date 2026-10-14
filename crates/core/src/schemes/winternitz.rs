@@ -18,7 +18,6 @@ pub const WINTERNITZ: Scheme = Scheme {
     identity_len: WINTERNITZ_PUBKEY_LEN,
     stored_identity_len: size_of::<vector::schemes::winternitz::Winternitz>(),
     next_key_len: WINTERNITZ_PUBKEY_LEN,
-    next_key_optional: false,
 };
 
 /// Initialize a stable account with its first signing key.

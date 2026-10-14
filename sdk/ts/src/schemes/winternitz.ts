@@ -13,7 +13,6 @@ export const WINTERNITZ: Scheme = {
   identityLen: WINTERNITZ_PUBKEY_LEN,
   storedIdentityLen: WINTERNITZ_PUBKEY_LEN,
   nextKeyLen: WINTERNITZ_PUBKEY_LEN,
-  nextKeyOptional: false,
 };
 
 /** Initialize a stable account with its first signing key. */

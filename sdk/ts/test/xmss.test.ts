@@ -2,10 +2,11 @@ import { expect, test } from "vitest";
 import { Address } from "@solana/web3.js";
 import {
   XMSS,
-  advanceVectorDigest,
+  createAdvanceInstruction,
+  createRotatingAdvanceInstruction,
+  rotatingAdvanceVectorDigest,
   createInitializeXmss,
   createPassthroughInstruction,
-  createRotatingPassthroughInstruction,
   createWithdrawSubinstruction,
   findVectorPda,
   vectorAccountLen,
@@ -29,25 +30,24 @@ test("XMSS account and rotation digest match Rust", () => {
   }
 
   const nextKey = new Uint8Array(41).fill(7);
-  const passthrough = createRotatingPassthroughInstruction(XMSS, identity, nextKey, [
+  const passthrough = createPassthroughInstruction(XMSS, identity, [
     createWithdrawSubinstruction(XMSS, identity, receiver, 1234n),
   ]);
-  // The next key follows the discriminator.
-  // `1` and the next key follow the discriminator; `0` keeps the key.
-  expect(Array.from(passthrough.data.subarray(0, 43))).toEqual([1, 1, ...nextKey]);
-  expect(
-    Array.from(createRotatingPassthroughInstruction(XMSS, identity, null, []).data)
-  ).toEqual([1, 0, 0]);
-  expect(() => createPassthroughInstruction(XMSS, identity, [])).toThrow();
+  // The next key follows the discriminator; the signature follows it.
+  const signature = new Uint8Array(XMSS.signatureLen);
+  const advance = createRotatingAdvanceInstruction(XMSS, identity, nextKey, signature);
+  expect(Array.from(advance.data.subarray(0, 42))).toEqual([0, ...nextKey]);
+  expect(advance.data.length).toBe(1 + 41 + XMSS.signatureLen);
+  expect(() => createAdvanceInstruction(XMSS, identity, signature)).toThrow();
   for (const length of [40, 42]) {
     expect(() =>
-      createRotatingPassthroughInstruction(XMSS, identity, new Uint8Array(length), [])
+      createRotatingAdvanceInstruction(XMSS, identity, new Uint8Array(length), signature)
     ).toThrow();
   }
-  const digest = advanceVectorDigest(
-    XMSS, new Uint8Array(32).fill(255), identity, [], [passthrough]
+  const digest = rotatingAdvanceVectorDigest(
+    XMSS, new Uint8Array(32).fill(255), identity, nextKey, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "77241ecced2b0d8186f9294d777345d40196ac04d5429a74c08bc7ee05fe569c"
+    "3a44cef01ba71f113784c0f39f8fe36b30e955ad43667c6239b747a25acf72e8"
   );
 });

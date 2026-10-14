@@ -13,6 +13,8 @@ pub struct Secp256k1 {
 }
 
 unsafe impl SigningScheme for Secp256k1 {
+    const SIGNATURE_LEN: usize = 64;
+
     fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
         let public_key: &[u8; CompressedPoint::SIZE] = key
             .try_into()
@@ -24,11 +26,12 @@ unsafe impl SigningScheme for Secp256k1 {
         Ok(())
     }
 
-    fn signature_len(&self) -> usize {
-        64
-    }
-
-    fn advance(&mut self, digest: &[u8; 32], signature: &[u8]) -> Result<(), ProgramError> {
+    fn advance(
+        &mut self,
+        digest: &[u8; 32],
+        signature: &[u8],
+        _next_key: &[u8],
+    ) -> Result<(), ProgramError> {
         let signature: [u8; 64] = signature
             .try_into()
             .map_err(|_| ProgramError::InvalidInstructionData)?;

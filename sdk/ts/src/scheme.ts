@@ -67,12 +67,10 @@ export interface Scheme {
    */
   storedIdentityLen: number;
   /**
-   * Length of the key a `passthrough` carries for a scheme whose key
-   * rotates (Winternitz, XMSS): the key that signs next. Zero otherwise.
+   * Length of the key an `advance` carries for a scheme whose key rotates
+   * (Winternitz, XMSS): the key that signs next. Zero otherwise.
    */
   nextKeyLen: number;
-  /** The next key may be left out, keeping the current one (XMSS). */
-  nextKeyOptional: boolean;
 }
 
 /** Total on-chain account size for a scheme. */

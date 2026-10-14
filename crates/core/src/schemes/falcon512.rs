@@ -19,7 +19,6 @@ pub const FALCON512: Scheme = Scheme {
     identity_len: FALCON512_WIRE_PUBKEY_LEN,
     stored_identity_len: size_of::<vector::schemes::falcon512::Falcon512>(),
     next_key_len: 0,
-    next_key_optional: false,
 };
 
 /// Initialize a Falcon-512 vector account. `wire_pubkey` is the standard

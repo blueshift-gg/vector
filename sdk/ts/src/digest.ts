@@ -58,8 +58,11 @@ function promoteToMessageFlags(
   );
 }
 
-/** One signer of an `advance`: its scheme and identity. */
-export type AdvanceSigner = { scheme: Scheme; identity: Uint8Array };
+/**
+ * One signer of an `advance`: its account, and for a scheme whose key
+ * rotates (Winternitz, XMSS), the key that signs next.
+ */
+export type AdvanceSigner = { scheme: Scheme; identity: Uint8Array; nextKey?: Uint8Array };
 
 /**
  * The message every signer of one advance approves: the SHA-256 of the
@@ -92,15 +95,13 @@ export function advanceMessage(
   writeU16LE(buffer, advanceIndex, buffer.length - 2);
 
   // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-  // u16 data_len + data. The signatures are the data after the
-  // discriminator.
+  // u16 data_len + data. The signatures are the end of the data.
   const offset = readU16LE(buffer, 2 + 2 * advanceIndex);
-  const dataStart = offset + 2 + 33 * advanceIx.keys.length + 32 + 2;
-  const signaturesStart = dataStart + 1;
-  const dataEnd = dataStart + advanceIx.data.length;
+  const dataEnd = offset + 2 + 33 * advanceIx.keys.length + 32 + 2 + advanceIx.data.length;
+  const signaturesLen = signers.reduce((n, s) => n + s.scheme.signatureLen, 0);
 
   const h = createHash("sha256");
-  h.update(buffer.subarray(0, signaturesStart));
+  h.update(buffer.subarray(0, dataEnd - signaturesLen));
   h.update(buffer.subarray(dataEnd));
   return new Uint8Array(h.digest());
 }
@@ -122,7 +123,7 @@ export function signerDigest(
   return new Uint8Array(h.digest());
 }
 
-/** {@link signerDigest} for an advance with one signer. */
+/** {@link signerDigest} for an advance with one signer, whose key never changes. */
 export function advanceVectorDigest(
   scheme: Scheme,
   nonce: Uint8Array,
@@ -131,8 +132,34 @@ export function advanceVectorDigest(
   postInstructions: TransactionInstruction[],
   feePayer?: Address
 ): Uint8Array {
+  return rotatingAdvanceVectorDigest(
+    scheme,
+    nonce,
+    identity,
+    new Uint8Array(),
+    preInstructions,
+    postInstructions,
+    feePayer
+  );
+}
+
+/**
+ * {@link advanceVectorDigest} for Winternitz and XMSS, whose key rotates.
+ * `nextKey` is the key that signs next: a Winternitz key must change every
+ * time, an XMSS key may stay until its tree runs out. `identity` stays the
+ * first key.
+ */
+export function rotatingAdvanceVectorDigest(
+  scheme: Scheme,
+  nonce: Uint8Array,
+  identity: Uint8Array,
+  nextKey: Uint8Array,
+  preInstructions: TransactionInstruction[],
+  postInstructions: TransactionInstruction[],
+  feePayer?: Address
+): Uint8Array {
   const message = advanceMessage(
-    [{ scheme, identity }],
+    [{ scheme, identity, nextKey }],
     preInstructions,
     postInstructions,
     feePayer

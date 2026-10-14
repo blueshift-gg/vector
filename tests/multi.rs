@@ -14,7 +14,7 @@ use solana_program_error::ProgramError;
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
-    sign_advance_instruction_ed25519, signer_digest, Scheme, ED25519, SECP256K1,
+    sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, ED25519, SECP256K1,
 };
 
 use crate::common::{
@@ -74,14 +74,25 @@ impl World {
             self.withdraw(&ED25519, &alice, 1_000_000_000),
             self.withdraw(&SECP256K1, &bob, 2_000_000_000),
         ];
-        let message = advance_message(&[(&ED25519, &alice), (&SECP256K1, &bob)], &[], &post, None);
+        let message = advance_message(
+            &[
+                AdvanceSigner::new(&ED25519, &alice),
+                AdvanceSigner::new(&SECP256K1, &bob),
+            ],
+            &[],
+            &post,
+            None,
+        );
         let alice_digest = signer_digest(&message, &NONCE, &find_vector_pda(&ED25519, &alice).0);
         let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0);
         let alice_signature = self.alice.sign(&alice_digest).to_bytes();
         let bob_signature: Secp256k1Signature = self.bob.sign_prehash(&bob_digest).unwrap();
         let advance = create_multi_advance_instruction(&[
-            (&ED25519, &alice, &alice_signature),
-            (&SECP256K1, &bob, &bob_signature.to_bytes()),
+            (AdvanceSigner::new(&ED25519, &alice), &alice_signature[..]),
+            (
+                AdvanceSigner::new(&SECP256K1, &bob),
+                &bob_signature.to_bytes()[..],
+            ),
         ]);
         let [first, second] = post;
         (vec![advance, first, second], alice_digest, bob_digest)

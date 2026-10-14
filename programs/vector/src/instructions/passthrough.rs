@@ -25,7 +25,6 @@ use crate::{
 /// this instruction included.
 ///
 /// > Find an earlier `Advance` that lists the account
-/// > Let the scheme take its part: a rotating scheme sets its next key
 /// > Invoke each instruction, signing as the account
 ///
 /// Accounts:
@@ -36,19 +35,16 @@ use crate::{
 ///
 /// Parameters:
 ///
-/// - what the scheme takes first: for Winternitz, the key that signs next;
-///   for XMSS, `0`, or `1` and the key that signs next
 /// - num_instructions: u8
 /// - for each instruction: num_accounts: u8, data_len: u16, data
 ///
 /// Account Checks:
-/// - Vector: owned by the program, complete, listed in an earlier `Advance`
+/// - Vector: owned by the program, listed in an earlier `Advance`
 /// - InstructionsSysvar: the instructions sysvar
 pub struct Passthrough<'a> {
     vector: &'a mut AccountView,
     instructions_sysvar: &'a AccountView,
     remaining: &'a [AccountView],
-    /// What the scheme takes, if anything, then the instructions.
     instructions: &'a [u8],
 }
 
@@ -80,19 +76,13 @@ impl<'a> Passthrough<'a> {
         let address = self.vector.address().to_bytes();
 
         // The seeds come from the account itself, so the signature below can
-        // only ever be the account's own. A scheme whose key rotates takes
-        // its next key off the front of the data.
-        let (seed, scheme, bump, instructions) = {
+        // only ever be the account's own.
+        let (seed, scheme, bump) = {
             let mut data = VectorAccount::borrow(self.vector)?;
-            let (account, identity) = VectorAccount::load(&mut data)?;
-            check_advanced(self.instructions_sysvar, &address)?;
-            (
-                account.seed,
-                [account.scheme],
-                [account.bump],
-                identity.passthrough(self.instructions)?,
-            )
+            let (account, _) = VectorAccount::split(&mut data)?;
+            (account.seed, [account.scheme], [account.bump])
         };
+        check_advanced(self.instructions_sysvar, &address)?;
 
         let seeds = [
             Seed::from(VECTOR_SEED),
@@ -100,7 +90,7 @@ impl<'a> Passthrough<'a> {
             Seed::from(&seed),
             Seed::from(&bump),
         ];
-        self.invoke(instructions, &[Signer::from(&seeds)])
+        self.invoke(self.instructions, &[Signer::from(&seeds)])
     }
 
     /// Invoke each instruction in the data, taking its program and accounts

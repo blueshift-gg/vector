@@ -19,7 +19,6 @@ pub const EIP191: Scheme = Scheme {
     identity_len: EIP191_ETH_ADDRESS_LEN,
     stored_identity_len: size_of::<vector::schemes::eip191::Eip191>(),
     next_key_len: 0,
-    next_key_optional: false,
 };
 
 /// Derive the 20-byte Ethereum address from an uncompressed secp256k1 public

@@ -7,8 +7,8 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
 use vector_core::{
-    create_initialize_instruction, create_initialize_mldsa44,
-    create_rotating_passthrough_instruction, find_vector_pda, WINTERNITZ, XMSS,
+    create_initialize_instruction, create_initialize_mldsa44, create_passthrough_instruction,
+    create_rotating_advance_instruction, find_vector_pda, WINTERNITZ, XMSS,
 };
 
 use crate::common::{build_vector_account, mollusk, NONCE};
@@ -88,22 +88,24 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     );
 
     // Anyone can assign a zeroed account to the program. It belongs to no
-    // scheme, so nothing runs on it.
+    // scheme, so no `Advance` lists it and nothing runs on it.
     let zeroed = Account::new(
         10_000_000,
         WINTERNITZ.account_len(),
         &vector_core::PROGRAM_ID,
     );
-    let advance = vector_core::create_advance_instruction(&WINTERNITZ, &KEY, &[0; 849]);
+    let advance = create_rotating_advance_instruction(&WINTERNITZ, &KEY, &[9; 41], &[0; 849]);
     for instruction in [
         &advance,
-        &create_rotating_passthrough_instruction(&WINTERNITZ, &KEY, Some(&[9; 41]), &[]),
+        &create_passthrough_instruction(&WINTERNITZ, &KEY, &[]),
     ] {
         let result = mollusk.process_instruction(instruction, &[(vector, zeroed.clone())]);
         assert!(matches!(
             result.program_result,
             ProgramResult::Failure(
-                ProgramError::InvalidAccountData | ProgramError::InvalidInstructionData
+                ProgramError::InvalidAccountData
+                    | ProgramError::InvalidInstructionData
+                    | ProgramError::MissingRequiredSignature
             )
         ));
     }
@@ -111,8 +113,7 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     // An account the program does not own has no scheme to read.
     let mut foreign = account;
     foreign.owner = Address::new_unique();
-    let passthrough =
-        create_rotating_passthrough_instruction(&WINTERNITZ, &KEY, Some(&[9; 41]), &[]);
+    let passthrough = create_passthrough_instruction(&WINTERNITZ, &KEY, &[]);
     let result = mollusk.process_instruction(&passthrough, &[(vector, foreign)]);
     assert_eq!(
         result.program_result,

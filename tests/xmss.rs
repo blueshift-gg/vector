@@ -6,9 +6,9 @@ use solana_address::Address;
 use solana_program_error::ProgramError;
 use solana_winternitz::xmss;
 use vector_core::{
-    advance_vector_digest, create_advance_instruction, create_initialize_xmss,
-    create_rotating_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
-    PROGRAM_ID, XMSS,
+    create_initialize_xmss, create_passthrough_instruction, create_rotating_advance_instruction,
+    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, PROGRAM_ID,
+    XMSS,
 };
 
 use crate::common::{
@@ -31,13 +31,20 @@ fn initialize_checks_key_length_and_pda() {
     assert_eq!(bump, 255);
     let receiver = Address::new_from_array([9; 32]);
     let withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 1234);
-    let passthrough =
-        create_rotating_passthrough_instruction(&XMSS, &identity, Some(&[7; 41]), &[withdraw]);
+    let passthrough = create_passthrough_instruction(&XMSS, &identity, &[withdraw]);
     assert_eq!(
-        advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[passthrough], None),
+        rotating_advance_vector_digest(
+            &XMSS,
+            &NONCE,
+            &identity,
+            &[7; 41],
+            &[],
+            &[passthrough],
+            None
+        ),
         [
-            119, 36, 30, 204, 237, 43, 13, 129, 134, 249, 41, 77, 119, 115, 69, 212, 1, 150, 172,
-            4, 213, 66, 154, 116, 192, 139, 199, 238, 5, 254, 86, 156
+            58, 68, 206, 240, 27, 167, 31, 17, 55, 132, 192, 243, 159, 143, 227, 107, 48, 233, 85,
+            173, 67, 102, 124, 98, 57, 183, 71, 162, 90, 207, 114, 232
         ],
     );
     let accounts = [
@@ -118,9 +125,12 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
         mollusk.sysvars.rent.minimum_balance(XMSS.account_len()),
         &stored,
     );
-    let digest = advance_vector_digest(&XMSS, &NONCE, &identity, &[], &[], None);
+    // The same key next keeps it.
+    let digest =
+        rotating_advance_vector_digest(&XMSS, &NONCE, &identity, &identity, &[], &[], None);
     let signature = signer.sign(&digest).unwrap();
-    let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
+    let advance =
+        create_rotating_advance_instruction(&XMSS, &identity, &identity, signature.as_bytes());
     // Leaf 0 signed, so leaf 1 is the lowest that may sign next.
     let expected = expected_advanced_data(digest, &XMSS, &identity, &xmss_stored(&public_key, 1));
     let result = mollusk.process_and_validate_instruction_chain(
@@ -180,7 +190,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
             ProgramError::InvalidInstructionData,
         ),
     ] {
-        let invalid = create_advance_instruction(&XMSS, &identity, bytes);
+        let invalid = create_rotating_advance_instruction(&XMSS, &identity, &identity, bytes);
         mollusk.process_and_validate_instruction_chain(
             &[(
                 &invalid,
@@ -214,10 +224,11 @@ fn advance_binds_and_authorizes_withdrawal() {
         (receiver, Account::new(1_000_000, 0, &Address::default())),
     ];
     let withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 3_000_000);
-    let passthrough = create_rotating_passthrough_instruction(&XMSS, &identity, None, &[withdraw]);
-    let digest = advance_vector_digest(
+    let passthrough = create_passthrough_instruction(&XMSS, &identity, &[withdraw]);
+    let digest = rotating_advance_vector_digest(
         &XMSS,
         &NONCE,
+        &identity,
         &identity,
         &[],
         std::slice::from_ref(&passthrough),
@@ -225,12 +236,12 @@ fn advance_binds_and_authorizes_withdrawal() {
     );
     let signature = signer.sign(&digest).unwrap();
     assert_eq!(signature.leaf(), 1);
-    let advance = create_advance_instruction(&XMSS, &identity, signature.as_bytes());
+    let advance =
+        create_rotating_advance_instruction(&XMSS, &identity, &identity, signature.as_bytes());
 
     // The signature must bind the downstream action, not just the nonce.
     let changed_withdraw = create_withdraw_subinstruction(&XMSS, &identity, &receiver, 4_000_000);
-    let changed =
-        create_rotating_passthrough_instruction(&XMSS, &identity, None, &[changed_withdraw]);
+    let changed = create_passthrough_instruction(&XMSS, &identity, &[changed_withdraw]);
     process_transaction(
         &mollusk,
         &[&advance, &changed],
