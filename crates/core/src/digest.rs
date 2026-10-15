@@ -1,5 +1,5 @@
-//! The canonical `advance` digest the client signs and the on-chain program
-//! recomputes from the instructions sysvar.
+//! What a vector account signs: a digest of the transaction, which the
+//! program recomputes from the instructions sysvar.
 
 use std::collections::HashMap;
 
@@ -8,16 +8,12 @@ use solana_address::Address;
 use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction, Instruction};
 use solana_instructions_sysvar::construct_instructions_data;
 
-use crate::instructions::create_advance_instruction;
-use crate::scheme::Scheme;
+use crate::instructions::{create_multi_advance_instruction, AdvanceSigner};
+use crate::scheme::{find_vector_pda, Scheme};
 
-/// Promote instruction-level account flags to message-level flags, matching
-/// what the Solana runtime writes into the live instructions sysvar: each
-/// unique account's `is_signer`/`is_writable` are OR-ed across every
-/// top-level instruction, and the transaction's fee payer (always a writable
-/// signer at the message level) is folded in when supplied.
-///
-/// Mirrors `promoteToMessageFlags` in `sdk/ts/src/digest.ts`.
+/// Set each account's flags to what the runtime writes in the instructions
+/// sysvar: signer or writable if any instruction says so, and the fee payer
+/// always both.
 fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<&Address>) {
     let mut flags: HashMap<Address, (bool, bool)> = HashMap::new();
     if let Some(payer) = fee_payer {
@@ -39,112 +35,42 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
     }
 }
 
-/// Compute the canonical `advance_vector_digest` the client must sign over,
-/// **exactly as the on-chain program recomputes it from the live
-/// instructions sysvar**. This is the mirror of `advanceVectorDigest` in
-/// `sdk/ts/src/digest.ts`.
+/// The message every signer of one advance approves: the SHA-256 of the
+/// instructions sysvar without the advance's data.
 ///
-/// `digest = SHA256(pre || nonce || identity || post)`, where `pre` and
-/// `post` span the entire instructions sysvar buffer minus the scheme's
-/// signature region inside the `advance` ix.
+/// `signers` are the advance's, in order. The advance goes after
+/// `pre_instructions`. A passthrough is one of the pre or post instructions,
+/// so the message covers it.
 ///
-/// Two runtime behaviours are reproduced before hashing:
-///
-/// 1. **Message-level flag promotion** — the live sysvar serializes each
-///    account's *message-level* `is_signer`/`is_writable` (OR-ed across all
-///    top-level instructions), not the per-instruction flags. `fee_payer`,
-///    when supplied, participates in this promotion only (it is always a
-///    writable signer at the message level): the digest is independent of
-///    the fee payer **unless** the fee payer's key appears among the
-///    committed instructions' accounts, in which case promotion folds it in.
-/// 2. **Sysvar index footer** — the buffer's trailing two bytes hold the
-///    runtime's `current_instruction_index`, i.e. the advance's own index
-///    (`pre_instructions.len()`), not zero.
-///
-/// Callers pass the full ix layout via `pre_instructions` /
-/// `post_instructions` — the advance ix is inserted at `pre.len()`. Any
-/// sibling `passthrough` ix authorising CPIs under the vector PDA's signer
-/// seeds is just another pre/post ix; the on-chain `passthrough` handler
-/// scans the sysvar to pair with this `advance`, and the digest commits
-/// to all of it.
-pub fn advance_vector_digest_with_fee_payer(
-    scheme: &Scheme,
-    nonce: &[u8; 32],
-    identity: &[u8],
+/// `fee_payer` is as in [`advance_vector_digest`].
+pub fn advance_message(
+    signers: &[AdvanceSigner],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
     fee_payer: Option<&Address>,
 ) -> [u8; 32] {
-    let sig_len = scheme.signature_len;
-    let placeholder = vec![0u8; sig_len];
-    let advance_ix = create_advance_instruction(scheme, identity, &placeholder);
-
-    let mut all_owned: Vec<Instruction> =
-        Vec::with_capacity(pre_instructions.len() + 1 + post_instructions.len());
-    all_owned.extend(pre_instructions.iter().cloned());
-    let advance_index = all_owned.len();
-    all_owned.push(advance_ix);
-    all_owned.extend(post_instructions.iter().cloned());
-
-    promote_to_message_flags(&mut all_owned, fee_payer);
-
-    vector_digest(advance_index, sig_len, nonce, identity, &all_owned)
-}
-
-/// [`advance_vector_digest_with_fee_payer`] for a fee payer that is not among
-/// the committed instructions' accounts, where it has no effect on the
-/// digest. Mirrors `advanceVectorDigest` without `feePayer` in
-/// `sdk/ts/src/digest.ts`.
-pub fn advance_vector_digest(
-    scheme: &Scheme,
-    nonce: &[u8; 32],
-    identity: &[u8],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-) -> [u8; 32] {
-    advance_vector_digest_with_fee_payer(
-        scheme,
-        nonce,
-        identity,
-        pre_instructions,
-        post_instructions,
-        None,
-    )
-}
-
-/// The digest a pre-signed revocation commits to: [`advance_vector_digest`]
-/// with empty pre/post instructions. The resulting advance is an inert
-/// transition — landing it only installs the next nonce, orphaning every
-/// signature pre-signed against `nonce` (a kill-switch).
-///
-/// This digest commits to the instructions sysvar of the broadcasting
-/// transaction, so a pre-signed revocation must be broadcast as a
-/// transaction containing ONLY the advance instruction. ed25519 / eip191 /
-/// secp256k1 inert advances fit the default compute budget (~13k / ~26k /
-/// ~72k CUs); for Falcon-512, sign via the advance signer with a
-/// compute-budget pre-instruction committed at sign time (its ~184k CU
-/// verify leaves no headroom under the 200k default).
-pub fn revocation_digest(scheme: &Scheme, nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {
-    advance_vector_digest(scheme, nonce, identity, &[], &[])
-}
-
-/// Shared digest computation for any vector instruction whose data starts
-/// with `[discriminator (1), signature (sig_len), ...]`. Hashes
-/// `buffer[..sig_start] || nonce || identity || buffer[sig_end..]` over the
-/// reconstructed sysvar buffer with its `current_instruction_index` footer
-/// patched to `target_index` (what the runtime stores before executing the
-/// target instruction — `construct_instructions_data` leaves it zeroed).
-fn vector_digest(
-    target_index: usize,
-    sig_len: usize,
-    nonce: &[u8; 32],
-    identity: &[u8],
-    all_ixs: &[Instruction],
-) -> [u8; 32] {
-    let borrowed_ixs: Vec<BorrowedInstruction> = all_ixs
+    // Only the length of the advance's data shows: it moves what follows.
+    let placeholders: Vec<Vec<u8>> = signers
         .iter()
-        .map(|ix| {
-            let accounts = ix
+        .map(|signer| vec![0; signer.scheme.signature_len])
+        .collect();
+    let signed: Vec<_> = signers
+        .iter()
+        .zip(&placeholders)
+        .map(|(&signer, signature)| (signer, signature.as_slice()))
+        .collect();
+
+    let mut all: Vec<Instruction> = pre_instructions.to_vec();
+    let advance_index = all.len();
+    all.push(create_multi_advance_instruction(&signed));
+    all.extend_from_slice(post_instructions);
+    promote_to_message_flags(&mut all, fee_payer);
+
+    let borrowed: Vec<BorrowedInstruction> = all
+        .iter()
+        .map(|ix| BorrowedInstruction {
+            program_id: &ix.program_id,
+            accounts: ix
                 .accounts
                 .iter()
                 .map(|meta| BorrowedAccountMeta {
@@ -152,45 +78,105 @@ fn vector_digest(
                     is_signer: meta.is_signer,
                     is_writable: meta.is_writable,
                 })
-                .collect();
-            BorrowedInstruction {
-                program_id: &ix.program_id,
-                accounts,
-                data: &ix.data,
-            }
+                .collect(),
+            data: &ix.data,
         })
         .collect();
-    let mut buffer = construct_instructions_data(&borrowed_ixs);
+    let mut buffer = construct_instructions_data(&borrowed);
 
-    // Patch the trailing `current_instruction_index` footer to the target's
-    // index. The on-chain program hashes the live sysvar, whose footer the
-    // runtime sets to the executing instruction's index; the constructed
-    // buffer leaves it zeroed, which only matches when the advance is the
-    // transaction's first instruction.
+    // The runtime sets the footer to the executing instruction's index; the
+    // constructed buffer leaves it zeroed.
     let len = buffer.len();
-    buffer[len - 2..].copy_from_slice(&(target_index as u16).to_le_bytes());
+    buffer[len - 2..].copy_from_slice(&(advance_index as u16).to_le_bytes());
 
     // Header: num_instructions (u16) + one offset u16 per instruction.
-    let ix_offset_pos = 2 + 2 * target_index;
-    let ix_offset = u16::from_le_bytes(
-        buffer[ix_offset_pos..ix_offset_pos + 2]
-            .try_into()
-            .expect("vector buffer header truncated"),
-    ) as usize;
-
     // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-    // u16 data_len + data. Signature sits right after the 1-byte
-    // discriminator.
-    let num_accounts = all_ixs[target_index].accounts.len();
-    let sig_start = ix_offset + 2 + 33 * num_accounts + 32 + 2 + 1;
-    let sig_end = sig_start + sig_len;
-
-    debug_assert!(sig_end + 2 <= buffer.len());
+    // u16 data_len + data. Everything after the discriminator is cut.
+    let offset_pos = 2 + 2 * advance_index;
+    let offset = u16::from_le_bytes([buffer[offset_pos], buffer[offset_pos + 1]]) as usize;
+    let advance = &all[advance_index];
+    let data_end = offset + 2 + 33 * advance.accounts.len() + 32 + 2 + advance.data.len();
+    let cut = advance.data.len() - 1;
 
     let mut hasher = Sha256::new();
-    hasher.update(&buffer[..sig_start]);
-    hasher.update(nonce);
-    hasher.update(identity);
-    hasher.update(&buffer[sig_end..]);
+    hasher.update(&buffer[..data_end - cut]);
+    hasher.update(&buffer[data_end..]);
     hasher.finalize().into()
+}
+
+/// What one signer signs, and the account's next nonce: `SHA256(message ||
+/// nonce || vector || next_key)`, with `message` from [`advance_message`],
+/// `vector` the signer's account address and `next_key` its
+/// [`AdvanceSigner::next_key`].
+pub fn signer_digest(
+    message: &[u8; 32],
+    nonce: &[u8; 32],
+    vector: &Address,
+    next_key: &[u8],
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(message);
+    hasher.update(nonce);
+    hasher.update(vector);
+    hasher.update(next_key);
+    hasher.finalize().into()
+}
+
+/// [`signer_digest`] for an advance with one signer, whose key never
+/// changes.
+///
+/// Pass `fee_payer` when it is also an account of one of the instructions:
+/// the runtime then marks it a writable signer there, and the digest covers
+/// that flag.
+pub fn advance_vector_digest(
+    scheme: &Scheme,
+    nonce: &[u8; 32],
+    identity: &[u8],
+    pre_instructions: &[Instruction],
+    post_instructions: &[Instruction],
+    fee_payer: Option<&Address>,
+) -> [u8; 32] {
+    rotating_advance_vector_digest(
+        scheme,
+        nonce,
+        identity,
+        &[],
+        pre_instructions,
+        post_instructions,
+        fee_payer,
+    )
+}
+
+/// [`advance_vector_digest`] for Winternitz and XMSS, whose key rotates.
+/// `next_key` is the key that signs next: a Winternitz key must change every
+/// time, an XMSS key may stay until its tree runs out. `identity` stays the
+/// first key.
+pub fn rotating_advance_vector_digest(
+    scheme: &Scheme,
+    nonce: &[u8; 32],
+    identity: &[u8],
+    next_key: &[u8],
+    pre_instructions: &[Instruction],
+    post_instructions: &[Instruction],
+    fee_payer: Option<&Address>,
+) -> [u8; 32] {
+    let signer = AdvanceSigner {
+        scheme,
+        identity,
+        next_key,
+    };
+    let message = advance_message(&[signer], pre_instructions, post_instructions, fee_payer);
+    signer_digest(
+        &message,
+        nonce,
+        &find_vector_pda(scheme, identity).0,
+        next_key,
+    )
+}
+
+/// The digest of an advance with nothing around it. Landing that advance only
+/// moves the nonce, which cancels everything signed against the old one. It
+/// must be the only instruction of its transaction.
+pub fn revocation_digest(scheme: &Scheme, nonce: &[u8; 32], identity: &[u8]) -> [u8; 32] {
+    advance_vector_digest(scheme, nonce, identity, &[], &[], None)
 }

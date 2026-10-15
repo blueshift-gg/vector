@@ -1,44 +1,33 @@
-//! Ed25519 program: identity is the 32-byte public key, verified directly
+//! Ed25519 scheme: identity is the 32-byte public key, verified directly
 //! over the advance digest.
 
 use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
-use solana_address::{address, Address};
+use solana_address::Address;
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest_with_fee_payer;
+use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
-pub const ED25519_PUBKEY_LEN: usize = 32;
-
 /// Ed25519 — identity is the 32-byte public key.
-pub const ED25519: Scheme = Scheme {
-    program_id: address!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV"),
-    signature_len: 64,
-    identity_len: ED25519_PUBKEY_LEN,
-    stored_identity_len: ED25519_PUBKEY_LEN,
-};
+pub const ED25519: Scheme = Scheme::of::<vector::schemes::ed25519::Ed25519>();
 
 /// 32-byte Ed25519 public key (the identity) for a signing key.
-pub fn ed25519_pubkey(signing_key: &SigningKey) -> [u8; ED25519_PUBKEY_LEN] {
+pub fn ed25519_pubkey(signing_key: &SigningKey) -> [u8; ED25519.identity_len] {
     signing_key.verifying_key().to_bytes()
 }
 
 /// Initialize an Ed25519 vector account. `pubkey` is the 32-byte public key.
 pub fn create_initialize_ed25519(
     payer: &Address,
-    pubkey: &[u8; ED25519_PUBKEY_LEN],
+    pubkey: &[u8; ED25519.identity_len],
 ) -> Instruction {
-    create_initialize_instruction(payer, &ED25519, pubkey, pubkey)
+    create_initialize_instruction(payer, &ED25519, pubkey)
 }
 
-/// Sign the advance digest with an Ed25519 key, returning the advance ix
-/// alone. Any CPI passthrough must be built separately via
-/// [`crate::instructions::create_passthrough_instruction`] and included
-/// among `pre_instructions` or `post_instructions` so the digest commits
-/// to its bytes. Pass the transaction's `fee_payer` whenever it is also an
-/// account of one of those instructions: the runtime then records it as a
-/// writable signer there, and the signature must commit to that.
+/// Sign an advance with an Ed25519 key. Put any passthrough among
+/// `pre_instructions` or `post_instructions`, so the signature covers it.
+/// Pass `fee_payer` when it is also an account of one of those instructions.
 pub fn sign_advance_instruction_ed25519(
     signing_key: &SigningKey,
     nonce: &[u8; 32],
@@ -47,7 +36,7 @@ pub fn sign_advance_instruction_ed25519(
     fee_payer: Option<&Address>,
 ) -> Instruction {
     let identity = ed25519_pubkey(signing_key);
-    let digest = advance_vector_digest_with_fee_payer(
+    let digest = advance_vector_digest(
         &ED25519,
         nonce,
         &identity,
@@ -59,13 +48,9 @@ pub fn sign_advance_instruction_ed25519(
     create_advance_instruction(&ED25519, &identity, &signature)
 }
 
-/// Sign an inert advance — a revocation — with an Ed25519 key:
-/// [`sign_advance_instruction_ed25519`] with empty pre/post instructions.
-/// Landing it only bumps the nonce, orphaning everything pre-signed against
-/// it. The digest ([`crate::digest::revocation_digest`]) commits to the
-/// broadcasting transaction containing ONLY this instruction; verify with
-/// [`crate::verify::verify_advance_signature_ed25519`] over empty pre/post
-/// slices.
+/// Sign an advance with nothing around it. Landing it only moves the nonce,
+/// which cancels everything signed against the old one. It must be the only
+/// instruction of its transaction.
 pub fn sign_revocation_instruction_ed25519(
     signing_key: &SigningKey,
     nonce: &[u8; 32],

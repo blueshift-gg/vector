@@ -6,9 +6,9 @@ use solana_address::Address;
 use solana_program_error::ProgramError;
 use solana_winternitz::winternitz;
 use vector_core::{
-    advance_vector_digest, create_advance_instruction, create_close_subinstruction,
-    create_initialize_winternitz, create_passthrough_instruction, create_rotate_subinstruction,
-    find_vector_pda, winternitz_identity, WINTERNITZ,
+    create_close_subinstruction, create_initialize_winternitz, create_passthrough_instruction,
+    create_rotating_advance_instruction, find_vector_pda, rotating_advance_vector_digest,
+    PROGRAM_ID, WINTERNITZ,
 };
 
 use crate::common::{
@@ -17,25 +17,32 @@ use crate::common::{
 
 #[test]
 fn initialize_and_client_encoding() {
-    let mollusk = mollusk(&WINTERNITZ);
+    let mollusk = mollusk();
     let public_key = core::array::from_fn(|i| i as u8);
-    let identity = winternitz_identity(&public_key);
+    let identity = public_key;
     let (vector, bump) = find_vector_pda(&WINTERNITZ, &identity);
     // Shared with sdk/ts/test/winternitz.test.ts.
     assert_eq!(
         vector.to_string(),
-        "8DgkUyaVWAvj24nWMEdFec11GfzhZ5CpoAFwdojVmt9R"
+        "Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y"
     );
     assert_eq!(bump, 255);
     let receiver = Address::new_from_array([9; 32]);
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
-    let rotate = create_rotate_subinstruction(&WINTERNITZ, &identity, &[7; 41]);
-    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[rotate, close]);
+    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[close]);
     assert_eq!(
-        advance_vector_digest(&WINTERNITZ, &NONCE, &identity, &[], &[passthrough]),
+        rotating_advance_vector_digest(
+            &WINTERNITZ,
+            &NONCE,
+            &identity,
+            &[7; 41],
+            &[],
+            &[passthrough],
+            None
+        ),
         [
-            65, 103, 69, 96, 145, 228, 158, 154, 111, 107, 43, 41, 164, 133, 193, 179, 225, 56,
-            222, 144, 0, 46, 22, 223, 99, 48, 129, 42, 136, 132, 197, 65
+            75, 188, 38, 174, 194, 65, 113, 65, 107, 130, 97, 210, 53, 94, 208, 104, 187, 85, 205,
+            31, 27, 12, 79, 46, 95, 232, 249, 125, 72, 19, 87, 182
         ],
     );
 
@@ -53,8 +60,8 @@ fn initialize_and_client_encoding() {
         &[
             Check::success(),
             Check::account(&vector)
-                .owner(&WINTERNITZ.program_id)
-                .space(WINTERNITZ.account_len())
+                .owner(&PROGRAM_ID)
+                .space(WINTERNITZ.account_len)
                 .build(),
         ],
     );
@@ -65,19 +72,29 @@ fn initialize_and_client_encoding() {
         .unwrap()
         .1
         .data;
-    assert_eq!(stored[32], bump);
-    assert_eq!(&stored[33..65], &identity);
-    assert_eq!(&stored[65..], &public_key);
+    assert_eq!(&stored[32..64], &vector_core::vector_seed(&identity));
+    let (_, system_bump) = vector_core::find_system_pda(&vector);
+    assert_eq!(stored[64..68], [WINTERNITZ.id, bump, system_bump, 0]);
+    assert_eq!(&stored[68..], &public_key);
 
+    // A key of another length has another address, and the scheme refuses it.
     for length in [40, 42] {
+        let key = vec![0; length];
+        let (address, _) = Address::find_program_address(
+            &[b"vector", &[WINTERNITZ.id], &vector_core::vector_seed(&key)],
+            &PROGRAM_ID,
+        );
         let mut malformed = initialize.clone();
-        malformed.data.resize(1 + length, 0);
+        malformed.accounts[1].pubkey = address;
+        malformed.data.splice(2.., key);
+        let mut accounts = accounts.to_vec();
+        accounts[1].0 = address;
         mollusk.process_and_validate_instruction(
             &malformed,
             &accounts,
             &[
                 Check::err(ProgramError::InvalidInstructionData),
-                Check::account(&vector).space(0).build(),
+                Check::account(&address).space(0).build(),
             ],
         );
     }
@@ -88,37 +105,37 @@ fn signature_binds_close_and_rejects_replay() {
     let directory = tempfile::tempdir().unwrap();
     let mut signer = winternitz::SigningKey::create(directory.path().join("signer.key")).unwrap();
     let public_key = signer.verifying_key().to_bytes();
-    let identity = winternitz_identity(&public_key);
-    let stored = [identity.as_slice(), public_key.as_slice()].concat();
-    let mollusk = mollusk(&WINTERNITZ);
-    let (vector, bump) = find_vector_pda(&WINTERNITZ, &identity);
-    let lamports = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(WINTERNITZ.account_len())
-        + 5_000_000;
-    let account = build_vector_account(NONCE, &WINTERNITZ, bump, lamports, &stored);
+    let identity = public_key;
+    let stored = public_key.to_vec();
+    let mollusk = mollusk();
+    let (vector, _) = find_vector_pda(&WINTERNITZ, &identity);
+    let lamports = mollusk.sysvars.rent.minimum_balance(WINTERNITZ.account_len) + 5_000_000;
+    let account = build_vector_account(NONCE, &WINTERNITZ, &identity, lamports, &stored);
     let receiver = Address::new_unique();
     let other = Address::new_unique();
     let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
     let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[close]);
-    let digest = advance_vector_digest(
+    let next_key = [7; 41];
+    let digest = rotating_advance_vector_digest(
         &WINTERNITZ,
         &NONCE,
         &identity,
+        &next_key,
         &[],
         std::slice::from_ref(&passthrough),
+        None,
     );
     let signature = signer.sign(&digest).unwrap().to_bytes();
-    let advance = create_advance_instruction(&WINTERNITZ, &identity, &signature);
-    let expected = expected_advanced_data(digest, &WINTERNITZ, bump, &stored);
+    let advance =
+        create_rotating_advance_instruction(&WINTERNITZ, &identity, &next_key, &signature);
+    let expected = expected_advanced_data(digest, &WINTERNITZ, &identity, &next_key);
 
     let other_close = create_close_subinstruction(&WINTERNITZ, &identity, &other);
     let changed_action = create_passthrough_instruction(&WINTERNITZ, &identity, &[other_close]);
     let mut tampered = signature;
     tampered[winternitz::SIGNATURE_LEN - 1] ^= 1;
     let mut wrong_key = account.clone();
-    wrong_key.data[65] ^= 1;
+    wrong_key.data[68] ^= 1;
     let mut advanced = account.clone();
     advanced.data = expected.clone();
 
@@ -155,7 +172,7 @@ fn signature_binds_close_and_rejects_replay() {
             ProgramError::MissingRequiredSignature,
         ),
     ] {
-        let invalid = create_advance_instruction(&WINTERNITZ, &identity, bytes);
+        let invalid = create_rotating_advance_instruction(&WINTERNITZ, &identity, &next_key, bytes);
         process_transaction(
             &mollusk,
             &[&invalid, &action],

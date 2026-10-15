@@ -1,4 +1,4 @@
-//! Plain secp256k1 ECDSA program tests.
+//! Plain secp256k1 ECDSA tests.
 
 use k256::ecdsa::SigningKey as Secp256k1SigningKey;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
@@ -7,7 +7,7 @@ use solana_address::Address;
 use vector_core::{
     advance_vector_digest, create_close_subinstruction, create_initialize_secp256k1_ecdsa,
     create_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
-    secp256k1_compressed_pubkey, sign_advance_instruction_secp256k1_ecdsa, SECP256K1,
+    secp256k1_compressed_pubkey, sign_advance_instruction_secp256k1_ecdsa, PROGRAM_ID, SECP256K1,
 };
 
 use crate::common::{
@@ -21,7 +21,7 @@ fn signing_key() -> Secp256k1SigningKey {
 
 #[test]
 fn initialize() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
@@ -47,8 +47,8 @@ fn initialize() {
         &[
             Check::success(),
             Check::account(&vector)
-                .owner(&SECP256K1.program_id)
-                .space(SECP256K1.account_len())
+                .owner(&PROGRAM_ID)
+                .space(SECP256K1.account_len)
                 .build(),
         ],
     );
@@ -56,26 +56,23 @@ fn initialize() {
 
 #[test]
 fn advance_empty() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
-    let (vector, bump) = find_vector_pda(&SECP256K1, &identity);
+    let (vector, _) = find_vector_pda(&SECP256K1, &identity);
     let vector_account = build_vector_account(
         NONCE,
         &SECP256K1,
-        bump,
-        mollusk
-            .sysvars
-            .rent
-            .minimum_balance(SECP256K1.account_len()),
+        &identity,
+        mollusk.sysvars.rent.minimum_balance(SECP256K1.account_len),
         &identity,
     );
 
     let advance_ix = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &[], &[], None);
 
-    let next_nonce = advance_vector_digest(&SECP256K1, &NONCE, &identity, &[], &[]);
-    let expected_vector_data = expected_advanced_data(next_nonce, &SECP256K1, bump, &identity);
+    let next_nonce = advance_vector_digest(&SECP256K1, &NONCE, &identity, &[], &[], None);
+    let expected_vector_data = expected_advanced_data(next_nonce, &SECP256K1, &identity, &identity);
 
     let accounts = vec![(vector, vector_account)];
 
@@ -103,16 +100,14 @@ fn advance_round_trips_spl_mint_authority() {
 
 #[test]
 fn close_via_advance() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
-    let vector_lamports = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(SECP256K1.account_len());
-    let (vector, bump) = find_vector_pda(&SECP256K1, &identity);
-    let vector_account = build_vector_account(NONCE, &SECP256K1, bump, vector_lamports, &identity);
+    let vector_lamports = mollusk.sysvars.rent.minimum_balance(SECP256K1.account_len);
+    let (vector, _) = find_vector_pda(&SECP256K1, &identity);
+    let vector_account =
+        build_vector_account(NONCE, &SECP256K1, &identity, vector_lamports, &identity);
 
     let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (
@@ -148,20 +143,22 @@ fn close_via_advance() {
 
 #[test]
 fn withdraw_via_advance() {
-    let mollusk = mollusk(&SECP256K1);
+    let mollusk = mollusk();
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
-    let rent_min = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(SECP256K1.account_len());
+    let rent_min = mollusk.sysvars.rent.minimum_balance(SECP256K1.account_len);
     let starting_vector_lamports = rent_min + 5_000_000;
     let withdraw_amount = 3_000_000u64;
 
-    let (vector, bump) = find_vector_pda(&SECP256K1, &identity);
-    let vector_account =
-        build_vector_account(NONCE, &SECP256K1, bump, starting_vector_lamports, &identity);
+    let (vector, _) = find_vector_pda(&SECP256K1, &identity);
+    let vector_account = build_vector_account(
+        NONCE,
+        &SECP256K1,
+        &identity,
+        starting_vector_lamports,
+        &identity,
+    );
 
     let eoa_starting_lamports = 10_000_000_000_u64;
     let (eoa, eoa_account) = (

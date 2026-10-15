@@ -1,10 +1,6 @@
 /**
- * secp256k1 + EIP-191 program: identity is the 20-byte Ethereum address;
- * the digest is wrapped in the EIP-191 personal-sign envelope before
- * signing/recovery.
- *
- * Mirrors `crates/core/src/schemes/eip191.rs`. Pulls in only
- * `@noble/curves/secp256k1` + `@noble/hashes/sha3` (keccak).
+ * secp256k1 + EIP-191. The identity is the 20-byte Ethereum address, and what
+ * is signed is the digest in a personal-sign envelope.
  */
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
@@ -18,23 +14,20 @@ import {
 import { advanceVectorDigest } from "../digest.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
+// Checked against the program by `fixtures/program.json`.
 export const EIP191: Scheme = {
-  programId: new Address("G6okL1MvXx7k5eytY7wRXNupXyYG1QVZW37ygAjMiTTu"),
+  id: 2,
   signatureLen: 65,
   identityLen: 20,
   storedIdentityLen: 20,
+  nextKeyLen: 0,
 };
-
-/** Derive the 20-byte Ethereum address from a 32-byte secp256k1 private key. */
-export function ethAddressFromPrivateKey(privateKey: Uint8Array): Uint8Array {
-  const pubkey = secp256k1.getPublicKey(privateKey, false); // uncompressed, 65 bytes
-  const hash = keccak_256(pubkey.slice(1)); // remove 0x04 prefix
-  return hash.slice(12, 32); // last 20 bytes
-}
 
 /** EIP-191 identity: the raw 20-byte ETH address. */
 export function eip191Identity(privateKey: Uint8Array): Uint8Array {
-  return ethAddressFromPrivateKey(privateKey);
+  const pubkey = secp256k1.getPublicKey(privateKey, false); // uncompressed, 65 bytes
+  const hash = keccak_256(pubkey.slice(1)); // remove 0x04 prefix
+  return hash.slice(12, 32); // last 20 bytes
 }
 
 /** Initialize an EIP-191 vector account. `ethAddress` is the 20-byte address. */
@@ -42,7 +35,7 @@ export function createInitializeEip191(
   payer: Address,
   ethAddress: Uint8Array
 ): TransactionInstruction {
-  return createInitializeInstruction(payer, EIP191, ethAddress, ethAddress);
+  return createInitializeInstruction(payer, EIP191, ethAddress);
 }
 
 const EIP191_PREFIX = new TextEncoder().encode(
@@ -50,10 +43,8 @@ const EIP191_PREFIX = new TextEncoder().encode(
 );
 
 /**
- * `keccak256("\x19Ethereum Signed Message:\n32" || digest)` — the EIP-191
- * personal-sign envelope the on-chain program reproduces before
- * `secp256k1_recover`. Exported so external signers (HSMs, wallets exposing
- * raw-prehash APIs) can be handed the exact prehash they expect.
+ * `keccak256("\x19Ethereum Signed Message:\n32" || digest)`: what an EIP-191
+ * signer actually signs. Exported for signers that take a prehash.
  */
 export function eip191EnvelopeHash(digest: Uint8Array): Uint8Array {
   const buf = new Uint8Array(EIP191_PREFIX.length + digest.length);
@@ -94,12 +85,9 @@ export function signAdvanceInstructionEip191(
 }
 
 /**
- * Sign an inert advance — a revocation — with an EIP-191 secp256k1 key:
- * {@link signAdvanceInstructionEip191} with empty pre/post instructions.
- * Landing it only bumps the nonce, orphaning everything pre-signed against
- * it. The digest (`revocationDigest`) commits to the broadcasting
- * transaction containing ONLY this instruction; verify with
- * `verifyAdvanceSignatureEip191` over empty pre/post arrays.
+ * Sign an advance with nothing around it. Landing it only moves the nonce,
+ * which cancels everything signed against the old one. It must be the only
+ * instruction of its transaction.
  */
 export function signRevocationInstructionEip191(
   privateKey: Uint8Array,

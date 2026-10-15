@@ -12,14 +12,17 @@ import { bytesToHex } from "@noble/hashes/utils";
 import {
   ADVANCE_DISCRIMINATOR,
   ED25519,
+  EIP191,
+  FALCON512,
+  SECP256K1,
   advanceVectorDigest,
   ed25519Identity,
   eip191Identity,
   falcon512Keygen,
   mldsa44Keygen,
-  createRegisterMlDsa44Instructions,
+  createInitializeMlDsa44,
+  INITIALIZE_DISCRIMINATOR,
   MLDSA44,
-  MLDSA44_EXPAND_DISCRIMINATOR,
   createPassthroughInstruction,
   createWithdrawSubinstruction,
   findVectorPda,
@@ -37,11 +40,7 @@ import {
   MalformedSignatureError,
   SignatureVerificationError,
   normalizeEip191RecoveryByte,
-  verifyAdvanceSignatureEd25519,
-  verifyAdvanceSignatureEip191,
-  verifyAdvanceSignatureFalcon512,
-  verifyAdvanceSignatureMlDsa44,
-  verifyAdvanceSignatureSecp256k1,
+  verifyAdvanceSignature,
 } from "../src/verify.js";
 
 const NONCE = new Uint8Array(32).fill(0x01);
@@ -94,7 +93,7 @@ describe("sign → verify round trips", () => {
     const { pre, post } = fixedIxLists();
 
     const advance = signAdvanceInstructionEd25519(key, NONCE, pre, post);
-    const digest = verifyAdvanceSignatureEd25519(pubkey, NONCE, pre, post, sigOf(advance));
+    const digest = verifyAdvanceSignature(ED25519, pubkey, NONCE, pre, post, sigOf(advance));
 
     const expected = advanceVectorDigest(ED25519, NONCE, pubkey, pre, post);
     expect(bytesToHex(digest)).toBe(bytesToHex(expected));
@@ -107,13 +106,13 @@ describe("sign → verify round trips", () => {
 
     const advance = signAdvanceInstructionSecp256k1(key, NONCE, pre, post);
     const wire = sigOf(advance);
-    const digest = verifyAdvanceSignatureSecp256k1(pubkey, NONCE, pre, post, wire);
+    const digest = verifyAdvanceSignature(SECP256K1, pubkey, NONCE, pre, post, wire);
     expect(digest.length).toBe(32);
 
     // On-chain `solana-secp256k1-ecdsa` accepts both s normalizations, so
     // the offline check must accept the malleated twin too.
     expect(() =>
-      verifyAdvanceSignatureSecp256k1(pubkey, NONCE, pre, post, malleateHighS(wire))
+      verifyAdvanceSignature(SECP256K1, pubkey, NONCE, pre, post, malleateHighS(wire))
     ).not.toThrow();
   });
 
@@ -124,7 +123,7 @@ describe("sign → verify round trips", () => {
 
     const advance = signAdvanceInstructionEip191(key, NONCE, pre, post);
     const wire = sigOf(advance);
-    const digest = verifyAdvanceSignatureEip191(ethAddress, NONCE, pre, post, wire);
+    const digest = verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, wire);
     expect(digest.length).toBe(32);
 
     // High-S twin: the recovery id's parity bit flips with the negated s,
@@ -133,7 +132,7 @@ describe("sign → verify round trips", () => {
     malleated.set(malleateHighS(wire.subarray(0, 64)));
     malleated[64] = wire[64] ^ 1;
     expect(() =>
-      verifyAdvanceSignatureEip191(ethAddress, NONCE, pre, post, malleated)
+      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, malleated)
     ).not.toThrow();
   });
 
@@ -143,8 +142,7 @@ describe("sign → verify round trips", () => {
 
     const advance = signAdvanceInstructionFalcon512(keypair, NONCE, pre, post);
     const signature = sigOf(advance);
-    const digest = verifyAdvanceSignatureFalcon512(
-      keypair.publicKey, NONCE, pre, post, signature
+    const digest = verifyAdvanceSignature(FALCON512, keypair.publicKey, NONCE, pre, post, signature
     );
     expect(digest.length).toBe(32);
 
@@ -152,7 +150,7 @@ describe("sign → verify round trips", () => {
     const badNonce = new Uint8Array(NONCE);
     badNonce[0] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignatureFalcon512(keypair.publicKey, badNonce, pre, post, signature)
+      verifyAdvanceSignature(FALCON512, keypair.publicKey, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
   });
 
@@ -164,38 +162,35 @@ describe("sign → verify round trips", () => {
     const advance = signAdvanceInstructionMlDsa44(keypair, NONCE, pre, post);
     const signature = sigOf(advance);
     expect(signature.length).toBe(MLDSA44.signatureLen);
-    const digest = verifyAdvanceSignatureMlDsa44(
-      keypair.publicKey, NONCE, pre, post, signature
+    const digest = verifyAdvanceSignature(MLDSA44, keypair.publicKey, NONCE, pre, post, signature
     );
     expect(digest).toEqual(advanceVectorDigest(MLDSA44, NONCE, keypair.publicKey, pre, post));
 
     const badNonce = new Uint8Array(NONCE);
     badNonce[0] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignatureMlDsa44(keypair.publicKey, badNonce, pre, post, signature)
+      verifyAdvanceSignature(MLDSA44, keypair.publicKey, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
     const tampered = new Uint8Array(signature);
     tampered[100] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignatureMlDsa44(keypair.publicKey, NONCE, pre, post, tampered)
+      verifyAdvanceSignature(MLDSA44, keypair.publicKey, NONCE, pre, post, tampered)
     ).toThrow(SignatureVerificationError);
 
-    // Registration is initialize plus two expands on the same PDA.
-    const register = createRegisterMlDsa44Instructions(addr(0x33), keypair.publicKey);
+    // Registration is three initialize calls; only the first carries the key.
+    const register = createInitializeMlDsa44(addr(0x33), keypair.publicKey);
     expect(register.length).toBe(3);
-    expect(register[0].data.length).toBe(1 + MLDSA44.identityLen);
-    for (const expand of register.slice(1)) {
-      expect(Array.from(expand.data)).toEqual([MLDSA44_EXPAND_DISCRIMINATOR]);
-      expect(expand.keys.length).toBe(1);
-      expect(expand.keys[0].pubkey.equals(register[0].keys[1].pubkey)).toBe(true);
-      expect(expand.keys[0].isWritable).toBe(true);
+    expect(register[0].data.length).toBe(2 + MLDSA44.identityLen);
+    for (const grow of register.slice(1)) {
+      expect(Array.from(grow.data)).toEqual([INITIALIZE_DISCRIMINATOR]);
+      expect(grow.keys).toEqual(register[0].keys);
     }
 
-    // Shared with tests/mldsa44.rs: identity, PDA and signature carve-out.
+    // Shared with tests/mldsa44.rs: identity, PDA and digest.
     const publicKey = new Uint8Array(1312).fill(0x44);
     const [pda, bump] = findVectorPda(MLDSA44, publicKey);
-    expect(pda.toString()).toBe("FNjvHupTZp9ZRo53mmh9tV3vv3mADxU5rKo9ataMWUj2");
-    expect(bump).toBe(255);
+    expect(pda.toString()).toBe("DSMGfPwdpxKeB7ai2vYrRSzTLPDTXKTFujjBMeGkKfMc");
+    expect(bump).toBe(254);
     const passthrough = createPassthroughInstruction(MLDSA44, publicKey, [
       createWithdrawSubinstruction(MLDSA44, publicKey, addr(9), 1234n),
     ]);
@@ -203,7 +198,7 @@ describe("sign → verify round trips", () => {
       MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
     );
     expect(Buffer.from(pinned).toString("hex")).toBe(
-      "d6cb91bb616d7e3e4aabb371c3b52dd1bf23c759171ffa555c631856591d65e8"
+      "da5f342afda099bf54e78072cfb1c5a6490171bafe756ec6c94e700321e16440"
     );
   });
 });
@@ -221,27 +216,27 @@ describe("tamper detection", () => {
     const a = fixedIxLists();
     a.pre[0].data[0] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignatureEd25519(pubkey, NONCE, a.pre, a.post, signature)
+      verifyAdvanceSignature(ED25519, pubkey, NONCE, a.pre, a.post, signature)
     ).toThrow(SignatureVerificationError);
 
     // Account pubkey.
     const b = fixedIxLists();
     b.post[0].keys[0].pubkey = addr(0x55);
     expect(() =>
-      verifyAdvanceSignatureEd25519(pubkey, NONCE, b.pre, b.post, signature)
+      verifyAdvanceSignature(ED25519, pubkey, NONCE, b.pre, b.post, signature)
     ).toThrow(SignatureVerificationError);
 
     // Nonce.
     const badNonce = new Uint8Array(NONCE);
     badNonce[31] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignatureEd25519(pubkey, badNonce, pre, post, signature)
+      verifyAdvanceSignature(ED25519, pubkey, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
 
     // Identity (a different — still valid — pubkey).
     const other = ed25519Identity(new Uint8Array(32).fill(0x43));
     expect(() =>
-      verifyAdvanceSignatureEd25519(other, NONCE, pre, post, signature)
+      verifyAdvanceSignature(ED25519, other, NONCE, pre, post, signature)
     ).toThrow(SignatureVerificationError);
   });
 });
@@ -258,10 +253,10 @@ describe("eip191 recovery byte", () => {
     const legacy = new Uint8Array(signature);
     legacy[64] = signature[64] + 27; // what Ethereum tooling emits
     expect(() =>
-      verifyAdvanceSignatureEip191(ethAddress, NONCE, pre, post, legacy)
+      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, legacy)
     ).toThrow(MalformedSignatureError);
     expect(() =>
-      verifyAdvanceSignatureEip191(ethAddress, NONCE, pre, post, legacy)
+      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, legacy)
     ).toThrow(/27\/28.*subtract 27/s);
   });
 
@@ -274,14 +269,14 @@ describe("eip191 recovery byte", () => {
     const normalized = new Uint8Array(signature);
     normalized[64] = normalizeEip191RecoveryByte(signature[64] + 27);
     expect(() =>
-      verifyAdvanceSignatureEip191(ethAddress, NONCE, pre, post, normalized)
+      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, normalized)
     ).not.toThrow();
   });
 
   test("signature from a different key reports an identity mismatch", () => {
     const otherAddress = eip191Identity(new Uint8Array(32).fill(0x44));
     expect(() =>
-      verifyAdvanceSignatureEip191(otherAddress, NONCE, pre, post, signature)
+      verifyAdvanceSignature(EIP191, otherAddress, NONCE, pre, post, signature)
     ).toThrow(IdentityMismatchError);
   });
 });
@@ -296,7 +291,7 @@ describe("eip191 recovery byte", () => {
  * index footer), its half of the pin breaks.
  */
 const PINNED_DIGEST_HEX =
-  "fb561cf20b01b2940889b1652f732ea100256e74f10675a3e169b1895b0a9e4f";
+  "60e745d8e318a4862ebdf99be084f1e0d07f3431c88887620d9b89fb0201cc0d";
 
 describe("cross-language digest pin", () => {
   test("digest matches the constant pinned by the Rust suite", () => {
@@ -309,7 +304,7 @@ describe("cross-language digest pin", () => {
 
     // And the pinned digest is exactly what a signer commits to.
     const advance = signAdvanceInstructionEd25519(key, NONCE, pre, post);
-    const verified = verifyAdvanceSignatureEd25519(pubkey, NONCE, pre, post, sigOf(advance));
+    const verified = verifyAdvanceSignature(ED25519, pubkey, NONCE, pre, post, sigOf(advance));
     expect(bytesToHex(verified)).toBe(PINNED_DIGEST_HEX);
   });
 });
@@ -323,7 +318,7 @@ describe("cross-language digest pin", () => {
  * implementation drifts, its half of the pin breaks.
  */
 const PINNED_REVOCATION_DIGEST_HEX =
-  "53e3d3f9a7c687ed3dbfbbee0da290586acb5f4d64d690221134d29ce9a25aba";
+  "be718a414d49cddd497fb38c1e4b5ba19cfb3c5062cf00136293915f1675dd54";
 
 describe("revocation (inert advance)", () => {
   test("round trip + cross-language pin", () => {
@@ -333,7 +328,7 @@ describe("revocation (inert advance)", () => {
     // A revocation is just an advance with empty pre/post, so it verifies
     // through the ordinary advance verifier with empty arrays.
     const revocation = signRevocationInstructionEd25519(key, NONCE);
-    const digest = verifyAdvanceSignatureEd25519(pubkey, NONCE, [], [], sigOf(revocation));
+    const digest = verifyAdvanceSignature(ED25519, pubkey, NONCE, [], [], sigOf(revocation));
 
     expect(bytesToHex(digest)).toBe(bytesToHex(revocationDigest(ED25519, NONCE, pubkey)));
     expect(bytesToHex(digest)).toBe(PINNED_REVOCATION_DIGEST_HEX);

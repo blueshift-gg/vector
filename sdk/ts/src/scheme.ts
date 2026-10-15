@@ -1,11 +1,6 @@
 /**
- * The scheme/program/account primitives shared by every scheme: the
- * {@link Scheme} descriptor, the host-side {@link VectorAccount} header
- * mirror, canonical PDA derivation, and the shared low-level byte helpers.
- * Per-scheme details (identity derivation, signing, init builders) live in
- * `./schemes/*`.
- *
- * Mirrors `crates/core/src/scheme.rs`.
+ * What every scheme shares: the {@link Scheme} descriptor, the account
+ * header, and PDA derivation.
  */
 import { createHash } from "crypto";
 import { Connection, Address } from "@solana/web3.js";
@@ -13,59 +8,74 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 
 // ── Constants ────────────────────────────────────────────────────────
 
-export const INITIALIZE_DISCRIMINATOR = 0;
-export const ADVANCE_DISCRIMINATOR = 1;
-export const CLOSE_DISCRIMINATOR = 2;
+export const ADVANCE_DISCRIMINATOR = 0;
+export const PASSTHROUGH_DISCRIMINATOR = 1;
+export const INITIALIZE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
-export const PASSTHROUGH_DISCRIMINATOR = 4;
-export const ROTATE_DISCRIMINATOR = 5;
+export const CLOSE_DISCRIMINATOR = 4;
+
+/** The Vector program: one program for every signing scheme. */
+export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
 /**
- * Fixed-size account header: `nonce[32] || bump[1]`. Each scheme is its own
- * program, so there is no on-chain scheme discriminator; the program ID
- * identifies the scheme. The scheme's identity bytes follow the header.
+ * The account header: `nonce[32] || seed[32] || scheme[1] || bump[1] ||
+ * system_bump[1] || pad[1]`. The seed is the SHA-256 of the key the account
+ * was created with. The scheme's identity bytes follow.
  */
-export const VECTOR_HEADER_LEN = 33;
+/**
+ * The program's own errors, as `ProgramError::Custom(code)`; every other
+ * failure is a standard `ProgramError`. Checked against the program by
+ * `fixtures/program.json`.
+ */
+export enum VectorError {
+  /** `advance` or `passthrough` ran inside another instruction. */
+  NotTopLevel = 0,
+  /** `passthrough`: no earlier `advance`, or the first one does not list a signer. */
+  NotAdvanced = 1,
+  /** Winternitz: the next key is the key that just signed. */
+  KeyReused = 2,
+  /** XMSS: the signature's leaf has signed before. */
+  LeafUsed = 3,
+  /** XMSS: the tree's last leaf signed, and the key was not replaced. */
+  TreeExhausted = 4,
+}
+
+export const VECTOR_HEADER_LEN = 68;
+/** What one instruction can allocate; a bigger account takes more `initialize` calls. */
+export const MAX_PERMITTED_DATA_INCREASE = 10_240;
 export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
-
-// Falcon-512 wire sizes — mirror `solana-falcon512` constants.
-export const FALCON_PUBKEY_LEN = 897;
-export const FALCON_SIGNATURE_LEN = 666;
-export const FALCON_PREPARED_PUBKEY_LEN = 1024;
-
-// ML-DSA-44 sizes — mirror `solana-ml-dsa` constants (FIPS 204 Table 2).
-export const MLDSA44_PUBKEY_LEN = 1312;
-export const MLDSA44_SIGNATURE_LEN = 2420;
-export const MLDSA44_PREPARED_KEY_LEN = 20544;
-
-/** sec1-compressed secp256k1 public key length. */
-export const SECP256K1_COMPRESSED_PUBKEY_LEN = 33;
 
 // ── Schemes ──────────────────────────────────────────────────────────
 
 /**
- * Everything a client needs to address one Vector program. Each on-chain
- * scheme is a separate program. Mirrors the `Scheme` struct in the Rust
+ * Everything a client needs to use one signing scheme. Mirrors the `Scheme` struct in the Rust
  * `vector-core` crate.
  */
 export interface Scheme {
-  /** On-chain program ID (matches the program's `declare_id!`). */
-  programId: Address;
+  /**
+   * The scheme byte: a header field of every account, a PDA seed, and
+   * what `initialize` takes after its discriminator.
+   */
+  id: number;
   /** Wire signature length carried in `advance` instruction data. */
   signatureLen: number;
   /**
-   * Client identity length — the bytes hashed into the advance digest and
-   * used to derive the PDA. The pubkey/address itself for most schemes; for
-   * Falcon it's `sha256(wire_pubkey)` (32). Winternitz/XMSS keep
-   * `sha256(initial_pubkey)` across rotations.
+   * Length of the identity: the key the account is created with, as
+   * `initialize` takes it. It names the account for good, also after a
+   * Winternitz or XMSS key rotates.
    */
   identityLen: number;
   /**
-   * Bytes the on-chain account stores after the 33-byte header. Equals
-   * `identityLen` for verbatim-pubkey schemes; larger for Falcon (32 + 1
-   * pad + 1024 prepared).
+   * Bytes the on-chain account stores after its header: the key in the
+   * form the scheme verifies against. Equals `identityLen` for schemes that
+   * store the key as given; Falcon-512 and ML-DSA-44 prepare it.
    */
   storedIdentityLen: number;
+  /**
+   * Length of the key an `advance` carries for a scheme whose key rotates
+   * (Winternitz, XMSS): the key that signs next. Zero otherwise.
+   */
+  nextKeyLen: number;
 }
 
 /** Total on-chain account size for a scheme. */
@@ -75,10 +85,13 @@ export function vectorAccountLen(scheme: Scheme): number {
 
 // ── VectorAccount ────────────────────────────────────────────────────
 
-/** Header of a vector account. Scheme identity follows at offset 33. */
+/** Header of a vector account. Scheme identity follows at offset 68. */
 export interface VectorAccount {
   nonce: Uint8Array; // 32 bytes
+  seed: Uint8Array; // 32 bytes
+  scheme: number; // 1 byte
   bump: number; // 1 byte
+  systemBump: number; // 1 byte
 }
 
 export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
@@ -89,15 +102,11 @@ export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
   }
   return {
     nonce: data.slice(0, 32),
-    bump: data[32],
+    seed: data.slice(32, 64),
+    scheme: data[64],
+    bump: data[65],
+    systemBump: data[66],
   };
-}
-
-export function serializeVectorAccountHeader(account: VectorAccount): Uint8Array {
-  const buf = new Uint8Array(VECTOR_HEADER_LEN);
-  buf.set(account.nonce, 0);
-  buf[32] = account.bump;
-  return buf;
 }
 
 // ── PDA ──────────────────────────────────────────────────────────────
@@ -107,15 +116,12 @@ export function sha256(data: Uint8Array): Uint8Array {
   return new Uint8Array(createHash("sha256").update(data).digest());
 }
 
-/**
- * 32-byte PDA-seed input: identity bytes themselves when `length <= 32`,
- * `sha256(identity)` otherwise. Mirrors `IdentitySeed::default_from`.
- */
-export function pdaSeedFromIdentity(identity: Uint8Array): Uint8Array {
-  return identity.length <= 32 ? identity : sha256(identity);
+/** The PDA seed for an identity: its SHA-256, for every scheme. */
+export function vectorSeed(identity: Uint8Array): Uint8Array {
+  return sha256(identity);
 }
 
-/** Derive `(vector_pda, bump)`. Seeds: `["vector", identity_seed]`. */
+/** Derive `(vector_pda, bump)`. Seeds: `["vector", [scheme], sha256(identity)]`. */
 export function findVectorPda(
   scheme: Scheme,
   identity: Uint8Array
@@ -124,20 +130,25 @@ export function findVectorPda(
     throw new Error(`Identity must be ${scheme.identityLen} bytes`);
   }
   return findProgramAddressSync(
-    [VECTOR_PDA_SEED, pdaSeedFromIdentity(identity)],
-    scheme.programId
+    [VECTOR_PDA_SEED, Uint8Array.of(scheme.id), vectorSeed(identity)],
+    PROGRAM_ID
   );
+}
+
+/**
+ * Derive the vector account's system PDA, `[vector]`, and its bump. It
+ * belongs to the System program; a passthrough can sign as it.
+ */
+export function findSystemPda(vector: Address): [Address, number] {
+  return findProgramAddressSync([vector.toBytes()], PROGRAM_ID);
 }
 
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 
 /**
- * Synchronous PDA derivation — `@solana/web3.js@3` only ships the async
- * `Address.findProgramAddress`, but our SDK builders need to derive PDAs
- * inline without forcing every caller to be async. The algorithm mirrors
- * the on-chain `find_program_address`: walk bumps 255→0, accept the first
- * `sha256(seeds || bump || program_id || "ProgramDerivedAddress")` that
- * is *off* the ed25519 curve.
+ * `@solana/web3.js` 3 only derives PDAs asynchronously, and the builders here
+ * are synchronous. Same algorithm: try bumps from 255 down and take the first
+ * hash that is off the ed25519 curve.
  */
 function findProgramAddressSync(
   seeds: Uint8Array[],

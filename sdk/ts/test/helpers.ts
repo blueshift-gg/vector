@@ -1,5 +1,5 @@
 /**
- * Shared scaffolding for the per-scheme integration test files.
+ * Shared scaffolding for the integration test files, one per scheme.
  *
  * Importing this module also applies the `Address` shims that
  * `@solana/spl-token@0.4` (v1-API) expects but `@solana/web3.js@3` no longer

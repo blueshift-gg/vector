@@ -1,41 +1,18 @@
 /**
- * Off-chain helpers for constructing Vector program instructions and
- * computing the digests the on-chain programs verify.
+ * Client helpers for the Vector program: build its instructions and compute
+ * the digests it verifies.
  *
- * Each signing scheme is its own on-chain program with its own program ID.
- * There is no on-chain scheme discriminator: the program ID identifies the
- * scheme, the account header is `nonce[32] || bump[1]` (33 bytes), and PDA
- * seeds are `["vector", identity_seed]`. A {@link Scheme} bundles what a
- * client needs to talk to a given program: its program ID, wire signature
- * length, and identity/stored-identity lengths.
+ * One program serves every signing scheme. An account is named by its scheme
+ * and its identity, the key it was created with: the PDA seeds are
+ * `["vector", [scheme], sha256(identity)]`.
  *
- * # Layout
- *
- * - `./scheme.js` — the {@link Scheme} descriptor, {@link VectorAccount}
- *   header mirror, canonical PDA derivation, and shared byte helpers.
- * - `./instructions.js` — generic builders (initialize/advance/passthrough/
- *   close/withdraw, instructions-sysvar serialization).
- * - `./digest.js` — {@link advanceVectorDigest}, the value clients sign.
- * - `./verify.js` — per-scheme offline verification of `advance` signatures
- *   ({@link verifyAdvanceSignatureEd25519} and friends), returning the
- *   digest (= next nonce) on success.
- * - `./schemes/*.js` — one module per program (`ed25519`, `eip191`,
- *   `falcon512`, `mldsa44`, `secp256k1`, `winternitz`, `xmss`): its `Scheme`/program-ID const,
- *   identity derivation, an `initialize` builder, and a signer where one
- *   exists.
- *
- * Everything is re-exported flat here, so either style works:
+ * Everything is exported here. Each scheme can also be imported on its own,
+ * which pulls in only that scheme's crypto:
  *
  * ```ts
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk";          // flat
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";  // per-scheme
+ * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk";
+ * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";
  * ```
- *
- * The Falcon wire-size constants are owned by `./scheme.js` and re-exported
- * flat from there. `./schemes/falcon512.js` also re-exports them for its
- * standalone subpath entrypoint; to keep the flat API unambiguous they are
- * NOT glob-exported here from that module (only the symbols unique to the
- * scheme module are).
  */
 
 export * from "./scheme.js";
@@ -49,34 +26,5 @@ export * from "./schemes/secp256k1.js";
 export * from "./schemes/winternitz.js";
 export * from "./schemes/xmss.js";
 
-// Falcon: re-export only the scheme-unique symbols. The wire-size
-// constants come from `./scheme.js` above (re-exporting them again via
-// this module would make them ambiguous and silently drop them from the
-// flat barrel).
-export {
-  FALCON512,
-  FALCON_SECRET_KEY_LEN,
-  falcon512Identity,
-  falcon512Keygen,
-  falcon512PublicKey,
-  createInitializeFalcon512,
-  signAdvanceInstructionFalcon512,
-} from "./schemes/falcon512.js";
-export type { Falcon512Keypair } from "./schemes/falcon512.js";
-
-// ML-DSA-44: as for Falcon, the size constants come from `./scheme.js`.
-export {
-  MLDSA44,
-  MLDSA44_SECRET_KEY_LEN,
-  MLDSA44_EXPAND_STEPS,
-  MLDSA44_EXPAND_DISCRIMINATOR,
-  MLDSA44_STORED_IDENTITY_LEN,
-  mldsa44Identity,
-  mldsa44Keygen,
-  mldsa44PublicKey,
-  createInitializeMlDsa44,
-  createExpandMlDsa44,
-  createRegisterMlDsa44Instructions,
-  signAdvanceInstructionMlDsa44,
-} from "./schemes/mldsa44.js";
-export type { MlDsa44Keypair } from "./schemes/mldsa44.js";
+export * from "./schemes/falcon512.js";
+export * from "./schemes/mldsa44.js";

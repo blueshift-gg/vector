@@ -14,7 +14,6 @@ import {
 import {
   FALCON512,
   falcon512Keygen,
-  falcon512Identity,
   findVectorPda,
   fetchVectorAccount,
   createInitializeFalcon512,
@@ -37,7 +36,7 @@ import {
 const FALCON_SEED = new Uint8Array(48);
 FALCON_SEED[47] = 0x01;
 const FALCON_KP = falcon512Keygen(FALCON_SEED);
-const FALCON_IDENTITY = falcon512Identity(FALCON_KP.publicKey);
+const FALCON_IDENTITY = FALCON_KP.publicKey;
 
 describe("vector-falcon512", () => {
   let connection: Connection;
@@ -60,7 +59,7 @@ describe("vector-falcon512", () => {
     (connection as any)._rpcWebSocket?.close();
   });
 
-  // Falcon-512 is single-step: its 1090-byte account fits one CPI
+  // Falcon-512 is single-step: its 1092-byte account fits one CPI
   // CreateAccount, so `initialize` registers it in a single call (the
   // wire pubkey is hashed + prepared on-chain at init).
   test("initialize falcon512 vector account", async () => {

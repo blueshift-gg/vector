@@ -1,15 +1,13 @@
 /**
- * The canonical `advance` digest the client signs and the on-chain program
+ * What a vector account signs: a digest of the transaction, which the program
  * recomputes from the instructions sysvar.
- *
- * Mirrors `crates/core/src/digest.rs`.
  */
 import { createHash } from "crypto";
 import { Address, TransactionInstruction } from "@solana/web3.js";
 
-import { Scheme, readU16LE, writeU16LE } from "./scheme.js";
+import { Scheme, findVectorPda, readU16LE, writeU16LE } from "./scheme.js";
 import {
-  createAdvanceInstruction,
+  createMultiAdvanceInstruction,
   constructInstructionsData,
 } from "./instructions.js";
 
@@ -61,53 +59,74 @@ function promoteToMessageFlags(
 }
 
 /**
- * Shared digest: `SHA256(buffer[..sigStart] || nonce || identity ||
- * buffer[sigEnd..])`. `identity` is the scheme's client identity bytes (for
- * Falcon, `sha256(wire_pubkey)`).
+ * One signer of an `advance`: its account, and for a scheme whose key
+ * rotates (Winternitz, XMSS), the key that signs next.
  */
-function vectorDigest(
-  targetIx: TransactionInstruction,
-  targetIndex: number,
-  sigLen: number,
-  nonce: Uint8Array,
-  identity: Uint8Array,
+export type AdvanceSigner = { scheme: Scheme; identity: Uint8Array; nextKey?: Uint8Array };
+
+/**
+ * The message every signer of one advance approves: the SHA-256 of the
+ * instructions sysvar without the advance's data.
+ *
+ * The advance goes after `preInstructions`. A passthrough is one of the pre
+ * or post instructions, so the message covers it. `feePayer` only matters
+ * when it is also an account of one of the instructions.
+ */
+export function advanceMessage(
+  signers: AdvanceSigner[],
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
   feePayer?: Address
 ): Uint8Array {
-  const allIxs = [...preInstructions, targetIx, ...postInstructions];
-  const promoted = promoteToMessageFlags(allIxs, feePayer);
-  const buffer = constructInstructionsData(promoted);
-  // Patch the sysvar's `current_instruction_index` footer (last 2 bytes) to
-  // match what the runtime will write at execution time. The footer is part
-  // of `post`, which is folded into the hash, so the off-chain digest only
-  // matches when this index is correct (a no-op for single-ix advance, but
-  // non-zero when there are pre-instructions like a CU bump).
-  writeU16LE(buffer, targetIndex, buffer.length - 2);
+  const advanceIx = createMultiAdvanceInstruction(
+    signers.map((signer) => ({
+      ...signer,
+      signature: new Uint8Array(signer.scheme.signatureLen),
+    }))
+  );
+  const advanceIndex = preInstructions.length;
+  const buffer = constructInstructionsData(
+    promoteToMessageFlags(
+      [...preInstructions, advanceIx, ...postInstructions],
+      feePayer
+    )
+  );
+  // The runtime sets the footer to the executing instruction's index.
+  writeU16LE(buffer, advanceIndex, buffer.length - 2);
 
-  const ixOffsetPos = 2 + 2 * targetIndex;
-  const ixOffset = readU16LE(buffer, ixOffsetPos);
-
-  const numAccounts = readU16LE(buffer, ixOffset);
-  const sigStart = ixOffset + 2 + 33 * numAccounts + 32 + 2 + 1;
-  const sigEnd = sigStart + sigLen;
+  // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
+  // u16 data_len + data. Everything after the discriminator is cut.
+  const offset = readU16LE(buffer, 2 + 2 * advanceIndex);
+  const dataEnd = offset + 2 + 33 * advanceIx.keys.length + 32 + 2 + advanceIx.data.length;
+  const cut = advanceIx.data.length - 1;
 
   const h = createHash("sha256");
-  h.update(buffer.subarray(0, sigStart));
-  h.update(nonce);
-  h.update(identity);
-  h.update(buffer.subarray(sigEnd));
+  h.update(buffer.subarray(0, dataEnd - cut));
+  h.update(buffer.subarray(dataEnd));
   return new Uint8Array(h.digest());
 }
 
 /**
- * Compute the canonical `advance_vector_digest` the client must sign over.
- * Callers thread the full ix layout via `pre`/`post`; the advance ix is
- * inserted at `pre.length`. Any sibling `passthrough` ix authorising CPIs
- * under the vector PDA's signer seeds is just another pre/post ix — its
- * bytes get committed to by the digest like any other tx ix, which is
- * what authenticates the passthrough end-to-end.
+ * What one signer signs, and the account's next nonce: `SHA256(message ||
+ * nonce || vector || nextKey)`, with `message` from {@link advanceMessage},
+ * `vector` the signer's account address and `nextKey` its
+ * {@link AdvanceSigner} `nextKey`.
  */
+export function signerDigest(
+  message: Uint8Array,
+  nonce: Uint8Array,
+  vector: Address,
+  nextKey: Uint8Array = new Uint8Array()
+): Uint8Array {
+  const h = createHash("sha256");
+  h.update(message);
+  h.update(nonce);
+  h.update(vector.toBytes());
+  h.update(nextKey);
+  return new Uint8Array(h.digest());
+}
+
+/** {@link signerDigest} for an advance with one signer, whose key never changes. */
 export function advanceVectorDigest(
   scheme: Scheme,
   nonce: Uint8Array,
@@ -116,15 +135,11 @@ export function advanceVectorDigest(
   postInstructions: TransactionInstruction[],
   feePayer?: Address
 ): Uint8Array {
-  const sigLen = scheme.signatureLen;
-  const placeholder = new Uint8Array(sigLen);
-  const advanceIx = createAdvanceInstruction(scheme, identity, placeholder);
-  return vectorDigest(
-    advanceIx,
-    preInstructions.length,
-    sigLen,
+  return rotatingAdvanceVectorDigest(
+    scheme,
     nonce,
     identity,
+    new Uint8Array(),
     preInstructions,
     postInstructions,
     feePayer
@@ -132,20 +147,33 @@ export function advanceVectorDigest(
 }
 
 /**
- * The digest a pre-signed revocation commits to: {@link advanceVectorDigest}
- * with empty pre/post instructions. The resulting advance is an inert
- * transition — landing it only installs the next nonce, orphaning every
- * signature pre-signed against `nonce` (a kill-switch).
- *
- * This digest commits to the instructions sysvar of the broadcasting
- * transaction, so a pre-signed revocation must be broadcast as a transaction
- * containing ONLY the advance instruction. ed25519 / eip191 / secp256k1
- * inert advances fit the default compute budget (~13k / ~26k / ~72k CUs);
- * for Falcon-512, sign via the advance signer with a compute-budget
- * pre-instruction committed at sign time (its ~184k CU verify leaves no
- * headroom under the 200k default).
- *
- * Mirrors `revocation_digest` in `crates/core/src/digest.rs`.
+ * {@link advanceVectorDigest} for Winternitz and XMSS, whose key rotates.
+ * `nextKey` is the key that signs next: a Winternitz key must change every
+ * time, an XMSS key may stay until its tree runs out. `identity` stays the
+ * first key.
+ */
+export function rotatingAdvanceVectorDigest(
+  scheme: Scheme,
+  nonce: Uint8Array,
+  identity: Uint8Array,
+  nextKey: Uint8Array,
+  preInstructions: TransactionInstruction[],
+  postInstructions: TransactionInstruction[],
+  feePayer?: Address
+): Uint8Array {
+  const message = advanceMessage(
+    [{ scheme, identity, nextKey }],
+    preInstructions,
+    postInstructions,
+    feePayer
+  );
+  return signerDigest(message, nonce, findVectorPda(scheme, identity)[0], nextKey);
+}
+
+/**
+ * The digest of an advance with nothing around it. Landing that advance only
+ * moves the nonce, which cancels everything signed against the old one. It
+ * must be the only instruction of its transaction.
  */
 export function revocationDigest(
   scheme: Scheme,
