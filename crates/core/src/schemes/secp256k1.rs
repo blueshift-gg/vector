@@ -9,32 +9,21 @@ use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
-pub const SECP256K1_COMPRESSED_PUBKEY_LEN: usize = 33;
-
 /// Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey.
-pub const SECP256K1: Scheme = Scheme {
-    id: 3,
-    signature_len: 64,
-    identity_len: SECP256K1_COMPRESSED_PUBKEY_LEN,
-    stored_identity_len: size_of::<vector::schemes::secp256k1::Secp256k1>(),
-    next_key_len: 0,
-};
+pub const SECP256K1: Scheme = Scheme::of::<vector::schemes::secp256k1::Secp256k1>();
 
 /// 33-byte sec1-compressed secp256k1 public key (the identity).
 pub fn secp256k1_compressed_pubkey(
     signing_key: &Secp256k1SigningKey,
-) -> [u8; SECP256K1_COMPRESSED_PUBKEY_LEN] {
+) -> [u8; SECP256K1.identity_len] {
     let encoded = signing_key.verifying_key().to_encoded_point(true);
-    let bytes = encoded.as_bytes();
-    let mut out = [0u8; SECP256K1_COMPRESSED_PUBKEY_LEN];
-    out.copy_from_slice(bytes);
-    out
+    encoded.as_bytes().try_into().expect("a compressed point")
 }
 
 /// Initialize a plain-secp256k1 (compressed-pubkey) ECDSA vector account.
 pub fn create_initialize_secp256k1_ecdsa(
     payer: &Address,
-    compressed_pubkey: &[u8; SECP256K1_COMPRESSED_PUBKEY_LEN],
+    compressed_pubkey: &[u8; SECP256K1.identity_len],
 ) -> Instruction {
     create_initialize_instruction(payer, &SECP256K1, compressed_pubkey)
 }

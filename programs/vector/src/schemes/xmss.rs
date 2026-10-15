@@ -1,5 +1,8 @@
 use pinocchio::error::ProgramError;
-use solana_winternitz::{xmss, VerifyingKey, PUBLIC_KEY_LEN};
+use solana_winternitz::{
+    xmss::{Signature, LEAVES},
+    VerifyingKey,
+};
 
 use crate::scheme::SigningScheme;
 
@@ -7,22 +10,22 @@ use crate::scheme::SigningScheme;
 /// keep it, and must replace it after the last leaf.
 #[repr(C)]
 pub struct Xmss {
-    public_key: [u8; PUBLIC_KEY_LEN],
+    public_key: VerifyingKey,
     /// The lowest leaf that may sign next (u32 LE). A signature moves it
     /// past its own leaf, so no leaf signs twice.
     next_leaf: [u8; 4],
 }
 
 unsafe impl SigningScheme for Xmss {
-    const SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
-    const NEXT_KEY_LEN: usize = PUBLIC_KEY_LEN;
+    const ID: u8 = 7;
+    type Key = VerifyingKey;
+    type Signature = Signature;
+    type NextKey = VerifyingKey;
 
-    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
-        let public_key: &[u8; PUBLIC_KEY_LEN] = key
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        identity[..PUBLIC_KEY_LEN].copy_from_slice(public_key);
-        identity[PUBLIC_KEY_LEN..].fill(0);
+    fn initialize(key: &VerifyingKey, identity: &mut [u8]) -> Result<(), ProgramError> {
+        let (public_key, next_leaf) = identity.split_at_mut(VerifyingKey::BYTE_LEN);
+        public_key.copy_from_slice(key.as_bytes());
+        next_leaf.fill(0);
         Ok(())
     }
 
@@ -30,26 +33,20 @@ unsafe impl SigningScheme for Xmss {
     fn advance(
         &mut self,
         digest: &[u8; 32],
-        signature: &[u8],
-        next_key: &[u8],
+        signature: &Signature,
+        next_key: &VerifyingKey,
     ) -> Result<(), ProgramError> {
-        let next_key: [u8; PUBLIC_KEY_LEN] = next_key
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let signature = xmss::Signature::ref_from_bytes(signature)
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
         if signature.leaf() < u32::from_le_bytes(self.next_leaf) {
             return Err(ProgramError::MissingRequiredSignature);
         }
-        VerifyingKey::ref_from_bytes(&self.public_key)
-            .map_err(|_| ProgramError::InvalidAccountData)?
+        self.public_key
             .verify(digest, signature)
             .map_err(|_| ProgramError::MissingRequiredSignature)?;
 
-        if next_key != self.public_key {
-            self.public_key = next_key;
+        if *next_key != self.public_key {
+            self.public_key = *next_key;
             self.next_leaf = [0; 4];
-        } else if signature.leaf() + 1 < xmss::LEAVES {
+        } else if signature.leaf() + 1 < LEAVES {
             // Verified, so the leaf is one of the tree's and this cannot overflow.
             self.next_leaf = (signature.leaf() + 1).to_le_bytes();
         } else {

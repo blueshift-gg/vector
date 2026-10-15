@@ -2,7 +2,7 @@
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
-import { Scheme, SECP256K1_COMPRESSED_PUBKEY_LEN } from "../scheme.js";
+import { Scheme } from "../scheme.js";
 import {
   createInitializeInstruction,
   createAdvanceInstruction,
@@ -10,11 +10,12 @@ import {
 import { advanceVectorDigest } from "../digest.js";
 
 /** Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey. */
+// Checked against the program by `fixtures/schemes.json`.
 export const SECP256K1: Scheme = {
   id: 3,
   signatureLen: 64,
-  identityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
-  storedIdentityLen: SECP256K1_COMPRESSED_PUBKEY_LEN,
+  identityLen: 33,
+  storedIdentityLen: 33,
   nextKeyLen: 0,
 };
 
@@ -36,11 +37,6 @@ export function createInitializeSecp256k1(
   payer: Address,
   compressedPubkey: Uint8Array
 ): TransactionInstruction {
-  if (compressedPubkey.length !== SECP256K1_COMPRESSED_PUBKEY_LEN) {
-    throw new Error(
-      `compressed pubkey must be ${SECP256K1_COMPRESSED_PUBKEY_LEN} bytes, got ${compressedPubkey.length}`
-    );
-  }
   return createInitializeInstruction(payer, SECP256K1, compressedPubkey);
 }
 

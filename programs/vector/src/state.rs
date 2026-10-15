@@ -53,7 +53,7 @@ impl VectorAccount {
     /// The scheme of an account, from its header. The program takes the
     /// scheme from here and never from the caller, so the identity is always
     /// read as the scheme that wrote it.
-    pub fn scheme(data: &[u8]) -> Result<&'static dyn Scheme, ProgramError> {
+    pub fn scheme(data: &[u8]) -> Result<&'static Scheme, ProgramError> {
         let id = *data
             .get(offset_of!(Self, scheme))
             .ok_or(ProgramError::AccountDataTooSmall)?;

@@ -9,26 +9,18 @@ use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
-pub const ED25519_PUBKEY_LEN: usize = 32;
-
 /// Ed25519 — identity is the 32-byte public key.
-pub const ED25519: Scheme = Scheme {
-    id: 1,
-    signature_len: 64,
-    identity_len: ED25519_PUBKEY_LEN,
-    stored_identity_len: size_of::<vector::schemes::ed25519::Ed25519>(),
-    next_key_len: 0,
-};
+pub const ED25519: Scheme = Scheme::of::<vector::schemes::ed25519::Ed25519>();
 
 /// 32-byte Ed25519 public key (the identity) for a signing key.
-pub fn ed25519_pubkey(signing_key: &SigningKey) -> [u8; ED25519_PUBKEY_LEN] {
+pub fn ed25519_pubkey(signing_key: &SigningKey) -> [u8; ED25519.identity_len] {
     signing_key.verifying_key().to_bytes()
 }
 
 /// Initialize an Ed25519 vector account. `pubkey` is the 32-byte public key.
 pub fn create_initialize_ed25519(
     payer: &Address,
-    pubkey: &[u8; ED25519_PUBKEY_LEN],
+    pubkey: &[u8; ED25519.identity_len],
 ) -> Instruction {
     create_initialize_instruction(payer, &ED25519, pubkey)
 }

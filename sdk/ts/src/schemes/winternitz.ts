@@ -3,16 +3,13 @@ import { Address, TransactionInstruction } from "@solana/web3.js";
 import { Scheme } from "../scheme.js";
 import { createInitializeInstruction } from "../instructions.js";
 
-// Mirror solana-winternitz's one-time instance.
-export const WINTERNITZ_PUBKEY_LEN = 41;
-export const WINTERNITZ_SIGNATURE_LEN = 849;
-
+// Checked against the program by `fixtures/schemes.json`.
 export const WINTERNITZ: Scheme = {
   id: 6,
-  signatureLen: WINTERNITZ_SIGNATURE_LEN,
-  identityLen: WINTERNITZ_PUBKEY_LEN,
-  storedIdentityLen: WINTERNITZ_PUBKEY_LEN,
-  nextKeyLen: WINTERNITZ_PUBKEY_LEN,
+  signatureLen: 849,
+  identityLen: 41,
+  storedIdentityLen: 41,
+  nextKeyLen: 41,
 };
 
 /** Initialize a stable account with its first signing key. */

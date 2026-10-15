@@ -2,48 +2,27 @@
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
 
-import {
-  Scheme,
-  MLDSA44_PUBKEY_LEN,
-  MLDSA44_SIGNATURE_LEN,
-  MLDSA44_PREPARED_KEY_LEN,
-} from "../scheme.js";
+import { Scheme } from "../scheme.js";
 import {
   createInitializeInstructions,
   createAdvanceInstruction,
 } from "../instructions.js";
 import { advanceVectorDigest } from "../digest.js";
 
-export {
-  MLDSA44_PUBKEY_LEN,
-  MLDSA44_SIGNATURE_LEN,
-  MLDSA44_PREPARED_KEY_LEN,
-} from "../scheme.js";
-
 /** ML-DSA-44 secret key length (FIPS 204 Table 2). */
 export const MLDSA44_SECRET_KEY_LEN = 2560;
-/** `pk[1312] || prepared[20544]`. */
-export const MLDSA44_STORED_IDENTITY_LEN =
-  MLDSA44_PUBKEY_LEN + MLDSA44_PREPARED_KEY_LEN;
-
-/** ML-DSA-44 — the identity is the public key (1,312 bytes). */
+/**
+ * ML-DSA-44 — the identity is the public key (1,312 bytes); the account
+ * also stores its prepared form (20,544 bytes).
+ */
+// Checked against the program by `fixtures/schemes.json`.
 export const MLDSA44: Scheme = {
   id: 5,
-  signatureLen: MLDSA44_SIGNATURE_LEN,
-  identityLen: MLDSA44_PUBKEY_LEN,
-  storedIdentityLen: MLDSA44_STORED_IDENTITY_LEN,
+  signatureLen: 2420,
+  identityLen: 1312,
+  storedIdentityLen: 1312 + 20544,
   nextKeyLen: 0,
 };
-
-/** ML-DSA-44 client identity: the public key itself, length-checked. */
-export function mldsa44Identity(publicKey: Uint8Array): Uint8Array {
-  if (publicKey.length !== MLDSA44_PUBKEY_LEN) {
-    throw new Error(
-      `ML-DSA-44 public key must be ${MLDSA44_PUBKEY_LEN} bytes, got ${publicKey.length}`
-    );
-  }
-  return publicKey;
-}
 
 /** ML-DSA-44 keypair: 2,560-byte secret + 1,312-byte public key. */
 export interface MlDsa44Keypair {
@@ -74,7 +53,7 @@ export function createInitializeMlDsa44(
   payer: Address,
   publicKey: Uint8Array
 ): TransactionInstruction[] {
-  return createInitializeInstructions(payer, MLDSA44, mldsa44Identity(publicKey));
+  return createInitializeInstructions(payer, MLDSA44, publicKey);
 }
 
 /**
@@ -89,7 +68,7 @@ export function signAdvanceInstructionMlDsa44(
   postInstructions: TransactionInstruction[],
   feePayer?: Address
 ): TransactionInstruction {
-  const identity = mldsa44Identity(keypair.publicKey);
+  const identity = keypair.publicKey;
   const digest = advanceVectorDigest(
     MLDSA44,
     nonce,

@@ -14,7 +14,7 @@ use vector_core::{
     secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
     sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
     sign_revocation_instruction_ed25519, verify_advance_signature, VerifyError, ED25519, EIP191,
-    FALCON512, FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN, SECP256K1, SYSTEM_PROGRAM_ID,
+    FALCON512, SECP256K1, SYSTEM_PROGRAM_ID,
 };
 
 const NONCE: [u8; 32] = [0x01; 32];
@@ -127,31 +127,27 @@ fn eip191_round_trip_high_s_twin_and_legacy_v() {
     verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, &malleated)
         .expect("high-S eip191 twin must verify offline, matching on-chain acceptance");
 
-    // Legacy 27/28 recovery byte (what Ethereum tooling emits) is rejected
-    // with subtract-27 guidance: it would fail `sol_secp256k1_recover`
-    // on-chain, so accepting it offline would green-light a dead artifact.
+    // The legacy 27/28 recovery byte Ethereum tooling emits fails
+    // `sol_secp256k1_recover` on chain, so it fails here too.
     let mut legacy = wire.to_vec();
     legacy[64] += 27;
-    let err = verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, &legacy)
-        .expect_err("legacy 27/28 form must be rejected");
-    assert!(matches!(err, VerifyError::MalformedSignature(_)));
-    assert!(
-        err.to_string().contains("subtract 27"),
-        "error must tell the caller how to fix it: {err}",
+    assert_eq!(
+        verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, &legacy),
+        Err(VerifyError::SignatureInvalid),
     );
 }
 
 #[test]
 fn falcon512_round_trip() {
     let (pk, sk) = pq_falcon::keypair();
-    let mut wire = [0u8; FALCON512_WIRE_PUBKEY_LEN];
+    let mut wire = [0u8; FALCON512.identity_len];
     wire.copy_from_slice(pk.as_bytes());
     let (pre, post) = fixed_ix_lists();
 
     let digest = advance_vector_digest(&FALCON512, &NONCE, &wire, &pre, &post, None);
     // Zero-pad the variable-length detached signature to the 666-byte wire.
     let detached = pq_falcon::detached_sign(&digest, &sk);
-    let mut signature = [0u8; FALCON512_SIGNATURE_LEN];
+    let mut signature = [0u8; FALCON512.signature_len];
     signature[..detached.as_bytes().len()].copy_from_slice(detached.as_bytes());
 
     let verified =

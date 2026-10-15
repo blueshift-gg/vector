@@ -1,9 +1,7 @@
 use core::mem::{offset_of, size_of};
 
 use pinocchio::error::ProgramError;
-use solana_ml_dsa::ml_dsa_44::{
-    PreparedVerifyingKey, Signature, VerifyingKey, PUBLIC_KEY_LEN, SIGNATURE_LEN,
-};
+use solana_ml_dsa::ml_dsa_44::{PreparedVerifyingKey, Signature, VerifyingKey, PUBLIC_KEY_LEN};
 
 use crate::{scheme::SigningScheme, state::VectorAccount};
 
@@ -17,7 +15,7 @@ type PreparedKey = PreparedVerifyingKey<false>;
 /// the account becomes long enough to hold each row.
 #[repr(C)]
 pub struct MlDsa44 {
-    public_key: [u8; PUBLIC_KEY_LEN],
+    public_key: VerifyingKey<false>,
     /// The key's matrix expanded, so that verifying does not redo it.
     prepared: [u8; PreparedKey::BYTE_LEN],
 }
@@ -29,15 +27,16 @@ const PREPARED: usize = offset_of!(MlDsa44, prepared);
 const _: () = assert!((VectorAccount::HEADER_LEN + PREPARED).is_multiple_of(4));
 
 unsafe impl SigningScheme for MlDsa44 {
-    const SIGNATURE_LEN: usize = SIGNATURE_LEN;
+    const ID: u8 = 5;
+    type Key = VerifyingKey<false>;
+    type Signature = Signature;
+    type NextKey = [u8; 0];
 
-    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
-        let public_key = VerifyingKey::<false>::ref_from_bytes(key)
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        let head = identity
-            .get_mut(..PREPARED)
-            .ok_or(ProgramError::AccountDataTooSmall)?;
-        head[..PUBLIC_KEY_LEN].copy_from_slice(public_key.as_bytes());
+    fn initialize(key: &VerifyingKey<false>, identity: &mut [u8]) -> Result<(), ProgramError> {
+        identity
+            .get_mut(..PUBLIC_KEY_LEN)
+            .ok_or(ProgramError::AccountDataTooSmall)?
+            .copy_from_slice(key.as_bytes());
         prepare_rows(identity, 0)
     }
 
@@ -48,11 +47,9 @@ unsafe impl SigningScheme for MlDsa44 {
     fn advance(
         &mut self,
         digest: &[u8; 32],
-        signature: &[u8],
-        _next_key: &[u8],
+        signature: &Signature,
+        _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
-        let signature = Signature::ref_from_bytes(signature)
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
         PreparedKey::ref_from_bytes(&self.prepared)
             .map_err(|_| ProgramError::InvalidAccountData)?
             .verify(digest, signature)

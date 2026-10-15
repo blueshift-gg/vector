@@ -3,17 +3,14 @@ import { Address, TransactionInstruction } from "@solana/web3.js";
 import { Scheme } from "../scheme.js";
 import { createInitializeInstruction } from "../instructions.js";
 
-// Mirror solana-winternitz's fixed height-8 instance.
-export const XMSS_PUBKEY_LEN = 41;
-export const XMSS_SIGNATURE_LEN = 1037;
-
+// Checked against the program by `fixtures/schemes.json`.
 export const XMSS: Scheme = {
   id: 7,
-  signatureLen: XMSS_SIGNATURE_LEN,
-  identityLen: XMSS_PUBKEY_LEN,
+  signatureLen: 1037,
+  identityLen: 41,
   // The key, then the lowest leaf that may sign next (u32 LE).
-  storedIdentityLen: XMSS_PUBKEY_LEN + 4,
-  nextKeyLen: XMSS_PUBKEY_LEN,
+  storedIdentityLen: 41 + 4,
+  nextKeyLen: 41,
 };
 
 /** Initialize a stable account with its first signing key. */

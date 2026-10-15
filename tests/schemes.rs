@@ -8,7 +8,8 @@ use solana_address::Address;
 use solana_program_error::ProgramError;
 use vector_core::{
     create_initialize_instruction, create_initialize_mldsa44, create_passthrough_instruction,
-    create_rotating_advance_instruction, find_vector_pda, WINTERNITZ, XMSS,
+    create_rotating_advance_instruction, find_vector_pda, VectorAccount, ED25519, EIP191,
+    FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
 };
 
 use crate::common::{build_vector_account, mollusk, NONCE};
@@ -119,4 +120,33 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
         result.program_result,
         ProgramResult::Failure(ProgramError::InvalidAccountOwner)
     );
+}
+
+/// The TypeScript SDK types every scheme's numbers by hand. The fixture is
+/// what the program says they are, and the TypeScript tests check the SDK
+/// against it.
+#[test]
+fn the_schemes_fixture_is_the_programs() {
+    let schemes = [ED25519, EIP191, SECP256K1, FALCON512, MLDSA44, WINTERNITZ, XMSS]
+        .map(|scheme| {
+            format!(
+                r#"    {{ "id": {}, "signatureLen": {}, "identityLen": {}, "storedIdentityLen": {}, "nextKeyLen": {} }}"#,
+                scheme.id,
+                scheme.signature_len,
+                scheme.identity_len,
+                scheme.stored_identity_len,
+                scheme.next_key_len,
+            )
+        })
+        .join(",\n");
+    let expected = format!(
+        "{{\n  \"headerLen\": {},\n  \"schemes\": [\n{schemes}\n  ]\n}}\n",
+        VectorAccount::HEADER_LEN,
+    );
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fixtures/schemes.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture, expected);
 }

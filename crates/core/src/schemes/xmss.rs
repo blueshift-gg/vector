@@ -3,24 +3,17 @@
 
 use solana_address::Address;
 use solana_instruction::Instruction;
-use solana_winternitz::{xmss, PUBLIC_KEY_LEN};
 
 use crate::{instructions::create_initialize_instruction, scheme::Scheme};
 
-pub const XMSS_PUBKEY_LEN: usize = PUBLIC_KEY_LEN;
-pub const XMSS_SIGNATURE_LEN: usize = xmss::SIGNATURE_LEN;
-
 /// The first key is the permanent identity. The account stores the key that
 /// signs next, which changes as it rotates.
-pub const XMSS: Scheme = Scheme {
-    id: 7,
-    signature_len: XMSS_SIGNATURE_LEN,
-    identity_len: XMSS_PUBKEY_LEN,
-    stored_identity_len: size_of::<vector::schemes::xmss::Xmss>(),
-    next_key_len: XMSS_PUBKEY_LEN,
-};
+pub const XMSS: Scheme = Scheme::of::<vector::schemes::xmss::Xmss>();
 
 /// Initialize a stable account with its first signing key.
-pub fn create_initialize_xmss(payer: &Address, public_key: &[u8; XMSS_PUBKEY_LEN]) -> Instruction {
+pub fn create_initialize_xmss(
+    payer: &Address,
+    public_key: &[u8; XMSS.identity_len],
+) -> Instruction {
     create_initialize_instruction(payer, &XMSS, public_key)
 }

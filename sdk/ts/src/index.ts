@@ -26,29 +26,5 @@ export * from "./schemes/secp256k1.js";
 export * from "./schemes/winternitz.js";
 export * from "./schemes/xmss.js";
 
-// Falcon: re-export only the scheme-unique symbols. The wire-size
-// constants come from `./scheme.js` above (re-exporting them again via
-// this module would make them ambiguous and silently drop them from the
-// flat barrel).
-export {
-  FALCON512,
-  FALCON_SECRET_KEY_LEN,
-  falcon512Keygen,
-  falcon512PublicKey,
-  createInitializeFalcon512,
-  signAdvanceInstructionFalcon512,
-} from "./schemes/falcon512.js";
-export type { Falcon512Keypair } from "./schemes/falcon512.js";
-
-// ML-DSA-44: as for Falcon, the size constants come from `./scheme.js`.
-export {
-  MLDSA44,
-  MLDSA44_SECRET_KEY_LEN,
-  MLDSA44_STORED_IDENTITY_LEN,
-  mldsa44Identity,
-  mldsa44Keygen,
-  mldsa44PublicKey,
-  createInitializeMlDsa44,
-  signAdvanceInstructionMlDsa44,
-} from "./schemes/mldsa44.js";
-export type { MlDsa44Keypair } from "./schemes/mldsa44.js";
+export * from "./schemes/falcon512.js";
+export * from "./schemes/mldsa44.js";

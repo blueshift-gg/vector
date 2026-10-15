@@ -78,14 +78,7 @@ impl<'a> Advance<'a> {
             let mut account = VectorAccount::borrow(vector)?;
             let scheme = VectorAccount::scheme(&account)?;
             let (header, identity) = VectorAccount::split(&mut account)?;
-            let next_key = take(&mut data, scheme.next_key_len())?;
-            let signature = take(&mut data, scheme.signature_len())?;
-
-            // The message is the same for every signer. The nonce, the
-            // address and the next key make the digest this account's own.
-            let digest = hashv(&[&message, &header.nonce, &address, next_key]);
-            scheme.advance(identity, &digest, signature, next_key)?;
-            header.nonce = digest;
+            (scheme.advance)(identity, &mut header.nonce, &message, &address, &mut data)?;
         }
 
         // The data was next keys and signatures and nothing else.
@@ -106,13 +99,4 @@ fn message(instructions_sysvar: &AccountView, cut: usize) -> Result<[u8; 32], Pr
     let advance_data = advance.get_instruction_data();
     let end = advance_data.as_ptr() as usize - data.as_ptr() as usize + advance_data.len();
     Ok(hashv(&[&data[..end - cut], &data[end..]]))
-}
-
-/// Take the next `len` bytes off the front of `data`.
-fn take<'a>(data: &mut &'a [u8], len: usize) -> Result<&'a [u8], ProgramError> {
-    let (bytes, rest) = data
-        .split_at_checked(len)
-        .ok_or(ProgramError::InvalidInstructionData)?;
-    *data = rest;
-    Ok(bytes)
 }

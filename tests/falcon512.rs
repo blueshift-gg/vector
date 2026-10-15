@@ -13,7 +13,7 @@ use solana_falcon512::Falcon512Pubkey;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
     create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
-    find_vector_pda, FALCON512, FALCON512_SIGNATURE_LEN, FALCON512_WIRE_PUBKEY_LEN, PROGRAM_ID,
+    find_vector_pda, FALCON512, PROGRAM_ID,
 };
 
 use crate::common::{
@@ -23,25 +23,25 @@ use crate::common::{
 
 /// Sign via PQClean and zero-pad the variable-length detached signature to
 /// the wire-format 666 bytes the on-chain verifier expects.
-fn sign(msg: &[u8], sk: &falcon512::SecretKey) -> [u8; FALCON512_SIGNATURE_LEN] {
+fn sign(msg: &[u8], sk: &falcon512::SecretKey) -> [u8; FALCON512.signature_len] {
     let sig = falcon512::detached_sign(msg, sk);
     let sig_bytes = sig.as_bytes();
-    assert!(sig_bytes.len() <= FALCON512_SIGNATURE_LEN);
-    let mut out = [0u8; FALCON512_SIGNATURE_LEN];
+    assert!(sig_bytes.len() <= FALCON512.signature_len);
+    let mut out = [0u8; FALCON512.signature_len];
     out[..sig_bytes.len()].copy_from_slice(sig_bytes);
     out
 }
 
-fn wire_pubkey(pk: &falcon512::PublicKey) -> [u8; FALCON512_WIRE_PUBKEY_LEN] {
+fn wire_pubkey(pk: &falcon512::PublicKey) -> [u8; FALCON512.identity_len] {
     let bytes = pk.as_bytes();
-    assert_eq!(bytes.len(), FALCON512_WIRE_PUBKEY_LEN);
-    let mut out = [0u8; FALCON512_WIRE_PUBKEY_LEN];
+    assert_eq!(bytes.len(), FALCON512.identity_len);
+    let mut out = [0u8; FALCON512.identity_len];
     out.copy_from_slice(bytes);
     out
 }
 
 /// What the account stores: the prepared public key.
-fn stored_identity(wire: &[u8; FALCON512_WIRE_PUBKEY_LEN]) -> Vec<u8> {
+fn stored_identity(wire: &[u8; FALCON512.identity_len]) -> Vec<u8> {
     let pk = Falcon512Pubkey::try_from_slice(wire).expect("valid wire pubkey");
     let prepared = pk.try_prepare_pubkey().expect("preparable pubkey");
     prepared.as_bytes().to_vec()

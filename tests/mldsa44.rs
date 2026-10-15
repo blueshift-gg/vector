@@ -17,7 +17,7 @@ use solana_program_error::ProgramError;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_initialize_mldsa44,
     create_passthrough_instruction, create_withdraw_subinstruction, find_system_pda,
-    find_vector_pda, verify_advance_signature, MLDSA44, MLDSA44_PUBKEY_LEN, MLDSA44_SIGNATURE_LEN,
+    find_vector_pda, verify_advance_signature, MLDSA44,
 };
 
 use crate::common::{
@@ -28,16 +28,16 @@ use crate::common::{
 /// The per-transaction compute cap registration has to fit.
 const TRANSACTION_CU_LIMIT: u64 = 1_400_000;
 
-fn keypair() -> ([u8; MLDSA44_PUBKEY_LEN], ml_dsa_44::PrivateKey) {
+fn keypair() -> ([u8; MLDSA44.identity_len], ml_dsa_44::PrivateKey) {
     let (pk, sk) = ml_dsa_44::try_keygen().unwrap();
     (pk.into_bytes(), sk)
 }
 
-fn sign(digest: &[u8; 32], sk: &ml_dsa_44::PrivateKey) -> [u8; MLDSA44_SIGNATURE_LEN] {
+fn sign(digest: &[u8; 32], sk: &ml_dsa_44::PrivateKey) -> [u8; MLDSA44.signature_len] {
     sk.try_sign(digest, &[]).unwrap()
 }
 
-fn stored_identity(public_key: &[u8; MLDSA44_PUBKEY_LEN]) -> Vec<u8> {
+fn stored_identity(public_key: &[u8; MLDSA44.identity_len]) -> Vec<u8> {
     use solana_ml_dsa::ml_dsa_44::VerifyingKey;
     let mut out = public_key.to_vec();
     out.extend_from_slice(
@@ -209,7 +209,7 @@ fn advance_empty() {
 
 #[test]
 fn client_encoding_matches_typescript() {
-    let pk = [0x44; MLDSA44_PUBKEY_LEN];
+    let pk = [0x44; MLDSA44.identity_len];
     let receiver = Address::new_from_array([9; 32]);
     let (pda, bump) = find_vector_pda(&MLDSA44, &pk);
     assert_eq!(

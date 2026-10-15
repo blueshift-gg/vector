@@ -126,7 +126,7 @@ impl Create<'_> {
         // it exists, and a plain `CreateAccount` refuses an address that
         // holds any; this funds only the shortfall, and still fails on an
         // account that has data.
-        let full_len = VectorAccount::HEADER_LEN + scheme.identity_len();
+        let full_len = scheme.account_len();
         let (scheme_seed, bump_seed) = ([self.scheme], [self.bump]);
         let seeds = [
             Seed::from(VECTOR_SEED),
@@ -167,7 +167,7 @@ impl Create<'_> {
         account.scheme = self.scheme;
         account.bump = self.bump;
         account.system_bump = system_bump;
-        scheme.initialize(self.key, identity)
+        (scheme.initialize)(self.key, identity)
     }
 }
 
@@ -178,7 +178,7 @@ fn grow(vector: &mut AccountView) -> ProgramResult {
     let scheme = VectorAccount::scheme(&vector.try_borrow()?)?;
 
     let old_len = vector.data_len();
-    let full_len = VectorAccount::HEADER_LEN + scheme.identity_len();
+    let full_len = scheme.account_len();
     if old_len >= full_len {
         return Err(ProgramError::InvalidAccountData);
     }
@@ -186,7 +186,7 @@ fn grow(vector: &mut AccountView) -> ProgramResult {
 
     let mut data = vector.try_borrow_mut()?;
     let (_, identity) = VectorAccount::split(&mut data)?;
-    scheme.grow(identity, old_len.saturating_sub(VectorAccount::HEADER_LEN))
+    (scheme.grow)(identity, old_len.saturating_sub(VectorAccount::HEADER_LEN))
 }
 
 /// The newest entry of the slot hashes sysvar: a slot (u64) and its hash.

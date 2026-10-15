@@ -26,3 +26,8 @@ solana-winternitz = { workspace = true }
 
 [lints]
 workspace = true
+
+# Off chain, `sol_secp256k1_recover` as the runtime runs it, so the client's
+# offline check is the program's own.
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+libsecp256k1 = { version = "0.7.2", default-features = false, features = ["static-context"] }

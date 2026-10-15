@@ -3433,6 +3433,7 @@ name = "vector"
 version = "0.1.0"
 dependencies = [
  "brine-ed25519",
+ "libsecp256k1",
  "pinocchio",
  "pinocchio-system",
  "solana-address 2.9.0",
@@ -3457,11 +3458,8 @@ dependencies = [
  "sha2 0.10.9",
  "sha3",
  "solana-address 2.9.0",
- "solana-falcon512",
  "solana-instruction 3.5.1",
  "solana-instructions-sysvar 3.0.0",
- "solana-ml-dsa",
- "solana-winternitz",
  "vector",
 ]
 

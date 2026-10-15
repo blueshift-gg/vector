@@ -7,37 +7,30 @@ use crate::scheme::SigningScheme;
 /// Ed25519. A signature is the 64-byte `(R, s)`.
 #[repr(C)]
 pub struct Ed25519 {
-    public_key: [u8; 32],
+    public_key: Address,
 }
 
 unsafe impl SigningScheme for Ed25519 {
-    const SIGNATURE_LEN: usize = 64;
+    const ID: u8 = 1;
+    type Key = Address;
+    type Signature = [u8; 64];
+    type NextKey = [u8; 0];
 
-    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
-        let public_key: &[u8; 32] = key
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        if !bytes_are_curve_point(public_key) {
+    fn initialize(key: &Address, identity: &mut [u8]) -> Result<(), ProgramError> {
+        if !bytes_are_curve_point(key) {
             return Err(ProgramError::InvalidInstructionData);
         }
-        identity.copy_from_slice(public_key);
+        identity.copy_from_slice(key.as_ref());
         Ok(())
     }
 
     fn advance(
         &mut self,
         digest: &[u8; 32],
-        signature: &[u8],
-        _next_key: &[u8],
+        signature: &[u8; 64],
+        _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
-        let signature: &[u8; 64] = signature
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        verify::<FastSha512>(
-            &Address::new_from_array(self.public_key),
-            signature,
-            &[digest],
-        )
-        .map_err(|_| ProgramError::MissingRequiredSignature)
+        verify::<FastSha512>(&self.public_key, signature, &[digest])
+            .map_err(|_| ProgramError::MissingRequiredSignature)
     }
 }

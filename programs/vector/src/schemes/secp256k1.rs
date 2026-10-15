@@ -13,29 +13,26 @@ pub struct Secp256k1 {
 }
 
 unsafe impl SigningScheme for Secp256k1 {
-    const SIGNATURE_LEN: usize = 64;
+    const ID: u8 = 3;
+    type Key = [u8; CompressedPoint::SIZE];
+    type Signature = [u8; 64];
+    type NextKey = [u8; 0];
 
-    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
-        let public_key: &[u8; CompressedPoint::SIZE] = key
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        if public_key[0] != 0x02 && public_key[0] != 0x03 {
+    fn initialize(key: &Self::Key, identity: &mut [u8]) -> Result<(), ProgramError> {
+        if key[0] != 0x02 && key[0] != 0x03 {
             return Err(ProgramError::InvalidInstructionData);
         }
-        identity.copy_from_slice(public_key);
+        identity.copy_from_slice(key);
         Ok(())
     }
 
     fn advance(
         &mut self,
         digest: &[u8; 32],
-        signature: &[u8],
-        _next_key: &[u8],
+        signature: &[u8; 64],
+        _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
-        let signature: [u8; 64] = signature
-            .try_into()
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
-        Secp256k1EcdsaSignature(signature)
+        Secp256k1EcdsaSignature(*signature)
             .verify::<PreHashed, CompressedPoint>(digest, CompressedPoint(self.public_key))
             .map_err(|_| ProgramError::MissingRequiredSignature)
     }

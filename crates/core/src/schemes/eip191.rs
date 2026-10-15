@@ -10,27 +10,19 @@ use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
 use crate::scheme::Scheme;
 
-pub const EIP191_ETH_ADDRESS_LEN: usize = 20;
-
 /// secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address.
-pub const EIP191: Scheme = Scheme {
-    id: 2,
-    signature_len: 65,
-    identity_len: EIP191_ETH_ADDRESS_LEN,
-    stored_identity_len: size_of::<vector::schemes::eip191::Eip191>(),
-    next_key_len: 0,
-};
+pub const EIP191: Scheme = Scheme::of::<vector::schemes::eip191::Eip191>();
 
 /// Derive the 20-byte Ethereum address from an uncompressed secp256k1 public
 /// key. Accepts the 65-byte `0x04 || x || y` form or the raw 64-byte point.
-pub fn eth_address_from_pubkey(uncompressed: &[u8]) -> [u8; EIP191_ETH_ADDRESS_LEN] {
+pub fn eth_address_from_pubkey(uncompressed: &[u8]) -> [u8; EIP191.identity_len] {
     let point = match uncompressed.len() {
         65 => &uncompressed[1..],
         64 => uncompressed,
         _ => panic!("invalid uncompressed public key length"),
     };
     let hash: [u8; 32] = Keccak256::digest(point).into();
-    let mut addr = [0u8; EIP191_ETH_ADDRESS_LEN];
+    let mut addr = [0u8; EIP191.identity_len];
     addr.copy_from_slice(&hash[12..32]);
     addr
 }
@@ -38,7 +30,7 @@ pub fn eth_address_from_pubkey(uncompressed: &[u8]) -> [u8; EIP191_ETH_ADDRESS_L
 /// 20-byte Ethereum address (the identity) for an EIP-191 secp256k1 key.
 pub fn secp256k1_eip191_eth_address(
     signing_key: &Secp256k1SigningKey,
-) -> [u8; EIP191_ETH_ADDRESS_LEN] {
+) -> [u8; EIP191.identity_len] {
     let verifying_key = signing_key.verifying_key();
     let uncompressed = verifying_key.to_encoded_point(false);
     eth_address_from_pubkey(uncompressed.as_bytes())
@@ -48,7 +40,7 @@ pub fn secp256k1_eip191_eth_address(
 /// address (no padding).
 pub fn create_initialize_secp256k1_eip191(
     payer: &Address,
-    eth_address: &[u8; EIP191_ETH_ADDRESS_LEN],
+    eth_address: &[u8; EIP191.identity_len],
 ) -> Instruction {
     create_initialize_instruction(payer, &EIP191, eth_address)
 }

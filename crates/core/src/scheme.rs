@@ -22,34 +22,9 @@ pub const PASSTHROUGH_DISCRIMINATOR: u8 = *vector::Passthrough::DISCRIMINATOR;
 pub use vector::state::VECTOR_SEED as VECTOR_PDA_SEED;
 
 /// Everything a client needs to use one signing scheme: its scheme byte and
-/// how big its signature and identity are. The concrete instances live in
+/// lengths, as the program defines them. The concrete instances live in
 /// [`crate::schemes`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Scheme {
-    /// The scheme byte: a header field of every account, a PDA seed, and
-    /// what `initialize` takes after its discriminator.
-    pub id: u8,
-    /// Wire signature length carried in `advance` instruction data.
-    pub signature_len: usize,
-    /// Length of the identity: the key the account is created with, as
-    /// `initialize` takes it. It names the account for good, also after a
-    /// Winternitz or XMSS key rotates.
-    pub identity_len: usize,
-    /// Bytes the on-chain account stores after its header: the size of the
-    /// scheme's identity struct in the program.
-    pub stored_identity_len: usize,
-    /// Length of the key an `advance` carries for a scheme whose key
-    /// rotates (Winternitz, XMSS): the key that signs next. Zero otherwise.
-    pub next_key_len: usize,
-}
-
-impl Scheme {
-    /// Total on-chain account length: `VectorAccount::HEADER_LEN +
-    /// stored_identity_len`.
-    pub const fn account_len(&self) -> usize {
-        VectorAccount::HEADER_LEN + self.stored_identity_len
-    }
-}
+pub use vector::scheme::Scheme;
 
 /// The PDA seed for an identity: its SHA-256, for every scheme.
 pub fn vector_seed(identity: &[u8]) -> [u8; 32] {

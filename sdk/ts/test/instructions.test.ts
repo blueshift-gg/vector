@@ -1,6 +1,30 @@
 import { expect, test } from "vitest";
 import { Address, TransactionInstruction } from "@solana/web3.js";
-import { createPassthroughInstruction, ED25519, findVectorPda } from "../src/index.js";
+import { readFileSync } from "fs";
+import {
+  createPassthroughInstruction,
+  ED25519,
+  EIP191,
+  FALCON512,
+  findVectorPda,
+  MLDSA44,
+  SECP256K1,
+  VECTOR_HEADER_LEN,
+  WINTERNITZ,
+  XMSS,
+} from "../src/index.js";
+
+// The program's numbers, pinned by the Rust test
+// `the_schemes_fixture_is_the_programs`.
+test("schemes are the program's", () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL("../../../fixtures/schemes.json", import.meta.url), "utf8")
+  );
+  expect({
+    headerLen: VECTOR_HEADER_LEN,
+    schemes: [ED25519, EIP191, SECP256K1, FALCON512, MLDSA44, WINTERNITZ, XMSS],
+  }).toEqual(fixture);
+});
 
 test("passthrough preserves external signers", () => {
   const identity = new Uint8Array(32).fill(7);

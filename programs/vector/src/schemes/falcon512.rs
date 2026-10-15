@@ -3,7 +3,6 @@ use core::mem::offset_of;
 use pinocchio::error::ProgramError;
 use solana_falcon512::{
     Falcon512PreparedPubkey, Falcon512Pubkey, Falcon512Signature, FALCON_512_PREPARED_PUBKEY_LEN,
-    FALCON_512_SIGNATURE_LEN,
 };
 
 use crate::{scheme::SigningScheme, state::VectorAccount};
@@ -22,26 +21,27 @@ const _: () =
     assert!((VectorAccount::HEADER_LEN + offset_of!(Falcon512, prepared)).is_multiple_of(2));
 
 unsafe impl SigningScheme for Falcon512 {
-    const SIGNATURE_LEN: usize = FALCON_512_SIGNATURE_LEN;
+    const ID: u8 = 4;
+    type Key = Falcon512Pubkey;
+    type Signature = Falcon512Signature;
+    type NextKey = [u8; 0];
 
-    fn initialize(key: &[u8], identity: &mut [u8]) -> Result<(), ProgramError> {
-        let prepared = Falcon512Pubkey::try_from_slice(key)
-            .and_then(|key| key.try_prepare_pubkey())
+    fn initialize(key: &Falcon512Pubkey, identity: &mut [u8]) -> Result<(), ProgramError> {
+        let prepared = key
+            .try_prepare_pubkey()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        identity.copy_from_slice(prepared.as_bytes());
+        identity.copy_from_slice(prepared.as_bytes().as_ref());
         Ok(())
     }
 
     fn advance(
         &mut self,
         digest: &[u8; 32],
-        signature: &[u8],
-        _next_key: &[u8],
+        signature: &Falcon512Signature,
+        _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
         let prepared = Falcon512PreparedPubkey::try_from_slice(&self.prepared)
             .map_err(|_| ProgramError::InvalidAccountData)?;
-        let signature = Falcon512Signature::try_from_slice(signature)
-            .map_err(|_| ProgramError::InvalidInstructionData)?;
         if signature.verify_with_prepared(digest, prepared) {
             Ok(())
         } else {

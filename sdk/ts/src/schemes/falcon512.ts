@@ -7,33 +7,23 @@
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 
-import {
-  Scheme,
-  FALCON_PUBKEY_LEN,
-  FALCON_SIGNATURE_LEN,
-  FALCON_PREPARED_PUBKEY_LEN,
-} from "../scheme.js";
+import { Scheme } from "../scheme.js";
 import {
   createInitializeInstruction,
   createAdvanceInstruction,
 } from "../instructions.js";
 import { advanceVectorDigest } from "../digest.js";
 
-export {
-  FALCON_PUBKEY_LEN,
-  FALCON_SIGNATURE_LEN,
-  FALCON_PREPARED_PUBKEY_LEN,
-} from "../scheme.js";
-
 /** Falcon-512 secret key length (`@noble/post-quantum` encoding). */
 export const FALCON_SECRET_KEY_LEN = 1281;
 
 /** Falcon-512. The identity is the 897-byte wire public key. */
+// Checked against the program by `fixtures/schemes.json`.
 export const FALCON512: Scheme = {
   id: 4,
-  signatureLen: FALCON_SIGNATURE_LEN,
-  identityLen: FALCON_PUBKEY_LEN,
-  storedIdentityLen: FALCON_PREPARED_PUBKEY_LEN,
+  signatureLen: 666,
+  identityLen: 897,
+  storedIdentityLen: 1024,
   nextKeyLen: 0,
 };
 
@@ -90,14 +80,14 @@ export function signAdvanceInstructionFalcon512(
   );
 
   const detached = Uint8Array.from(nobleFalcon.sign(digest, keypair.secretKey));
-  if (detached.length > FALCON_SIGNATURE_LEN) {
+  if (detached.length > FALCON512.signatureLen) {
     throw new Error(
-      `Falcon-512 signature ${detached.length} B exceeds wire size ${FALCON_SIGNATURE_LEN}`
+      `Falcon-512 signature ${detached.length} B exceeds wire size ${FALCON512.signatureLen}`
     );
   }
   // Zero-pad the compressed detached signature to the fixed 666-byte wire
   // format `solana-falcon512` reads (matches PQClean's `CRYPTO_BYTES`).
-  const signature = new Uint8Array(FALCON_SIGNATURE_LEN);
+  const signature = new Uint8Array(FALCON512.signatureLen);
   signature.set(detached, 0);
 
   return createAdvanceInstruction(FALCON512, identity, signature);
