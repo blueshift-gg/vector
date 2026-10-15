@@ -56,7 +56,7 @@ pub fn create_initialize_instructions(
     let first = create_initialize_instruction(payer, scheme, identity);
     let mut grow = first.clone();
     grow.data.truncate(1);
-    let calls = scheme.account_len().div_ceil(MAX_PERMITTED_DATA_INCREASE);
+    let calls = scheme.account_len.div_ceil(MAX_PERMITTED_DATA_INCREASE);
     std::iter::once(first)
         .chain(std::iter::repeat_n(grow, calls - 1))
         .collect()

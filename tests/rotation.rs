@@ -46,7 +46,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     };
     let stored = store(&identity);
     let mollusk = mollusk();
-    let rent = mollusk.sysvars.rent.minimum_balance(scheme.account_len());
+    let rent = mollusk.sysvars.rent.minimum_balance(scheme.account_len);
     let receiver = Address::new_unique();
     let accounts = vec![
         (
@@ -237,10 +237,7 @@ fn winternitz_key_signs_once() {
     let next_key = next.verifying_key().to_bytes();
     let (vector, _) = find_vector_pda(&WINTERNITZ, &identity);
     let mollusk = mollusk();
-    let rent = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(WINTERNITZ.account_len());
+    let rent = mollusk.sysvars.rent.minimum_balance(WINTERNITZ.account_len);
     let accounts = [(
         vector,
         build_vector_account(NONCE, &WINTERNITZ, &identity, rent, &identity),
@@ -315,7 +312,7 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
     let identity = key.verifying_key().to_bytes();
     let (vector, _) = find_vector_pda(&XMSS, &identity);
     let mollusk = mollusk();
-    let rent = mollusk.sysvars.rent.minimum_balance(XMSS.account_len());
+    let rent = mollusk.sysvars.rent.minimum_balance(XMSS.account_len);
     let account = |next_leaf| {
         let stored = xmss_stored(&identity, next_leaf);
         [(

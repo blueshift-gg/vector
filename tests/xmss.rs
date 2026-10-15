@@ -60,7 +60,7 @@ fn initialize_checks_key_length_and_pda() {
             Check::success(),
             Check::account(&vector)
                 .owner(&PROGRAM_ID)
-                .space(XMSS.account_len())
+                .space(XMSS.account_len)
                 .build(),
         ],
     );
@@ -122,7 +122,7 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
         NONCE,
         &XMSS,
         &identity,
-        mollusk.sysvars.rent.minimum_balance(XMSS.account_len()),
+        mollusk.sysvars.rent.minimum_balance(XMSS.account_len),
         &stored,
     );
     // The same key next keeps it.
@@ -220,7 +220,7 @@ fn advance_binds_and_authorizes_withdrawal() {
 
     let mollusk = mollusk();
     let (vector, _) = find_vector_pda(&XMSS, &identity);
-    let rent = mollusk.sysvars.rent.minimum_balance(XMSS.account_len());
+    let rent = mollusk.sysvars.rent.minimum_balance(XMSS.account_len);
     let account = build_vector_account(NONCE, &XMSS, &identity, rent + 5_000_000, &stored);
     let receiver = Address::new_unique();
     let accounts = [

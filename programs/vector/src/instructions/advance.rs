@@ -96,7 +96,19 @@ fn message(instructions_sysvar: &AccountView, cut: usize) -> Result<[u8; 32], Pr
     let data = instructions_sysvar.try_borrow()?;
     let advance = instructions.load_instruction_at(instructions.load_current_index().into())?;
 
+    // Where this instruction's data ends in the sysvar, and the signed
+    // bytes before it.
     let advance_data = advance.get_instruction_data();
-    let end = advance_data.as_ptr() as usize - data.as_ptr() as usize + advance_data.len();
-    Ok(hashv(&[&data[..end - cut], &data[end..]]))
+    let end = (advance_data.as_ptr() as usize)
+        .wrapping_sub(data.as_ptr() as usize)
+        .wrapping_add(advance_data.len());
+    let (before, after) = data
+        .split_at_checked(end)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    let signed = before
+        .len()
+        .checked_sub(cut)
+        .and_then(|len| before.get(..len))
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    Ok(hashv(&[signed, after]))
 }

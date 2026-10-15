@@ -78,6 +78,8 @@ pub struct Scheme {
     pub identity_len: usize,
     /// Bytes the account stores after its header: the size of the scheme.
     pub stored_identity_len: usize,
+    /// The account's whole length: the header, then the stored identity.
+    pub account_len: usize,
     /// Length of [`SigningScheme::Signature`].
     pub signature_len: usize,
     /// Length of [`SigningScheme::NextKey`].
@@ -96,17 +98,13 @@ impl Scheme {
             id: T::ID,
             identity_len: size_of::<T::Key>(),
             stored_identity_len: size_of::<T>(),
+            account_len: VectorAccount::HEADER_LEN + size_of::<T>(),
             signature_len: size_of::<T::Signature>(),
             next_key_len: size_of::<T::NextKey>(),
             initialize: initialize::<T>,
             grow: T::grow,
             advance: advance::<T>,
         }
-    }
-
-    /// The account's whole length: the header, then the stored identity.
-    pub const fn account_len(&self) -> usize {
-        VectorAccount::HEADER_LEN + self.stored_identity_len
     }
 }
 
@@ -146,6 +144,14 @@ fn take<'a>(data: &mut &'a [u8], len: usize) -> Result<&'a [u8], ProgramError> {
         .ok_or(ProgramError::InvalidInstructionData)?;
     *data = rest;
     Ok(bytes)
+}
+
+/// Write `bytes` to the front of `identity`, for `initialize`.
+pub fn write<const N: usize>(identity: &mut [u8], bytes: &[u8; N]) -> ProgramResult {
+    *identity
+        .first_chunk_mut()
+        .ok_or(ProgramError::AccountDataTooSmall)? = *bytes;
+    Ok(())
 }
 
 /// `bytes` as a `U`, if they are exactly as long.

@@ -78,7 +78,7 @@ fn initialize() {
             Check::success(),
             Check::account(&vector)
                 .owner(&PROGRAM_ID)
-                .space(FALCON512.account_len())
+                .space(FALCON512.account_len)
                 .build(),
         ],
     );
@@ -103,10 +103,7 @@ fn advance_empty() {
         NONCE,
         &FALCON512,
         &identity,
-        mollusk
-            .sysvars
-            .rent
-            .minimum_balance(FALCON512.account_len()),
+        mollusk.sysvars.rent.minimum_balance(FALCON512.account_len),
         &stored,
     );
 
@@ -154,10 +151,7 @@ fn close_via_advance() {
     let identity = wire;
     let stored = stored_identity(&wire);
 
-    let vector_lamports = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(FALCON512.account_len());
+    let vector_lamports = mollusk.sysvars.rent.minimum_balance(FALCON512.account_len);
     let (vector, _) = find_vector_pda(&FALCON512, &identity);
     let vector_account =
         build_vector_account(NONCE, &FALCON512, &identity, vector_lamports, &stored);
@@ -207,10 +201,7 @@ fn withdraw_via_advance() {
     let identity = wire;
     let stored = stored_identity(&wire);
 
-    let rent_min = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(FALCON512.account_len());
+    let rent_min = mollusk.sysvars.rent.minimum_balance(FALCON512.account_len);
     let starting_vector_lamports = rent_min + 5_000_000;
     let withdraw_amount = 3_000_000u64;
 

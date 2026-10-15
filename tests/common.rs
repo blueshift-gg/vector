@@ -143,7 +143,7 @@ pub fn run_round_trip_spl<F>(
         NONCE,
         scheme,
         identity,
-        mollusk.sysvars.rent.minimum_balance(scheme.account_len()),
+        mollusk.sysvars.rent.minimum_balance(scheme.account_len),
         stored_identity,
     );
 

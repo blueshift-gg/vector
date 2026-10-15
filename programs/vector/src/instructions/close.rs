@@ -49,8 +49,11 @@ impl<'a> Close<'a> {
     pub const DISCRIMINATOR: &'a u8 = &4;
 
     pub fn process(&mut self) -> ProgramResult {
-        // Every lamport there is fits a u64.
-        let lamports = self.receiver.lamports() + self.vector.lamports();
+        let lamports = self
+            .receiver
+            .lamports()
+            .checked_add(self.vector.lamports())
+            .ok_or(ProgramError::ArithmeticOverflow)?;
         self.vector.set_lamports(0);
         self.receiver.set_lamports(lamports);
 

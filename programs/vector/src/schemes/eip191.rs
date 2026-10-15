@@ -1,7 +1,7 @@
 use pinocchio::error::ProgramError;
 use solana_nostd_keccak::{hash, hashv};
 
-use crate::scheme::SigningScheme;
+use crate::scheme::{write, SigningScheme};
 
 /// secp256k1 ECDSA in an EIP-191 "Ethereum Signed Message" envelope, so any
 /// Ethereum wallet's `personal_sign` produces a signature. A signature is
@@ -22,8 +22,7 @@ unsafe impl SigningScheme for Eip191 {
         if key == &[0; 20] {
             return Err(ProgramError::InvalidInstructionData);
         }
-        identity.copy_from_slice(key);
-        Ok(())
+        write(identity, key)
     }
 
     fn advance(

@@ -48,7 +48,7 @@ fn initialize() {
             Check::success(),
             Check::account(&vector)
                 .owner(&PROGRAM_ID)
-                .space(EIP191.account_len())
+                .space(EIP191.account_len)
                 .build(),
         ],
     );
@@ -65,7 +65,7 @@ fn advance_empty() {
         NONCE,
         &EIP191,
         &identity,
-        mollusk.sysvars.rent.minimum_balance(EIP191.account_len()),
+        mollusk.sysvars.rent.minimum_balance(EIP191.account_len),
         &identity,
     );
 
@@ -104,7 +104,7 @@ fn close_via_advance() {
     let key = signing_key();
     let identity = secp256k1_eip191_eth_address(&key);
 
-    let vector_lamports = mollusk.sysvars.rent.minimum_balance(EIP191.account_len());
+    let vector_lamports = mollusk.sysvars.rent.minimum_balance(EIP191.account_len);
     let (vector, _) = find_vector_pda(&EIP191, &identity);
     let vector_account =
         build_vector_account(NONCE, &EIP191, &identity, vector_lamports, &identity);
@@ -147,7 +147,7 @@ fn withdraw_via_advance() {
     let key = signing_key();
     let identity = secp256k1_eip191_eth_address(&key);
 
-    let rent_min = mollusk.sysvars.rent.minimum_balance(EIP191.account_len());
+    let rent_min = mollusk.sysvars.rent.minimum_balance(EIP191.account_len);
     let starting_vector_lamports = rent_min + 5_000_000;
     let withdraw_amount = 3_000_000u64;
 

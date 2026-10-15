@@ -2,7 +2,7 @@ use pinocchio::error::ProgramError;
 use solana_secp256k1::{CompressedPoint, Secp256k1Point};
 use solana_secp256k1_ecdsa::{hash::Secp256k1EcdsaHash, Secp256k1EcdsaSignature};
 
-use crate::scheme::SigningScheme;
+use crate::scheme::{write, SigningScheme};
 
 /// Plain secp256k1 ECDSA, with no recovery. A signature is the 64-byte
 /// `(r, s)`.
@@ -22,8 +22,7 @@ unsafe impl SigningScheme for Secp256k1 {
         if key[0] != 0x02 && key[0] != 0x03 {
             return Err(ProgramError::InvalidInstructionData);
         }
-        identity.copy_from_slice(key);
-        Ok(())
+        write(identity, key)
     }
 
     fn advance(
@@ -42,8 +41,10 @@ unsafe impl SigningScheme for Secp256k1 {
 struct PreHashed;
 
 impl Secp256k1EcdsaHash for PreHashed {
+    /// The message is always the 32-byte digest. Anything else would hash to
+    /// zeros, which no signature verifies over.
     #[inline(always)]
     fn hash(message: &[u8]) -> [u8; 32] {
-        message.try_into().expect("digest must be 32 bytes")
+        message.first_chunk().copied().unwrap_or_default()
     }
 }

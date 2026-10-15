@@ -55,7 +55,7 @@ fn initialize() {
             Check::success(),
             Check::account(&vector)
                 .owner(&PROGRAM_ID)
-                .space(ED25519.account_len())
+                .space(ED25519.account_len)
                 .build(),
         ],
     );
@@ -72,7 +72,7 @@ fn advance_empty() {
         NONCE,
         &ED25519,
         &pubkey,
-        mollusk.sysvars.rent.minimum_balance(ED25519.account_len()),
+        mollusk.sysvars.rent.minimum_balance(ED25519.account_len),
         &pubkey,
     );
 
@@ -111,7 +111,7 @@ fn revocation_orphans_presigned_advance() {
     let key = signing_key();
     let pubkey = ed25519_pubkey(&key);
 
-    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len);
     let (vector, _) = find_vector_pda(&ED25519, &pubkey);
     let vector_account =
         build_vector_account(NONCE, &ED25519, &pubkey, rent_min + 5_000_000, &pubkey);
@@ -176,7 +176,7 @@ fn close_via_advance() {
     let key = signing_key();
     let pubkey = ed25519_pubkey(&key);
 
-    let vector_lamports = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let vector_lamports = mollusk.sysvars.rent.minimum_balance(ED25519.account_len);
     let (vector, _) = find_vector_pda(&ED25519, &pubkey);
     let vector_account = build_vector_account(NONCE, &ED25519, &pubkey, vector_lamports, &pubkey);
 
@@ -220,7 +220,7 @@ fn withdraw_via_advance() {
     let key = signing_key();
     let pubkey = ed25519_pubkey(&key);
 
-    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len);
     let starting_vector_lamports = rent_min + 5_000_000;
     let withdraw_amount = 3_000_000u64;
 
@@ -270,7 +270,7 @@ fn withdraw_to_the_fee_payer() {
     let mollusk = mollusk();
     let key = signing_key();
     let pubkey = ed25519_pubkey(&key);
-    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let rent_min = mollusk.sysvars.rent.minimum_balance(ED25519.account_len);
     let (vector, _) = find_vector_pda(&ED25519, &pubkey);
     let payer = Address::new_unique();
     let accounts = [
@@ -305,7 +305,7 @@ fn initialize_a_funded_address() {
     let (system_program, system_program_account) = keyed_account_for_system_program();
     let payer = Address::new_unique();
     let (vector, _bump) = find_vector_pda(&ED25519, &pubkey);
-    let rent = mollusk.sysvars.rent.minimum_balance(ED25519.account_len());
+    let rent = mollusk.sysvars.rent.minimum_balance(ED25519.account_len);
     let init_ix = create_initialize_ed25519(&payer, &pubkey);
 
     for at_address in [1, rent + 1] {
@@ -320,7 +320,7 @@ fn initialize_a_funded_address() {
                 Check::success(),
                 Check::account(&vector)
                     .owner(&PROGRAM_ID)
-                    .space(ED25519.account_len())
+                    .space(ED25519.account_len)
                     .lamports(rent.max(at_address))
                     .build(),
             ],

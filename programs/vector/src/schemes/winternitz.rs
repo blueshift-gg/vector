@@ -1,7 +1,10 @@
 use pinocchio::error::ProgramError;
 use solana_winternitz::{winternitz::Signature, VerifyingKey};
 
-use crate::{error::VectorError, scheme::SigningScheme};
+use crate::{
+    error::VectorError,
+    scheme::{write, SigningScheme},
+};
 
 /// DKKW25 Winternitz. A key signs once, so every `Advance` replaces it.
 #[repr(C)]
@@ -17,8 +20,7 @@ unsafe impl SigningScheme for Winternitz {
     type NextKey = VerifyingKey;
 
     fn initialize(key: &VerifyingKey, identity: &mut [u8]) -> Result<(), ProgramError> {
-        identity.copy_from_slice(key.as_bytes());
-        Ok(())
+        write(identity, key.as_bytes())
     }
 
     /// The same key again would sign a second time.

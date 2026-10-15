@@ -5,7 +5,10 @@ use solana_falcon512::{
     Falcon512PreparedPubkey, Falcon512Pubkey, Falcon512Signature, FALCON_512_PREPARED_PUBKEY_LEN,
 };
 
-use crate::{scheme::SigningScheme, state::VectorAccount};
+use crate::{
+    scheme::{write, SigningScheme},
+    state::VectorAccount,
+};
 
 /// Falcon-512. The key is given in its 897-byte wire form; a signature is
 /// the compressed form, zero-padded to 666 bytes.
@@ -30,8 +33,7 @@ unsafe impl SigningScheme for Falcon512 {
         let prepared = key
             .try_prepare_pubkey()
             .map_err(|_| ProgramError::InvalidInstructionData)?;
-        identity.copy_from_slice(prepared.as_bytes().as_ref());
-        Ok(())
+        write(identity, prepared.as_bytes())
     }
 
     fn advance(

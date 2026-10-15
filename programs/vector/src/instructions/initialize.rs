@@ -127,7 +127,7 @@ impl Create<'_> {
         // it exists, and a plain `CreateAccount` refuses an address that
         // holds any; this funds only the shortfall, and still fails on an
         // account that has data.
-        let full_len = scheme.account_len();
+        let full_len = scheme.account_len;
         let seeds = [
             Seed::from(VECTOR_SEED),
             Seed::from(from_ref(&scheme.id)),
@@ -179,11 +179,11 @@ fn grow(vector: &mut AccountView) -> ProgramResult {
     let scheme = VectorAccount::scheme(&vector.try_borrow()?)?;
 
     let old_len = vector.data_len();
-    let full_len = scheme.account_len();
+    let full_len = scheme.account_len;
     if old_len >= full_len {
         return Err(ProgramError::InvalidAccountData);
     }
-    vector.resize(full_len.min(old_len + MAX_PERMITTED_DATA_INCREASE))?;
+    vector.resize(full_len.min(old_len.saturating_add(MAX_PERMITTED_DATA_INCREASE)))?;
 
     let mut data = vector.try_borrow_mut()?;
     let (_, identity) = VectorAccount::split(&mut data)?;

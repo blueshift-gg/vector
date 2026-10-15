@@ -90,11 +90,7 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
 
     // Anyone can assign a zeroed account to the program. It belongs to no
     // scheme, so no `Advance` lists it and nothing runs on it.
-    let zeroed = Account::new(
-        10_000_000,
-        WINTERNITZ.account_len(),
-        &vector_core::PROGRAM_ID,
-    );
+    let zeroed = Account::new(10_000_000, WINTERNITZ.account_len, &vector_core::PROGRAM_ID);
     let advance = create_rotating_advance_instruction(&WINTERNITZ, &KEY, &[9; 41], &[0; 849]);
     for (instruction, error) in [
         (&advance, ProgramError::InvalidAccountData),

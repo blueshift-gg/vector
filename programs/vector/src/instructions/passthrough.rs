@@ -47,7 +47,7 @@ const MAX_SIGNERS: usize = 16;
 /// Parameters:
 ///
 /// - num_signers: u8
-/// - for each signer: 0 to sign as the account, 1 as its system PDA
+/// - for each signer, what it signs as: 0 the account, 1 its system PDA
 /// - num_instructions: u8
 /// - for each instruction: num_accounts: u8, data_len: u16, data
 ///
@@ -57,7 +57,7 @@ const MAX_SIGNERS: usize = 16;
 pub struct Passthrough<'a> {
     instructions_sysvar: &'a AccountView,
     signers: &'a [AccountView],
-    system: &'a [u8],
+    signs: &'a [Signs],
     remaining: &'a [AccountView],
     instructions: &'a [u8],
 }
@@ -74,11 +74,12 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
         let [num_signers, data @ ..] = data else {
             return Err(ProgramError::InvalidInstructionData);
         };
-        let (system, instructions) = data
+        let (signs, instructions) = data
             .split_at_checked((*num_signers).into())
             .ok_or(ProgramError::InvalidInstructionData)?;
+        let signs = Signs::parse(signs)?;
         let (signers, remaining) = accounts
-            .split_at_checked(system.len())
+            .split_at_checked(signs.len())
             .ok_or(ProgramError::NotEnoughAccountKeys)?;
         if signers.is_empty() {
             return Err(ProgramError::NotEnoughAccountKeys);
@@ -87,7 +88,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
         Ok(Self {
             instructions_sysvar,
             signers,
-            system,
+            signs,
             remaining,
             instructions,
         })
@@ -145,67 +146,103 @@ impl<'a> Passthrough<'a> {
 
         fill(
             buffer,
-            self.signers
-                .iter()
-                .zip(self.system)
-                .map(|(signer, system)| {
-                    if !signer.owned_by(&crate::ID) {
-                        return Err(ProgramError::InvalidAccountOwner);
-                    }
-                    let vector = signer.address();
-                    let listed = (0..advance.num_account_metas()).any(|index| {
-                        advance
-                            .get_instruction_account_at(index)
-                            .is_ok_and(|meta| &meta.key == vector)
-                    });
-                    if !listed {
-                        return Err(VectorError::NotAdvanced.into());
-                    }
-                    // SAFETY: nothing writes a header the `Advance` lists while this
-                    // runs. Only `Advance` and `Initialize` write one: `Advance` runs
-                    // only at the top level, and `Initialize` refuses a complete
-                    // account, which every listed one is.
-                    let header = VectorAccount::header(unsafe { signer.borrow_unchecked() })?;
-                    Ok(match system {
-                        0 => Authority {
-                            address: *vector,
-                            seeds: [
-                                Seed::from(VECTOR_SEED),
-                                Seed::from(from_ref(&header.scheme)),
-                                Seed::from(&header.seed),
-                                Seed::from(from_ref(&header.bump)),
-                            ],
-                            len: 4,
-                        },
-                        1 => {
-                            let bump = from_ref(&header.system_bump);
-                            Authority {
-                                address: Address::create_program_address(
-                                    &[vector.as_ref(), bump],
-                                    &crate::ID,
-                                )?,
-                                seeds: [vector.as_ref(), bump, &[], &[]].map(Seed::from),
-                                len: 2,
-                            }
+            self.signers.iter().zip(self.signs).map(|(signer, signs)| {
+                if !signer.owned_by(&crate::ID) {
+                    return Err(ProgramError::InvalidAccountOwner);
+                }
+                let vector = signer.address();
+                let listed = (0..advance.num_account_metas()).any(|index| {
+                    advance
+                        .get_instruction_account_at(index)
+                        .is_ok_and(|meta| &meta.key == vector)
+                });
+                if !listed {
+                    return Err(VectorError::NotAdvanced.into());
+                }
+                // SAFETY: nothing writes a header the `Advance` lists while this
+                // runs. Only `Advance` and `Initialize` write one: `Advance` runs
+                // only at the top level, and `Initialize` refuses a complete
+                // account, which every listed one is.
+                let header = VectorAccount::header(unsafe { signer.borrow_unchecked() })?;
+                Ok(match signs {
+                    Signs::Vector => Authority::Vector {
+                        address: vector,
+                        seeds: [
+                            Seed::from(VECTOR_SEED),
+                            Seed::from(from_ref(&header.scheme)),
+                            Seed::from(&header.seed),
+                            Seed::from(from_ref(&header.bump)),
+                        ],
+                    },
+                    Signs::System => {
+                        let bump = from_ref(&header.system_bump);
+                        Authority::System {
+                            address: Address::create_program_address(
+                                &[vector.as_ref(), bump],
+                                &crate::ID,
+                            )?,
+                            seeds: [Seed::from(vector.as_ref()), Seed::from(bump)],
                         }
-                        _ => return Err(ProgramError::InvalidInstructionData),
-                    })
-                }),
+                    }
+                })
+            }),
         )
     }
 }
 
-/// An address the passthrough signs as, a vector account or its system PDA,
-/// and its seeds, which point into the account.
-struct Authority<'a> {
-    address: Address,
-    seeds: [Seed<'a>; 4],
-    len: usize,
+/// What one signer of a `Passthrough` signs as: a byte of its data.
+#[repr(u8)]
+#[derive(Clone, Copy)]
+enum Signs {
+    /// The vector account.
+    Vector = 0,
+    /// The account's system PDA.
+    System = 1,
+}
+
+impl Signs {
+    const ALL: [Signs; 2] = [Signs::Vector, Signs::System];
+
+    /// The bytes as `Signs`, in place, if each is one.
+    fn parse(bytes: &[u8]) -> Result<&[Signs], ProgramError> {
+        let valid = |byte: &u8| Self::ALL.iter().any(|signs| *signs as u8 == *byte);
+        if !bytes.iter().all(valid) {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        // SAFETY: `Signs` is one byte, and every byte is one of its values.
+        Ok(unsafe { core::slice::from_raw_parts(bytes.as_ptr().cast(), bytes.len()) })
+    }
+}
+
+/// An address the passthrough signs as, with its seeds, which point into the
+/// account.
+enum Authority<'a> {
+    /// The vector account: `["vector", [scheme], seed, [bump]]`.
+    Vector {
+        address: &'a Address,
+        seeds: [Seed<'a>; 4],
+    },
+    /// Its system PDA, which the program derives: `[vector address,
+    /// system_bump]`.
+    System {
+        address: Address,
+        seeds: [Seed<'a>; 2],
+    },
 }
 
 impl Authority<'_> {
+    fn address(&self) -> &Address {
+        match self {
+            Self::Vector { address, .. } => address,
+            Self::System { address, .. } => address,
+        }
+    }
+
     fn signer(&self) -> Signer<'_, '_> {
-        Signer::from(&self.seeds[..self.len])
+        match self {
+            Self::Vector { seeds, .. } => Signer::from(seeds),
+            Self::System { seeds, .. } => Signer::from(seeds),
+        }
     }
 }
 
@@ -219,7 +256,7 @@ fn invoke(
     authorities: &[Authority],
 ) -> ProgramResult {
     let signs =
-        |authority: &Authority, account: &AccountView| account.address() == &authority.address;
+        |authority: &Authority, account: &AccountView| account.address() == authority.address();
 
     let mut metas = [const { MaybeUninit::uninit() }; MAX_STATIC_CPI_ACCOUNTS];
     let metas = fill(

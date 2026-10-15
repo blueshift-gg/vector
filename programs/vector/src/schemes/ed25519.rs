@@ -2,7 +2,7 @@ use brine_ed25519::{hasher::FastSha512, verify};
 use pinocchio::error::ProgramError;
 use solana_address::{bytes_are_curve_point, Address};
 
-use crate::scheme::SigningScheme;
+use crate::scheme::{write, SigningScheme};
 
 /// Ed25519. A signature is the 64-byte `(R, s)`.
 #[repr(C)]
@@ -20,8 +20,7 @@ unsafe impl SigningScheme for Ed25519 {
         if !bytes_are_curve_point(key) {
             return Err(ProgramError::InvalidInstructionData);
         }
-        identity.copy_from_slice(key.as_ref());
-        Ok(())
+        write(identity, key.as_array())
     }
 
     fn advance(

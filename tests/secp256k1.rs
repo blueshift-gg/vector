@@ -48,7 +48,7 @@ fn initialize() {
             Check::success(),
             Check::account(&vector)
                 .owner(&PROGRAM_ID)
-                .space(SECP256K1.account_len())
+                .space(SECP256K1.account_len)
                 .build(),
         ],
     );
@@ -65,10 +65,7 @@ fn advance_empty() {
         NONCE,
         &SECP256K1,
         &identity,
-        mollusk
-            .sysvars
-            .rent
-            .minimum_balance(SECP256K1.account_len()),
+        mollusk.sysvars.rent.minimum_balance(SECP256K1.account_len),
         &identity,
     );
 
@@ -107,10 +104,7 @@ fn close_via_advance() {
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
-    let vector_lamports = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(SECP256K1.account_len());
+    let vector_lamports = mollusk.sysvars.rent.minimum_balance(SECP256K1.account_len);
     let (vector, _) = find_vector_pda(&SECP256K1, &identity);
     let vector_account =
         build_vector_account(NONCE, &SECP256K1, &identity, vector_lamports, &identity);
@@ -153,10 +147,7 @@ fn withdraw_via_advance() {
     let key = signing_key();
     let identity = secp256k1_compressed_pubkey(&key);
 
-    let rent_min = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(SECP256K1.account_len());
+    let rent_min = mollusk.sysvars.rent.minimum_balance(SECP256K1.account_len);
     let starting_vector_lamports = rent_min + 5_000_000;
     let withdraw_amount = 3_000_000u64;
 

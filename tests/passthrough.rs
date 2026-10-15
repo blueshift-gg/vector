@@ -34,10 +34,7 @@ impl World {
         let (vector, _) = find_vector_pda(&ED25519, &identity);
         let (system, _) = find_system_pda(&vector);
         let receiver = Address::new_unique();
-        let rent = mollusk()
-            .sysvars
-            .rent
-            .minimum_balance(ED25519.account_len());
+        let rent = mollusk().sysvars.rent.minimum_balance(ED25519.account_len);
         let (system_program, system_program_account) = keyed_account_for_system_program();
         let accounts = vec![
             (

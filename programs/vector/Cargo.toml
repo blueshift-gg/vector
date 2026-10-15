@@ -12,7 +12,7 @@ crate-type = ["cdylib", "lib"]
 no-entrypoint = []
 
 [dependencies]
-pinocchio = { workspace = true, features = ["account-resize"] }
+pinocchio = { workspace = true, features = ["account-resize", "cpi"] }
 pinocchio-system = { workspace = true, features = ["account-resize"] }
 solana-address = { workspace = true, features = ["curve25519"] }
 brine-ed25519 = { workspace = true }

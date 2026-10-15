@@ -61,7 +61,7 @@ fn initialize_and_client_encoding() {
             Check::success(),
             Check::account(&vector)
                 .owner(&PROGRAM_ID)
-                .space(WINTERNITZ.account_len())
+                .space(WINTERNITZ.account_len)
                 .build(),
         ],
     );
@@ -109,11 +109,7 @@ fn signature_binds_close_and_rejects_replay() {
     let stored = public_key.to_vec();
     let mollusk = mollusk();
     let (vector, _) = find_vector_pda(&WINTERNITZ, &identity);
-    let lamports = mollusk
-        .sysvars
-        .rent
-        .minimum_balance(WINTERNITZ.account_len())
-        + 5_000_000;
+    let lamports = mollusk.sysvars.rent.minimum_balance(WINTERNITZ.account_len) + 5_000_000;
     let account = build_vector_account(NONCE, &WINTERNITZ, &identity, lamports, &stored);
     let receiver = Address::new_unique();
     let other = Address::new_unique();

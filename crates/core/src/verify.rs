@@ -65,10 +65,10 @@ pub fn verify_advance_signature(
 
     // The account as on chain: 8-byte aligned, the identity after the
     // header. Falcon-512 and ML-DSA-44 read their prepared key in place.
-    let mut account = vec![0u64; scheme.account_len().div_ceil(8)];
+    let mut account = vec![0u64; scheme.account_len.div_ceil(8)];
     // SAFETY: any `u64` buffer is a valid byte buffer of 8 times its length.
     let account = unsafe {
-        core::slice::from_raw_parts_mut(account.as_mut_ptr().cast::<u8>(), scheme.account_len())
+        core::slice::from_raw_parts_mut(account.as_mut_ptr().cast::<u8>(), scheme.account_len)
     };
     let stored = &mut account[VectorAccount::HEADER_LEN..];
     (scheme.initialize)(identity, stored).map_err(|_| VerifyError::InvalidIdentity)?;

@@ -4,7 +4,10 @@ use solana_winternitz::{
     VerifyingKey,
 };
 
-use crate::{error::VectorError, scheme::SigningScheme};
+use crate::{
+    error::VectorError,
+    scheme::{write, SigningScheme},
+};
 
 /// DKKW25 XMSS. A key signs once per leaf of its tree, so `Advance` may
 /// keep it, and must replace it after the last leaf.
@@ -23,10 +26,8 @@ unsafe impl SigningScheme for Xmss {
     type NextKey = VerifyingKey;
 
     fn initialize(key: &VerifyingKey, identity: &mut [u8]) -> Result<(), ProgramError> {
-        let (public_key, next_leaf) = identity.split_at_mut(VerifyingKey::BYTE_LEN);
-        public_key.copy_from_slice(key.as_bytes());
-        next_leaf.fill(0);
-        Ok(())
+        // A new account is zeroed, so its next leaf is 0.
+        write(identity, key.as_bytes())
     }
 
     /// The same key as `next_key` keeps it, and its used leaves stay used.
@@ -46,11 +47,13 @@ unsafe impl SigningScheme for Xmss {
         if *next_key != self.public_key {
             self.public_key = *next_key;
             self.next_leaf = [0; 4];
-        } else if signature.leaf() + 1 < LEAVES {
-            // Verified, so the leaf is one of the tree's and this cannot overflow.
-            self.next_leaf = (signature.leaf() + 1).to_le_bytes();
         } else {
-            return Err(VectorError::TreeExhausted.into());
+            let next = signature
+                .leaf()
+                .checked_add(1)
+                .filter(|next| *next < LEAVES)
+                .ok_or(VectorError::TreeExhausted)?;
+            self.next_leaf = next.to_le_bytes();
         }
         Ok(())
     }

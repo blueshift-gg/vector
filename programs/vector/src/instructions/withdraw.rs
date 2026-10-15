@@ -62,8 +62,11 @@ impl<'a> Withdraw<'a> {
             .lamports()
             .checked_sub(self.lamports)
             .ok_or(ProgramError::InsufficientFunds)?;
-        // Every lamport there is fits a u64.
-        let received = self.receiver.lamports() + self.lamports;
+        let received = self
+            .receiver
+            .lamports()
+            .checked_add(self.lamports)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
         self.vector.set_lamports(remaining);
         self.receiver.set_lamports(received);
 

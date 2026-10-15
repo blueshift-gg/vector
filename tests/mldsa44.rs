@@ -63,7 +63,7 @@ fn register_in_one_transaction() {
 
     let register = create_initialize_mldsa44(&payer, &pk);
     assert_eq!(register.len(), 3);
-    assert_eq!(MLDSA44.account_len(), 21_924);
+    assert_eq!(MLDSA44.account_len, 21_924);
     let grow = &register[1];
 
     let accounts = vec![
@@ -157,7 +157,7 @@ fn advance_empty() {
         NONCE,
         &MLDSA44,
         &pk,
-        mollusk.sysvars.rent.minimum_balance(MLDSA44.account_len()),
+        mollusk.sysvars.rent.minimum_balance(MLDSA44.account_len),
         &stored,
     );
 

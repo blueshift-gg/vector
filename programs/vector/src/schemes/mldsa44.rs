@@ -1,9 +1,12 @@
 use core::mem::{offset_of, size_of};
 
 use pinocchio::error::ProgramError;
-use solana_ml_dsa::ml_dsa_44::{PreparedVerifyingKey, Signature, VerifyingKey, PUBLIC_KEY_LEN};
+use solana_ml_dsa::ml_dsa_44::{PreparedVerifyingKey, Signature, VerifyingKey};
 
-use crate::{scheme::SigningScheme, state::VectorAccount};
+use crate::{
+    scheme::{write, SigningScheme},
+    state::VectorAccount,
+};
 
 // SHAKE128/256, as specified by FIPS 204.
 type PreparedKey = PreparedVerifyingKey<false>;
@@ -33,10 +36,7 @@ unsafe impl SigningScheme for MlDsa44 {
     type NextKey = [u8; 0];
 
     fn initialize(key: &VerifyingKey<false>, identity: &mut [u8]) -> Result<(), ProgramError> {
-        identity
-            .get_mut(..PUBLIC_KEY_LEN)
-            .ok_or(ProgramError::AccountDataTooSmall)?
-            .copy_from_slice(key.as_bytes());
+        write(identity, key.as_bytes())?;
         prepare_rows(identity, 0)
     }
 
@@ -60,27 +60,30 @@ unsafe impl SigningScheme for MlDsa44 {
 /// Prepare the rows that fit in `identity` now and did not fit when it was
 /// `from` bytes long. The last row completes the key with its hash.
 fn prepare_rows(identity: &mut [u8], from: usize) -> Result<(), ProgramError> {
-    let len = identity.len();
-    let (head, prepared) = identity
+    let complete = identity.len() == size_of::<MlDsa44>();
+    let (public_key, prepared) = identity
         .split_at_mut_checked(PREPARED)
         .ok_or(ProgramError::AccountDataTooSmall)?;
-    let public_key = VerifyingKey::<false>::ref_from_bytes(&head[..PUBLIC_KEY_LEN])
+    let public_key = VerifyingKey::<false>::ref_from_bytes(public_key)
         .map_err(|_| ProgramError::InvalidAccountData)?;
 
-    for i in 0..PreparedKey::PUBLIC_KEY_HASH_OFFSET / PreparedKey::ROW_BYTE_LEN {
-        let end = (i + 1) * PreparedKey::ROW_BYTE_LEN;
-        if PREPARED + end > from && PREPARED + end <= len {
-            let row =
-                PreparedKey::borrow_row_mut(&mut prepared[end - PreparedKey::ROW_BYTE_LEN..end])
-                    .map_err(|_| ProgramError::InvalidAccountData)?;
-            public_key
-                .prepare_row_into(i, row)
-                .map_err(|_| ProgramError::InvalidAccountData)?;
-        }
+    // Whole rows only: one that does not fit yet waits for the next call.
+    let rows = PreparedKey::PUBLIC_KEY_HASH_OFFSET / PreparedKey::ROW_BYTE_LEN;
+    let done = from.saturating_sub(PREPARED) / PreparedKey::ROW_BYTE_LEN;
+    for (i, row) in (0..rows)
+        .zip(prepared.as_chunks_mut::<{ PreparedKey::ROW_BYTE_LEN }>().0)
+        .skip(done)
+    {
+        let row = PreparedKey::borrow_row_mut(row).map_err(|_| ProgramError::InvalidAccountData)?;
+        public_key
+            .prepare_row_into(i, row)
+            .map_err(|_| ProgramError::InvalidAccountData)?;
     }
-    if len == size_of::<MlDsa44>() {
-        prepared[PreparedKey::PUBLIC_KEY_HASH_OFFSET..]
-            .copy_from_slice(&public_key.public_key_hash());
+    if complete {
+        let hash = prepared
+            .get_mut(PreparedKey::PUBLIC_KEY_HASH_OFFSET..)
+            .ok_or(ProgramError::AccountDataTooSmall)?;
+        write(hash, &public_key.public_key_hash())?;
     }
     Ok(())
 }
