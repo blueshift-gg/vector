@@ -1,13 +1,9 @@
-use pinocchio::{
-    error::ProgramError,
-    sysvars::{rent::Rent, Sysvar},
-    AccountView, ProgramResult,
-};
+use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 /// # Withdraw
 ///
-/// Send lamports from the account to the receiver, leaving enough for the
-/// account to stay rent-exempt.
+/// Send lamports from the account to the receiver. The runtime refuses to
+/// leave it with less than rent-exemption but more than nothing.
 ///
 /// It only runs inside a `Passthrough`, which is what makes the account a
 /// signer. The owner's signature on the `Advance` covers it.
@@ -22,7 +18,7 @@ use pinocchio::{
 /// - lamports: u64
 ///
 /// Account Checks:
-/// - Vector: signer, owned by the program, not the receiver
+/// - Vector: signer
 pub struct Withdraw<'a> {
     vector: &'a mut AccountView,
     receiver: &'a mut AccountView,
@@ -37,15 +33,11 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Withdraw<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
 
-        // Account Checks
+        // Account Checks: the runtime refuses to debit an account the
+        // program does not own, or to change the lamports an instruction
+        // holds in total, so a receiver that is the vector fails.
         if !vector.is_signer() {
             return Err(ProgramError::MissingRequiredSignature);
-        }
-        if !vector.owned_by(&crate::ID) {
-            return Err(ProgramError::InvalidAccountOwner);
-        }
-        if vector.address() == receiver.address() {
-            return Err(ProgramError::InvalidAccountData);
         }
 
         let lamports = u64::from_le_bytes(
@@ -65,19 +57,13 @@ impl<'a> Withdraw<'a> {
     pub const DISCRIMINATOR: &'a u8 = &3;
 
     pub fn process(&mut self) -> ProgramResult {
-        let rent = Rent::get()?.try_minimum_balance(self.vector.data_len())?;
-
         let remaining = self
             .vector
             .lamports()
             .checked_sub(self.lamports)
-            .filter(|remaining| *remaining >= rent)
             .ok_or(ProgramError::InsufficientFunds)?;
-        let received = self
-            .receiver
-            .lamports()
-            .checked_add(self.lamports)
-            .ok_or(ProgramError::ArithmeticOverflow)?;
+        // Every lamport there is fits a u64.
+        let received = self.receiver.lamports() + self.lamports;
         self.vector.set_lamports(remaining);
         self.receiver.set_lamports(received);
 

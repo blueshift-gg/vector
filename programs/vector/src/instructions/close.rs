@@ -16,7 +16,7 @@ use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 /// Parameters: None
 ///
 /// Account Checks:
-/// - Vector: signer, owned by the program, not the receiver
+/// - Vector: signer
 pub struct Close<'a> {
     vector: &'a mut AccountView,
     receiver: &'a mut AccountView,
@@ -30,15 +30,11 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Close<'a> {
             return Err(ProgramError::NotEnoughAccountKeys);
         };
 
-        // Account Checks
+        // Account Checks: the runtime refuses to debit an account the
+        // program does not own, or to change the lamports an instruction
+        // holds in total, so a receiver that is the vector fails.
         if !vector.is_signer() {
             return Err(ProgramError::MissingRequiredSignature);
-        }
-        if !vector.owned_by(&crate::ID) {
-            return Err(ProgramError::InvalidAccountOwner);
-        }
-        if vector.address() == receiver.address() {
-            return Err(ProgramError::InvalidAccountData);
         }
 
         if !data.is_empty() {
@@ -53,11 +49,8 @@ impl<'a> Close<'a> {
     pub const DISCRIMINATOR: &'a u8 = &4;
 
     pub fn process(&mut self) -> ProgramResult {
-        let lamports = self
-            .receiver
-            .lamports()
-            .checked_add(self.vector.lamports())
-            .ok_or(ProgramError::ArithmeticOverflow)?;
+        // Every lamport there is fits a u64.
+        let lamports = self.receiver.lamports() + self.vector.lamports();
         self.vector.set_lamports(0);
         self.receiver.set_lamports(lamports);
 

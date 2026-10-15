@@ -132,7 +132,8 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
 
     // The next key signs exactly once. A failed action must roll back both
     // the new key and nonce, allowing these exact bytes to be retried.
-    let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, 3_000_000);
+    // More than the account holds.
+    let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, rent + 3_000_000);
     let passthrough = create_passthrough_instruction(scheme, &identity, &[withdraw]);
     let next_key = third.verifying_key().as_bytes().to_vec();
     let next_digest = rotating_advance_vector_digest(
@@ -168,7 +169,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .find(|(key, _)| *key == vector)
         .unwrap()
         .1
-        .lamports += 2_000_000;
+        .lamports += rent + 2_000_000;
     let retry = process_transaction(
         &mollusk,
         &next_transaction.iter().collect::<Vec<_>>(),
