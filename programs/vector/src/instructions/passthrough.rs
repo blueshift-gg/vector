@@ -99,8 +99,16 @@ impl<'a> Passthrough<'a> {
     pub const DISCRIMINATOR: &'a u8 = &1;
 
     pub fn process(&self) -> ProgramResult {
+        let mut headers = [const { MaybeUninit::uninit() }; MAX_SIGNERS];
+        let headers = self.headers(&mut headers)?;
         let mut authorities = [const { MaybeUninit::uninit() }; MAX_SIGNERS];
-        let authorities = self.authorities(&mut authorities)?;
+        let authorities =
+            fill(
+                &mut authorities,
+                self.signers.iter().zip(self.signs).zip(headers).map(
+                    |((signer, signs), header)| Authority::new(signer.address(), *signs, header),
+                ),
+            )?;
 
         let mut data = self.instructions;
         let mut accounts = self.remaining;
@@ -129,12 +137,12 @@ impl<'a> Passthrough<'a> {
         Ok(())
     }
 
-    /// Who this passthrough signs as: each signer, checked against the
-    /// first `Advance`, with the address and seeds it signs with.
-    fn authorities<'b>(
+    /// Each signer's header, checked against the first `Advance`. The
+    /// headers are copied, so the seeds point at bytes no call can change.
+    fn headers<'b>(
         &self,
-        buffer: &'b mut [MaybeUninit<Authority<'a>>],
-    ) -> Result<&'b [Authority<'a>], ProgramError> {
+        buffer: &'b mut [MaybeUninit<VectorAccount>],
+    ) -> Result<&'b [VectorAccount], ProgramError> {
         let instructions = Instructions::try_from(self.instructions_sysvar)?;
         let advance = (0..instructions.load_current_index())
             .filter_map(|index| instructions.load_instruction_at(index.into()).ok())
@@ -146,45 +154,23 @@ impl<'a> Passthrough<'a> {
 
         fill(
             buffer,
-            self.signers.iter().zip(self.signs).map(|(signer, signs)| {
+            self.signers.iter().map(|signer| {
                 if !signer.owned_by(&crate::ID) {
                     return Err(ProgramError::InvalidAccountOwner);
                 }
-                let vector = signer.address();
                 let listed = (0..advance.num_account_metas()).any(|index| {
                     advance
                         .get_instruction_account_at(index)
-                        .is_ok_and(|meta| &meta.key == vector)
+                        .is_ok_and(|meta| &meta.key == signer.address())
                 });
                 if !listed {
                     return Err(VectorError::NotAdvanced.into());
                 }
-                // SAFETY: nothing writes a header the `Advance` lists while this
-                // runs. Only `Advance` and `Initialize` write one: `Advance` runs
-                // only at the top level, and `Initialize` refuses a complete
-                // account, which every listed one is.
-                let header = VectorAccount::header(unsafe { signer.borrow_unchecked() })?;
-                Ok(match signs {
-                    Signs::Vector => Authority::Vector {
-                        address: vector,
-                        seeds: [
-                            Seed::from(VECTOR_SEED),
-                            Seed::from(from_ref(&header.scheme)),
-                            Seed::from(&header.seed),
-                            Seed::from(from_ref(&header.bump)),
-                        ],
-                    },
-                    Signs::System => {
-                        let bump = from_ref(&header.system_bump);
-                        Authority::System {
-                            address: Address::create_program_address(
-                                &[vector.as_ref(), bump],
-                                &crate::ID,
-                            )?,
-                            seeds: [Seed::from(vector.as_ref()), Seed::from(bump)],
-                        }
-                    }
-                })
+                // SAFETY: this instruction holds no borrow of any account, and
+                // the header is copied before anything else runs.
+                Ok(*VectorAccount::header(unsafe {
+                    signer.borrow_unchecked()
+                })?)
             }),
         )
     }
@@ -214,8 +200,8 @@ impl Signs {
     }
 }
 
-/// An address the passthrough signs as, with its seeds, which point into the
-/// account.
+/// An address the passthrough signs as, with its seeds, which point into a
+/// copy of the account's header.
 enum Authority<'a> {
     /// The vector account: `["vector", [scheme], seed, [bump]]`.
     Vector {
@@ -230,7 +216,33 @@ enum Authority<'a> {
     },
 }
 
-impl Authority<'_> {
+impl<'a> Authority<'a> {
+    /// The vector at `vector` with `header`, signing as `signs` says.
+    fn new(
+        vector: &'a Address,
+        signs: Signs,
+        header: &'a VectorAccount,
+    ) -> Result<Self, ProgramError> {
+        Ok(match signs {
+            Signs::Vector => Self::Vector {
+                address: vector,
+                seeds: [
+                    Seed::from(VECTOR_SEED),
+                    Seed::from(from_ref(&header.scheme)),
+                    Seed::from(&header.seed),
+                    Seed::from(from_ref(&header.bump)),
+                ],
+            },
+            Signs::System => {
+                let bump = from_ref(&header.system_bump);
+                Self::System {
+                    address: Address::create_program_address(&[vector.as_ref(), bump], &crate::ID)?,
+                    seeds: [Seed::from(vector.as_ref()), Seed::from(bump)],
+                }
+            }
+        })
+    }
+
     fn address(&self) -> &Address {
         match self {
             Self::Vector { address, .. } => address,
