@@ -91,16 +91,6 @@ export function deserializeVectorAccount(data: Uint8Array): VectorAccount {
   };
 }
 
-export function serializeVectorAccountHeader(account: VectorAccount): Uint8Array {
-  const buf = new Uint8Array(VECTOR_HEADER_LEN);
-  buf.set(account.nonce, 0);
-  buf.set(account.seed, 32);
-  buf[64] = account.scheme;
-  buf[65] = account.bump;
-  buf[66] = account.systemBump;
-  return buf;
-}
-
 // ── PDA ──────────────────────────────────────────────────────────────
 
 /** sha256 helper returning a `Uint8Array`. */

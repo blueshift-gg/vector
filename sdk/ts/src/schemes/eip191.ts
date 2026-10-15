@@ -14,6 +14,7 @@ import {
 import { advanceVectorDigest } from "../digest.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
+// Checked against the program by `fixtures/schemes.json`.
 export const EIP191: Scheme = {
   id: 2,
   signatureLen: 65,
@@ -22,16 +23,11 @@ export const EIP191: Scheme = {
   nextKeyLen: 0,
 };
 
-/** Derive the 20-byte Ethereum address from a 32-byte secp256k1 private key. */
-export function ethAddressFromPrivateKey(privateKey: Uint8Array): Uint8Array {
+/** EIP-191 identity: the raw 20-byte ETH address. */
+export function eip191Identity(privateKey: Uint8Array): Uint8Array {
   const pubkey = secp256k1.getPublicKey(privateKey, false); // uncompressed, 65 bytes
   const hash = keccak_256(pubkey.slice(1)); // remove 0x04 prefix
   return hash.slice(12, 32); // last 20 bytes
-}
-
-/** EIP-191 identity: the raw 20-byte ETH address. */
-export function eip191Identity(privateKey: Uint8Array): Uint8Array {
-  return ethAddressFromPrivateKey(privateKey);
 }
 
 /** Initialize an EIP-191 vector account. `ethAddress` is the 20-byte address. */

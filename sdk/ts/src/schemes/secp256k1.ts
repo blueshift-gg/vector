@@ -19,14 +19,9 @@ export const SECP256K1: Scheme = {
   nextKeyLen: 0,
 };
 
-/** 33-byte sec1-compressed secp256k1 public key. */
-export function secp256k1CompressedPubkey(privateKey: Uint8Array): Uint8Array {
-  return secp256k1.getPublicKey(privateKey, true);
-}
-
 /** Plain-secp256k1 identity: the 33-byte compressed pubkey. */
 export function secp256k1Identity(privateKey: Uint8Array): Uint8Array {
-  return secp256k1CompressedPubkey(privateKey);
+  return secp256k1.getPublicKey(privateKey, true);
 }
 
 /**
