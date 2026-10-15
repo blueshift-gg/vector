@@ -4,7 +4,7 @@ use solana_winternitz::{
     VerifyingKey,
 };
 
-use crate::scheme::SigningScheme;
+use crate::{error::VectorError, scheme::SigningScheme};
 
 /// DKKW25 XMSS. A key signs once per leaf of its tree, so `Advance` may
 /// keep it, and must replace it after the last leaf.
@@ -37,7 +37,7 @@ unsafe impl SigningScheme for Xmss {
         next_key: &VerifyingKey,
     ) -> Result<(), ProgramError> {
         if signature.leaf() < u32::from_le_bytes(self.next_leaf) {
-            return Err(ProgramError::MissingRequiredSignature);
+            return Err(VectorError::LeafUsed.into());
         }
         self.public_key
             .verify(digest, signature)
@@ -50,8 +50,7 @@ unsafe impl SigningScheme for Xmss {
             // Verified, so the leaf is one of the tree's and this cannot overflow.
             self.next_leaf = (signature.leaf() + 1).to_le_bytes();
         } else {
-            // The tree is used up.
-            return Err(ProgramError::InvalidInstructionData);
+            return Err(VectorError::TreeExhausted.into());
         }
         Ok(())
     }

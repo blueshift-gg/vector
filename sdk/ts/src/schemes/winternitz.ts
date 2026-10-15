@@ -3,7 +3,7 @@ import { Address, TransactionInstruction } from "@solana/web3.js";
 import { Scheme } from "../scheme.js";
 import { createInitializeInstruction } from "../instructions.js";
 
-// Checked against the program by `fixtures/schemes.json`.
+// Checked against the program by `fixtures/program.json`.
 export const WINTERNITZ: Scheme = {
   id: 6,
   signatureLen: 849,

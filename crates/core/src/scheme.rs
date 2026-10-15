@@ -6,6 +6,8 @@
 use sha2::{Digest as Sha2Digest, Sha256};
 use solana_address::{address, Address};
 
+/// The program's own errors, as `ProgramError::Custom`.
+pub use vector::error::VectorError;
 /// The account header, as the program defines it.
 pub use vector::state::VectorAccount;
 /// The Vector program: one program for every signing scheme.

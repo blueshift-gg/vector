@@ -14,7 +14,7 @@ import {
 import { advanceVectorDigest } from "../digest.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
-// Checked against the program by `fixtures/schemes.json`.
+// Checked against the program by `fixtures/program.json`.
 export const EIP191: Scheme = {
   id: 2,
   signatureLen: 65,

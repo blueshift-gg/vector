@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::{mem::MaybeUninit, slice::from_ref};
 
 use pinocchio::{
     account::MAX_PERMITTED_DATA_INCREASE,
@@ -13,6 +13,7 @@ use pinocchio_system::{
 use solana_nostd_sha256::{hash, hashv};
 
 use crate::{
+    scheme::Scheme,
     schemes,
     state::{VectorAccount, VECTOR_SEED},
 };
@@ -62,7 +63,7 @@ pub enum Initialize<'a> {
 pub struct Create<'a> {
     payer: &'a AccountView,
     vector: &'a mut AccountView,
-    scheme: u8,
+    scheme: &'static Scheme,
     key: &'a [u8],
     seed: [u8; 32],
     bump: u8,
@@ -86,19 +87,20 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
         let [scheme, key @ ..] = data else {
             return Err(ProgramError::InvalidInstructionData);
         };
+        let scheme = schemes::scheme(*scheme)?;
 
         // Account Checks
         let seed = hash(key);
         let (address, bump) =
-            Address::find_program_address(&[VECTOR_SEED, &[*scheme], &seed], &crate::ID);
+            Address::find_program_address(&[VECTOR_SEED, &[scheme.id], &seed], &crate::ID);
         if vector.address() != &address {
-            return Err(ProgramError::InvalidAccountData);
+            return Err(ProgramError::InvalidSeeds);
         }
 
         Ok(Self::Create(Create {
             payer,
             vector,
-            scheme: *scheme,
+            scheme,
             key,
             seed,
             bump,
@@ -119,20 +121,18 @@ impl<'a> Initialize<'a> {
 
 impl Create<'_> {
     fn process(&mut self) -> ProgramResult {
-        let (payer, vector) = (self.payer, &mut *self.vector);
-        let scheme = schemes::scheme(self.scheme)?;
+        let (payer, vector, scheme) = (self.payer, &mut *self.vector, self.scheme);
 
         // Create the account. Anyone can send lamports to the address before
         // it exists, and a plain `CreateAccount` refuses an address that
         // holds any; this funds only the shortfall, and still fails on an
         // account that has data.
         let full_len = scheme.account_len();
-        let (scheme_seed, bump_seed) = ([self.scheme], [self.bump]);
         let seeds = [
             Seed::from(VECTOR_SEED),
-            Seed::from(&scheme_seed),
+            Seed::from(from_ref(&scheme.id)),
             Seed::from(&self.seed),
-            Seed::from(&bump_seed),
+            Seed::from(from_ref(&self.bump)),
         ];
         create_program_account_with_minimum_balance_signed(
             vector,
@@ -143,11 +143,12 @@ impl Create<'_> {
             &[Signer::from(&seeds)],
         )?;
 
-        // Fund it for its full size, so it stays rent-exempt as it grows.
-        let shortfall = Rent::get()?
-            .try_minimum_balance(full_len)?
-            .saturating_sub(vector.lamports());
-        if shortfall > 0 {
+        // An account created short is funded for its full size, so it stays
+        // rent-exempt as it grows.
+        if full_len > MAX_PERMITTED_DATA_INCREASE {
+            let shortfall = Rent::get()?
+                .try_minimum_balance(full_len)?
+                .saturating_sub(vector.lamports());
             Transfer {
                 from: payer,
                 to: vector,
@@ -164,7 +165,7 @@ impl Create<'_> {
         let (account, identity) = VectorAccount::split(&mut data)?;
         account.nonce = hashv(&[&self.seed, &latest_slot_hash()?]);
         account.seed = self.seed;
-        account.scheme = self.scheme;
+        account.scheme = scheme.id;
         account.bump = self.bump;
         account.system_bump = system_bump;
         (scheme.initialize)(self.key, identity)

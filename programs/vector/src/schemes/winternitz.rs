@@ -1,7 +1,7 @@
 use pinocchio::error::ProgramError;
 use solana_winternitz::{winternitz::Signature, VerifyingKey};
 
-use crate::scheme::SigningScheme;
+use crate::{error::VectorError, scheme::SigningScheme};
 
 /// DKKW25 Winternitz. A key signs once, so every `Advance` replaces it.
 #[repr(C)]
@@ -32,7 +32,7 @@ unsafe impl SigningScheme for Winternitz {
             .verify(digest, signature)
             .map_err(|_| ProgramError::MissingRequiredSignature)?;
         if *next_key == self.public_key {
-            return Err(ProgramError::InvalidInstructionData);
+            return Err(VectorError::KeyReused.into());
         }
         self.public_key = *next_key;
         Ok(())

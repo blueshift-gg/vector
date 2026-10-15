@@ -8,5 +8,12 @@
     { "id": 5, "signatureLen": 2420, "identityLen": 1312, "storedIdentityLen": 21856, "nextKeyLen": 0 },
     { "id": 6, "signatureLen": 849, "identityLen": 41, "storedIdentityLen": 41, "nextKeyLen": 41 },
     { "id": 7, "signatureLen": 1037, "identityLen": 41, "storedIdentityLen": 45, "nextKeyLen": 41 }
-  ]
+  ],
+  "errors": {
+    "NotTopLevel": 0,
+    "NotAdvanced": 1,
+    "KeyReused": 2,
+    "LeafUsed": 3,
+    "TreeExhausted": 4
+  }
 }

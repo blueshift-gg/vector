@@ -27,7 +27,7 @@ fn top_level_only() -> Result<(), ProgramError> {
 
         if unsafe { pinocchio::syscalls::sol_get_stack_height() } != TRANSACTION_LEVEL_STACK_HEIGHT
         {
-            return Err(ProgramError::IncorrectAuthority);
+            return Err(crate::error::VectorError::NotTopLevel.into());
         }
     }
     Ok(())

@@ -10,7 +10,7 @@ import {
 import { advanceVectorDigest } from "../digest.js";
 
 /** Ed25519 — identity is the 32-byte public key. */
-// Checked against the program by `fixtures/schemes.json`.
+// Checked against the program by `fixtures/program.json`.
 export const ED25519: Scheme = {
   id: 1,
   signatureLen: 64,

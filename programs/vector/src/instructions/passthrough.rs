@@ -1,8 +1,7 @@
-use alloc::vec::Vec;
-use core::slice::from_ref;
+use core::{mem::MaybeUninit, slice::from_ref};
 
 use pinocchio::{
-    cpi::{invoke_signed_with_slice, Seed, Signer},
+    cpi::{invoke_signed_with_bounds, Seed, Signer, MAX_STATIC_CPI_ACCOUNTS},
     error::ProgramError,
     instruction::{InstructionAccount, InstructionView},
     sysvars::instructions::Instructions,
@@ -10,9 +9,14 @@ use pinocchio::{
 };
 
 use crate::{
+    error::VectorError,
     instructions::{top_level_only, Advance},
     state::{VectorAccount, VECTOR_SEED},
 };
+
+/// Most signers one `Passthrough` takes: the runtime's limit on signers of
+/// one call (`MAX_SIGNERS` in Agave's `cpi.rs`).
+const MAX_SIGNERS: usize = 16;
 
 /// # Passthrough
 ///
@@ -94,25 +98,11 @@ impl<'a> Passthrough<'a> {
     pub const DISCRIMINATOR: &'a u8 = &1;
 
     pub fn process(&self) -> ProgramResult {
-        let authorities = self.authorities()?;
-
-        // Every account of every instruction, an authority signing wherever
-        // it appears. Each instruction takes its own run of them.
-        let metas: Vec<InstructionAccount> = self
-            .remaining
-            .iter()
-            .map(|account| {
-                let mut meta = InstructionAccount::from(account);
-                meta.is_signer |= authorities
-                    .iter()
-                    .any(|authority| account.address() == &authority.address);
-                meta
-            })
-            .collect();
-        let mut signers = Vec::with_capacity(authorities.len());
+        let mut authorities = [const { MaybeUninit::uninit() }; MAX_SIGNERS];
+        let authorities = self.authorities(&mut authorities)?;
 
         let mut data = self.instructions;
-        let mut start = 0;
+        let mut accounts = self.remaining;
         for _ in 0..read::<1>(&mut data)?[0] {
             let num_accounts = read::<1>(&mut data)?[0] as usize;
             let data_len = u16::from_le_bytes(*read::<2>(&mut data)?) as usize;
@@ -121,40 +111,18 @@ impl<'a> Passthrough<'a> {
                 .ok_or(ProgramError::InvalidInstructionData)?;
             data = rest;
 
-            let end = start + 1 + num_accounts;
-            let (Some([program, accounts @ ..]), Some([_, metas @ ..])) =
-                (self.remaining.get(start..end), metas.get(start..end))
+            let ([program, instruction_accounts @ ..], rest) = accounts
+                .split_at_checked(1 + num_accounts)
+                .ok_or(ProgramError::NotEnoughAccountKeys)?
             else {
                 return Err(ProgramError::NotEnoughAccountKeys);
             };
-            start = end;
+            accounts = rest;
 
-            // Only the authorities the instruction names sign it: each costs
-            // the runtime a derivation.
-            signers.clear();
-            signers.extend(
-                authorities
-                    .iter()
-                    .filter(|authority| {
-                        accounts
-                            .iter()
-                            .any(|account| account.address() == &authority.address)
-                    })
-                    .map(Authority::signer),
-            );
-
-            invoke_signed_with_slice(
-                &InstructionView {
-                    program_id: program.address(),
-                    accounts: metas,
-                    data: instruction_data,
-                },
-                accounts,
-                &signers,
-            )?;
+            invoke(program, instruction_accounts, instruction_data, authorities)?;
         }
 
-        if !data.is_empty() || start != self.remaining.len() {
+        if !data.is_empty() || !accounts.is_empty() {
             return Err(ProgramError::InvalidInstructionData);
         }
         Ok(())
@@ -162,7 +130,10 @@ impl<'a> Passthrough<'a> {
 
     /// Who this passthrough signs as: each signer, checked against the
     /// first `Advance`, with the address and seeds it signs with.
-    fn authorities(&self) -> Result<Vec<Authority<'a>>, ProgramError> {
+    fn authorities<'b>(
+        &self,
+        buffer: &'b mut [MaybeUninit<Authority<'a>>],
+    ) -> Result<&'b [Authority<'a>], ProgramError> {
         let instructions = Instructions::try_from(self.instructions_sysvar)?;
         let advance = (0..instructions.load_current_index())
             .filter_map(|index| instructions.load_instruction_at(index.into()).ok())
@@ -170,53 +141,57 @@ impl<'a> Passthrough<'a> {
                 instruction.get_program_id() == &crate::ID
                     && instruction.get_instruction_data().first() == Some(Advance::DISCRIMINATOR)
             })
-            .ok_or(ProgramError::MissingRequiredSignature)?;
+            .ok_or(VectorError::NotAdvanced)?;
 
-        let mut authorities = Vec::with_capacity(self.signers.len());
-        for (signer, system) in self.signers.iter().zip(self.system) {
-            if !signer.owned_by(&crate::ID) {
-                return Err(ProgramError::InvalidAccountOwner);
-            }
-            let vector = signer.address();
-            let listed = (0..advance.num_account_metas()).any(|index| {
-                advance
-                    .get_instruction_account_at(index)
-                    .is_ok_and(|meta| &meta.key == vector)
-            });
-            if !listed {
-                return Err(ProgramError::MissingRequiredSignature);
-            }
-            // SAFETY: nothing writes a header the `Advance` lists while this
-            // runs. Only `Advance` and `Initialize` write one: `Advance` runs
-            // only at the top level, and `Initialize` refuses a complete
-            // account, which every listed one is.
-            let header = VectorAccount::header(unsafe { signer.borrow_unchecked() })?;
-            authorities.push(match system {
-                0 => Authority {
-                    address: *vector,
-                    seeds: [
-                        Seed::from(VECTOR_SEED),
-                        Seed::from(from_ref(&header.scheme)),
-                        Seed::from(&header.seed),
-                        Seed::from(from_ref(&header.bump)),
-                    ],
-                    len: 4,
-                },
-                1 => {
-                    let bump = from_ref(&header.system_bump);
-                    Authority {
-                        address: Address::create_program_address(
-                            &[vector.as_ref(), bump],
-                            &crate::ID,
-                        )?,
-                        seeds: [vector.as_ref(), bump, &[], &[]].map(Seed::from),
-                        len: 2,
+        fill(
+            buffer,
+            self.signers
+                .iter()
+                .zip(self.system)
+                .map(|(signer, system)| {
+                    if !signer.owned_by(&crate::ID) {
+                        return Err(ProgramError::InvalidAccountOwner);
                     }
-                }
-                _ => return Err(ProgramError::InvalidInstructionData),
-            });
-        }
-        Ok(authorities)
+                    let vector = signer.address();
+                    let listed = (0..advance.num_account_metas()).any(|index| {
+                        advance
+                            .get_instruction_account_at(index)
+                            .is_ok_and(|meta| &meta.key == vector)
+                    });
+                    if !listed {
+                        return Err(VectorError::NotAdvanced.into());
+                    }
+                    // SAFETY: nothing writes a header the `Advance` lists while this
+                    // runs. Only `Advance` and `Initialize` write one: `Advance` runs
+                    // only at the top level, and `Initialize` refuses a complete
+                    // account, which every listed one is.
+                    let header = VectorAccount::header(unsafe { signer.borrow_unchecked() })?;
+                    Ok(match system {
+                        0 => Authority {
+                            address: *vector,
+                            seeds: [
+                                Seed::from(VECTOR_SEED),
+                                Seed::from(from_ref(&header.scheme)),
+                                Seed::from(&header.seed),
+                                Seed::from(from_ref(&header.bump)),
+                            ],
+                            len: 4,
+                        },
+                        1 => {
+                            let bump = from_ref(&header.system_bump);
+                            Authority {
+                                address: Address::create_program_address(
+                                    &[vector.as_ref(), bump],
+                                    &crate::ID,
+                                )?,
+                                seeds: [vector.as_ref(), bump, &[], &[]].map(Seed::from),
+                                len: 2,
+                            }
+                        }
+                        _ => return Err(ProgramError::InvalidInstructionData),
+                    })
+                }),
+        )
     }
 }
 
@@ -232,6 +207,80 @@ impl Authority<'_> {
     fn signer(&self) -> Signer<'_, '_> {
         Signer::from(&self.seeds[..self.len])
     }
+}
+
+/// Invoke one instruction, each authority signing wherever it appears: at
+/// most `MAX_STATIC_CPI_ACCOUNTS` (64) accounts, all on the stack.
+#[inline(never)]
+fn invoke(
+    program: &AccountView,
+    accounts: &[AccountView],
+    data: &[u8],
+    authorities: &[Authority],
+) -> ProgramResult {
+    let signs =
+        |authority: &Authority, account: &AccountView| account.address() == &authority.address;
+
+    let mut metas = [const { MaybeUninit::uninit() }; MAX_STATIC_CPI_ACCOUNTS];
+    let metas = fill(
+        &mut metas,
+        accounts.iter().map(|account| {
+            let mut meta = InstructionAccount::from(account);
+            meta.is_signer |= authorities
+                .iter()
+                .any(|authority| signs(authority, account));
+            Ok(meta)
+        }),
+    )?;
+    // Only the authorities the instruction names sign it: each costs the
+    // runtime a derivation.
+    let mut signers = [const { MaybeUninit::uninit() }; MAX_SIGNERS];
+    let signers = fill(
+        &mut signers,
+        authorities
+            .iter()
+            .filter(|authority| accounts.iter().any(|account| signs(authority, account)))
+            .map(|authority| Ok(authority.signer())),
+    )?;
+
+    call(
+        &InstructionView {
+            program_id: program.address(),
+            accounts: metas,
+            data,
+        },
+        accounts,
+        signers,
+    )
+}
+
+/// The call itself. pinocchio lays its accounts out on the stack, so this
+/// frame holds them and `invoke`'s holds the rest: SBF allows 4 KB a frame.
+#[inline(never)]
+fn call(
+    instruction: &InstructionView,
+    accounts: &[AccountView],
+    signers: &[Signer],
+) -> ProgramResult {
+    invoke_signed_with_bounds::<MAX_STATIC_CPI_ACCOUNTS, _>(instruction, accounts, signers)
+}
+
+/// Write `items` to the front of `buffer` and return them, or the first
+/// error. More items than `buffer` holds is `InvalidArgument`.
+fn fill<T>(
+    buffer: &mut [MaybeUninit<T>],
+    items: impl Iterator<Item = Result<T, ProgramError>>,
+) -> Result<&[T], ProgramError> {
+    let mut len = 0;
+    for item in items {
+        buffer
+            .get_mut(len)
+            .ok_or(ProgramError::InvalidArgument)?
+            .write(item?);
+        len += 1;
+    }
+    // SAFETY: the first `len` slots were written.
+    Ok(unsafe { core::slice::from_raw_parts(buffer.as_ptr().cast(), len) })
 }
 
 /// Take the next `N` bytes off the front of `data`.

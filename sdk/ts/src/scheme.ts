@@ -22,6 +22,24 @@ export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamf
  * system_bump[1] || pad[1]`. The seed is the SHA-256 of the key the account
  * was created with. The scheme's identity bytes follow.
  */
+/**
+ * The program's own errors, as `ProgramError::Custom(code)`; every other
+ * failure is a standard `ProgramError`. Checked against the program by
+ * `fixtures/program.json`.
+ */
+export enum VectorError {
+  /** `advance` or `passthrough` ran inside another instruction. */
+  NotTopLevel = 0,
+  /** `passthrough`: no earlier `advance`, or the first one does not list a signer. */
+  NotAdvanced = 1,
+  /** Winternitz: the next key is the key that just signed. */
+  KeyReused = 2,
+  /** XMSS: the signature's leaf has signed before. */
+  LeafUsed = 3,
+  /** XMSS: the tree's last leaf signed, and the key was not replaced. */
+  TreeExhausted = 4,
+}
+
 export const VECTOR_HEADER_LEN = 68;
 /** What one instruction can allocate; a bigger account takes more `initialize` calls. */
 export const MAX_PERMITTED_DATA_INCREASE = 10_240;

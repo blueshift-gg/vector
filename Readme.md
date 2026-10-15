@@ -163,11 +163,24 @@ accounts: [instructions_sysvar, vector_1, ..., vector_n, {program, accounts...}.
 data:     [1, n, system_1, ..., system_n, num_ixs, {num_accounts, data_len(u16), data}...]
 ```
 
-One `Passthrough` signs for any number of accounts, each listed in the `Advance`. Each signs as its vector account (`system = 0`) or as its system PDA (`system = 1`); list an account twice to sign as both.
+One `Passthrough` signs for up to 16 accounts, each listed in the `Advance`: 16 is the runtime's limit on signers of one call. Each signs as its vector account (`system = 0`) or as its system PDA (`system = 1`); list an account twice to sign as both.
 
 The vector account belongs to the program, so it cannot be the `from` of a System `Transfer`, or `Allocate` and `Assign` like a wallet. Each account therefore has a system PDA, `[vector address, system_bump]` under the program and owned by the System program; `find_system_pda` / `findSystemPda` derives it. The program derives it from the vector's address and stored `system_bump` (about 1,500 CUs), and never takes it from the caller.
 
 For each sub-instruction in the passthrough payload, Vector promotes any account whose address matches one of its signers to `is_signer = true`, and signs with the seeds of those signers only, before invoking. This is what lets `Close`/`Withdraw` pass their `vector.is_signer()` gate when reached via re-entry, and lets arbitrary downstream programs treat the PDA as the signer for authority operations (e.g. SPL Token `set_authority`).
+
+The program never allocates: it runs with pinocchio's `no_allocator!`, and every buffer is on the stack. A sub-instruction therefore takes at most 64 accounts, pinocchio's bound for a call built on the stack.
+
+### Errors
+A bad signature is `MissingRequiredSignature`, and every other standard `ProgramError` keeps its meaning. The program's own errors are `ProgramError::Custom(code)`, as `VectorError` in both SDKs:
+
+| Code | Name | When |
+|------|------|------|
+| `0` | `NotTopLevel` | `Advance` or `Passthrough` ran inside another instruction |
+| `1` | `NotAdvanced` | `Passthrough` found no earlier `Advance`, or the first one does not list a signer |
+| `2` | `KeyReused` | Winternitz: the next key is the key that just signed |
+| `3` | `LeafUsed` | XMSS: the signature's leaf has signed before |
+| `4` | `TreeExhausted` | XMSS: the last leaf signed, and the key was not replaced |
 
 ## Security Model
 The signer is authorizing a concrete transaction buffer, not a reusable nonce and not a partially specified intent. Since the signed digest is reconstructed from the instruction sysvar onchain, any material change to the transaction changes the digest and invalidates the signature.
@@ -336,7 +349,7 @@ Everything below is native protocol behaviour — no extra programs, accounts, o
 
 ### Offline verification
 
-Both SDKs ship a verify function that recomputes the digest from the full instruction layout and checks the signature as the on-chain program will — no RPC. The Rust one runs the program's own `initialize` and `advance` for the scheme, with `sol_secp256k1_recover` as the runtime implements it, so it cannot disagree with the chain. The TypeScript one verifies with `@noble`, and shares its digest pins and `fixtures/schemes.json` with the Rust tests. A PASS means the transaction will verify on-chain against the same nonce; the returned digest is the account's next nonce.
+Both SDKs ship a verify function that recomputes the digest from the full instruction layout and checks the signature as the on-chain program will — no RPC. The Rust one runs the program's own `initialize` and `advance` for the scheme, with `sol_secp256k1_recover` as the runtime implements it, so it cannot disagree with the chain. The TypeScript one verifies with `@noble`, and shares its digest pins and `fixtures/program.json` with the Rust tests. A PASS means the transaction will verify on-chain against the same nonce; the returned digest is the account's next nonce.
 
 ```rust
 use vector_core::{verify_advance_signature, ED25519};

@@ -8,8 +8,8 @@ use solana_address::Address;
 use solana_program_error::ProgramError;
 use vector_core::{
     create_initialize_instruction, create_initialize_mldsa44, create_passthrough_instruction,
-    create_rotating_advance_instruction, find_vector_pda, VectorAccount, ED25519, EIP191,
-    FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
+    create_rotating_advance_instruction, find_vector_pda, VectorAccount, VectorError, ED25519,
+    EIP191, FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
 };
 
 use crate::common::{build_vector_account, mollusk, NONCE};
@@ -43,7 +43,7 @@ fn initialize_derives_the_address_from_the_scheme_it_is_given() {
     let result = mollusk.process_instruction(&initialize, &accounts);
     assert_eq!(
         result.program_result,
-        ProgramResult::Failure(ProgramError::InvalidAccountData)
+        ProgramResult::Failure(ProgramError::InvalidSeeds)
     );
 
     // A scheme that does not exist has an address too, and nothing behind it.
@@ -96,19 +96,15 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
         &vector_core::PROGRAM_ID,
     );
     let advance = create_rotating_advance_instruction(&WINTERNITZ, &KEY, &[9; 41], &[0; 849]);
-    for instruction in [
-        &advance,
-        &create_passthrough_instruction(&WINTERNITZ, &KEY, &[]),
+    for (instruction, error) in [
+        (&advance, ProgramError::InvalidAccountData),
+        (
+            &create_passthrough_instruction(&WINTERNITZ, &KEY, &[]),
+            VectorError::NotAdvanced.into(),
+        ),
     ] {
         let result = mollusk.process_instruction(instruction, &[(vector, zeroed.clone())]);
-        assert!(matches!(
-            result.program_result,
-            ProgramResult::Failure(
-                ProgramError::InvalidAccountData
-                    | ProgramError::InvalidInstructionData
-                    | ProgramError::MissingRequiredSignature
-            )
-        ));
+        assert_eq!(result.program_result, ProgramResult::Failure(error));
     }
 
     // An account the program does not own has no scheme to read, and no
@@ -122,11 +118,11 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     );
 }
 
-/// The TypeScript SDK types every scheme's numbers by hand. The fixture is
-/// what the program says they are, and the TypeScript tests check the SDK
-/// against it.
+/// The TypeScript SDK types the program's numbers by hand: the header, each
+/// scheme's byte and lengths, and the error codes. The fixture is what the
+/// program says they are, and the TypeScript tests check the SDK against it.
 #[test]
-fn the_schemes_fixture_is_the_programs() {
+fn the_program_fixture_is_the_programs() {
     let schemes = [ED25519, EIP191, SECP256K1, FALCON512, MLDSA44, WINTERNITZ, XMSS]
         .map(|scheme| {
             format!(
@@ -139,13 +135,22 @@ fn the_schemes_fixture_is_the_programs() {
             )
         })
         .join(",\n");
+    let errors = [
+        VectorError::NotTopLevel,
+        VectorError::NotAdvanced,
+        VectorError::KeyReused,
+        VectorError::LeafUsed,
+        VectorError::TreeExhausted,
+    ]
+    .map(|error| format!(r#"    "{error:?}": {}"#, error as u32))
+    .join(",\n");
     let expected = format!(
-        "{{\n  \"headerLen\": {},\n  \"schemes\": [\n{schemes}\n  ]\n}}\n",
+        "{{\n  \"headerLen\": {},\n  \"schemes\": [\n{schemes}\n  ],\n  \"errors\": {{\n{errors}\n  }}\n}}\n",
         VectorAccount::HEADER_LEN,
     );
     let fixture = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../fixtures/schemes.json"
+        "/../fixtures/program.json"
     ))
     .unwrap();
     assert_eq!(fixture, expected);

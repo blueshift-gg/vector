@@ -15,7 +15,7 @@ export const MLDSA44_SECRET_KEY_LEN = 2560;
  * ML-DSA-44 — the identity is the public key (1,312 bytes); the account
  * also stores its prepared form (20,544 bytes).
  */
-// Checked against the program by `fixtures/schemes.json`.
+// Checked against the program by `fixtures/program.json`.
 export const MLDSA44: Scheme = {
   id: 5,
   signatureLen: 2420,

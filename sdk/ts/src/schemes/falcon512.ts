@@ -18,7 +18,7 @@ import { advanceVectorDigest } from "../digest.js";
 export const FALCON_SECRET_KEY_LEN = 1281;
 
 /** Falcon-512. The identity is the 897-byte wire public key. */
-// Checked against the program by `fixtures/schemes.json`.
+// Checked against the program by `fixtures/program.json`.
 export const FALCON512: Scheme = {
   id: 4,
   signatureLen: 666,

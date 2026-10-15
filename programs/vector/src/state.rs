@@ -1,16 +1,20 @@
 //! The vector account: a fixed header, then the scheme's identity.
 
-use core::mem::{offset_of, size_of};
+use core::mem::size_of;
 
 use pinocchio::{account::RefMut, error::ProgramError, AccountView};
 
-use crate::{scheme::Scheme, schemes};
+use crate::{
+    scheme::{cast, cast_mut, Scheme},
+    schemes,
+};
 
 /// First seed of every vector account's address:
 /// `["vector", [scheme], seed, [bump]]`.
 pub const VECTOR_SEED: &[u8] = b"vector";
 
-/// The header every vector account starts with.
+/// The header every vector account starts with. It is plain bytes: `repr(C)`
+/// with alignment 1, no padding and no invalid bit patterns.
 ///
 /// ```text
 /// nonce:  [u8; 32]  // offset  0 — what the next signature must be made over
@@ -54,10 +58,7 @@ impl VectorAccount {
     /// scheme from here and never from the caller, so the identity is always
     /// read as the scheme that wrote it.
     pub fn scheme(data: &[u8]) -> Result<&'static Scheme, ProgramError> {
-        let id = *data
-            .get(offset_of!(Self, scheme))
-            .ok_or(ProgramError::AccountDataTooSmall)?;
-        schemes::scheme(id).map_err(|_| ProgramError::InvalidAccountData)
+        schemes::scheme(Self::header(data)?.scheme).map_err(|_| ProgramError::InvalidAccountData)
     }
 
     /// The header at the start of account data.
@@ -65,9 +66,8 @@ impl VectorAccount {
         let header = data
             .get(..Self::HEADER_LEN)
             .ok_or(ProgramError::AccountDataTooSmall)?;
-        // SAFETY: `header` is `HEADER_LEN` bytes, and `Self` is `repr(C)` with
-        // alignment 1, no padding and no invalid bit patterns.
-        Ok(unsafe { &*header.as_ptr().cast::<Self>() })
+        // SAFETY: the header is plain bytes.
+        unsafe { cast(header) }.ok_or(ProgramError::AccountDataTooSmall)
     }
 
     /// Split account data into the header and the identity bytes after it.
@@ -75,11 +75,8 @@ impl VectorAccount {
         let (header, identity) = data
             .split_at_mut_checked(Self::HEADER_LEN)
             .ok_or(ProgramError::AccountDataTooSmall)?;
-        // SAFETY: `header` is `HEADER_LEN` bytes, and `Self` is `repr(C)` with
-        // alignment 1, no padding and no invalid bit patterns.
-        Ok((
-            unsafe { &mut *header.as_mut_ptr().cast::<Self>() },
-            identity,
-        ))
+        // SAFETY: the header is plain bytes.
+        let header = unsafe { cast_mut(header) }.ok_or(ProgramError::AccountDataTooSmall)?;
+        Ok((header, identity))
     }
 }

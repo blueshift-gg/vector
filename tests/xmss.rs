@@ -7,8 +7,8 @@ use solana_program_error::ProgramError;
 use solana_winternitz::xmss;
 use vector_core::{
     create_initialize_xmss, create_passthrough_instruction, create_rotating_advance_instruction,
-    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, PROGRAM_ID,
-    XMSS,
+    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, VectorError,
+    PROGRAM_ID, XMSS,
 };
 
 use crate::common::{
@@ -105,7 +105,7 @@ fn initialize_checks_key_length_and_pda() {
     mollusk.process_and_validate_instruction(
         &wrong_pda,
         &wrong_accounts,
-        &[Check::err(ProgramError::InvalidAccountData)],
+        &[Check::err(ProgramError::InvalidSeeds)],
     );
 }
 
@@ -145,29 +145,33 @@ fn advance_rejects_replay_wrong_key_and_malformed_signatures() {
     );
     println!("xmss advance: {} CUs", result.compute_units_consumed);
 
-    // A new nonce invalidates the old authorization without consuming a
-    // second leaf. Reusing the signature bytes is not signing twice.
+    // Its leaf has signed, so the same signature cannot land again.
     let mut advanced = account.clone();
     advanced.data = expected.clone();
     mollusk.process_and_validate_instruction_chain(
         &[(
             &advance,
             &[
-                Check::err(ProgramError::MissingRequiredSignature),
+                Check::err(VectorError::LeafUsed.into()),
                 Check::account(&vector).data(&expected).build(),
             ],
         )],
         &[(vector, advanced)],
     );
 
-    for offset in [0, 68, account.data.len() - 1] {
+    // The nonce, the key, and the leaf counter's high byte.
+    for (offset, error) in [
+        (0, ProgramError::MissingRequiredSignature),
+        (68, ProgramError::MissingRequiredSignature),
+        (account.data.len() - 1, VectorError::LeafUsed.into()),
+    ] {
         let mut changed = account.clone();
         changed.data[offset] ^= 1;
         mollusk.process_and_validate_instruction_chain(
             &[(
                 &advance,
                 &[
-                    Check::err(ProgramError::MissingRequiredSignature),
+                    Check::err(error),
                     Check::account(&vector).data(&changed.data).build(),
                 ],
             )],

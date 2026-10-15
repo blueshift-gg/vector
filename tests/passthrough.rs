@@ -12,7 +12,8 @@ use solana_system_interface::instruction::transfer;
 use vector_core::{
     create_multi_passthrough_instruction, create_passthrough_instruction,
     create_system_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
-    find_system_pda, find_vector_pda, sign_advance_instruction_ed25519, PassthroughSigner, ED25519,
+    find_system_pda, find_vector_pda, sign_advance_instruction_ed25519, PassthroughSigner,
+    VectorError, ED25519,
 };
 
 use crate::common::{build_vector_account, mollusk, process_transaction, NONCE};
@@ -168,7 +169,7 @@ fn passthrough_needs_an_earlier_advance_listing_the_account() {
     let (result, accounts) = world.run(vec![withdraw(&world.identity)], 1);
     assert_eq!(
         result,
-        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+        TransactionProgramResult::Failure(0, VectorError::NotAdvanced.into())
     );
     assert_eq!(accounts, world.accounts);
 
@@ -183,7 +184,36 @@ fn passthrough_needs_an_earlier_advance_listing_the_account() {
     let (result, accounts) = world.run(vec![withdraw(&other)], 0);
     assert_eq!(
         result,
-        TransactionProgramResult::Failure(1, ProgramError::MissingRequiredSignature)
+        TransactionProgramResult::Failure(1, VectorError::NotAdvanced.into())
     );
     assert_eq!(accounts, world.accounts);
+}
+
+/// Everything is on the stack: at most 16 signers, the runtime's limit for
+/// one call, and 64 accounts in one instruction.
+#[test]
+fn passthrough_limits() {
+    let world = World::new();
+    let signer = PassthroughSigner::vector(&ED25519, &world.identity);
+    let withdraw =
+        create_withdraw_subinstruction(&ED25519, &world.identity, &world.receiver, 1_000_000);
+
+    let too_many_signers = create_multi_passthrough_instruction(&[signer; 17], &[withdraw]);
+    let (result, _) = world.run(vec![too_many_signers], 0);
+    assert_eq!(
+        result,
+        TransactionProgramResult::Failure(1, ProgramError::InvalidArgument)
+    );
+
+    let mut too_many_accounts = transfer(&world.system, &world.receiver, 1);
+    too_many_accounts
+        .accounts
+        .resize(65, too_many_accounts.accounts[1].clone());
+    let passthrough =
+        create_system_passthrough_instruction(&ED25519, &world.identity, &[too_many_accounts]);
+    let (result, _) = world.run(vec![passthrough], 0);
+    assert_eq!(
+        result,
+        TransactionProgramResult::Failure(1, ProgramError::InvalidArgument)
+    );
 }

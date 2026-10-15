@@ -14,7 +14,8 @@ use solana_program_error::ProgramError;
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
-    sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, ED25519, SECP256K1,
+    sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, VectorError, ED25519,
+    SECP256K1,
 };
 
 use crate::common::{
@@ -273,7 +274,7 @@ fn advance_errors() {
     );
     assert_eq!(
         world.run(&[advance, outer], &world.accounts).0,
-        TransactionProgramResult::Failure(1, ProgramError::IncorrectAuthority)
+        TransactionProgramResult::Failure(1, VectorError::NotTopLevel.into())
     );
 }
 
@@ -292,6 +293,6 @@ fn passthrough_without_its_account_in_an_advance_is_rejected() {
     );
     assert_eq!(
         world.run(&[advance, take_from_bob], &world.accounts).0,
-        TransactionProgramResult::Failure(1, ProgramError::MissingRequiredSignature)
+        TransactionProgramResult::Failure(1, VectorError::NotAdvanced.into())
     );
 }

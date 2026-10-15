@@ -5,11 +5,10 @@
 //! signature, and [`Passthrough`] then acts for the account.
 #![no_std]
 
-extern crate alloc;
-
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use solana_address::declare_id;
 
+pub mod error;
 pub mod instructions;
 pub use instructions::*;
 
@@ -19,7 +18,10 @@ pub mod state;
 
 // The clients use this crate as a library, for its types and constants.
 #[cfg(not(feature = "no-entrypoint"))]
-pinocchio::entrypoint!(process_instruction);
+pinocchio::program_entrypoint!(process_instruction);
+// Nothing allocates: every buffer is on the stack. An allocation panics.
+#[cfg(not(feature = "no-entrypoint"))]
+pinocchio::no_allocator!();
 #[cfg(not(feature = "no-entrypoint"))]
 pinocchio::nostd_panic_handler!();
 

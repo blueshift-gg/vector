@@ -153,7 +153,7 @@ fn take<'a>(data: &mut &'a [u8], len: usize) -> Result<&'a [u8], ProgramError> {
 /// # Safety
 ///
 /// Every bit pattern of `U`'s size must be a `U`.
-unsafe fn cast<U>(bytes: &[u8]) -> Option<&U> {
+pub(crate) unsafe fn cast<U>(bytes: &[u8]) -> Option<&U> {
     const { assert!(align_of::<U>() == 1) };
     // SAFETY: the length is `U`'s, its alignment is 1, and the caller
     // promises the bits are a `U`.
@@ -165,7 +165,7 @@ unsafe fn cast<U>(bytes: &[u8]) -> Option<&U> {
 /// # Safety
 ///
 /// As [`cast`].
-unsafe fn cast_mut<U>(bytes: &mut [u8]) -> Option<&mut U> {
+pub(crate) unsafe fn cast_mut<U>(bytes: &mut [u8]) -> Option<&mut U> {
     const { assert!(align_of::<U>() == 1) };
     // SAFETY: as in `cast`.
     (bytes.len() == size_of::<U>()).then(|| unsafe { &mut *bytes.as_mut_ptr().cast::<U>() })

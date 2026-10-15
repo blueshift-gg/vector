@@ -11,7 +11,8 @@ use solana_winternitz::{
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
-    rotating_advance_vector_digest, signer_digest, AdvanceSigner, Scheme, WINTERNITZ, XMSS,
+    rotating_advance_vector_digest, signer_digest, AdvanceSigner, Scheme, VectorError, WINTERNITZ,
+    XMSS,
 };
 
 use crate::common::{
@@ -75,7 +76,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let result = process_transaction(&mollusk, &[&passthrough], &accounts, &[]);
     assert_eq!(
         result.program_result,
-        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+        TransactionProgramResult::Failure(0, VectorError::NotAdvanced.into())
     );
     assert_eq!(result.resulting_accounts, accounts);
     // The signature covers the next key: another one does not verify.
@@ -269,7 +270,7 @@ fn winternitz_key_signs_once() {
     let (result, resulting, _) = send(&identity);
     assert_eq!(
         result,
-        TransactionProgramResult::Failure(0, ProgramError::InvalidInstructionData)
+        TransactionProgramResult::Failure(0, VectorError::KeyReused.into())
     );
     assert_eq!(resulting, accounts);
 
@@ -341,7 +342,7 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
     let (result, data, _) = send(5, 4, &identity);
     assert_eq!(
         result,
-        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+        TransactionProgramResult::Failure(0, VectorError::LeafUsed.into())
     );
     assert_eq!(data, account(5)[0].1.data);
     // Keeping the key moves the counter past the leaf.
@@ -357,7 +358,7 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
     let (result, ..) = send(last, last, &identity);
     assert_eq!(
         result,
-        TransactionProgramResult::Failure(0, ProgramError::InvalidInstructionData)
+        TransactionProgramResult::Failure(0, VectorError::TreeExhausted.into())
     );
     let (result, data, digest) = send(last, last, &next_key);
     assert_eq!(result, TransactionProgramResult::Success);
