@@ -110,11 +110,11 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
         ));
     }
 
-    // An account the program does not own has no scheme to read.
+    // An account the program does not own has no scheme to read, and no
+    // `Advance` can list it.
     let mut foreign = account;
     foreign.owner = Address::new_unique();
-    let passthrough = create_passthrough_instruction(&WINTERNITZ, &KEY, &[]);
-    let result = mollusk.process_instruction(&passthrough, &[(vector, foreign)]);
+    let result = mollusk.process_instruction(&advance, &[(vector, foreign)]);
     assert_eq!(
         result.program_result,
         ProgramResult::Failure(ProgramError::InvalidAccountOwner)

@@ -22,7 +22,6 @@ import {
   ADVANCE_DISCRIMINATOR,
   CLOSE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
-  SYSTEM_PASSTHROUGH_DISCRIMINATOR,
   WITHDRAW_DISCRIMINATOR,
 } from "./scheme.js";
 
@@ -119,7 +118,7 @@ export function createRotatingAdvanceInstruction(
  * its own `signerDigest` of the one `advanceMessage`.
  *
  * Accounts: `[vector_pda(writable)..., instructions_sysvar]`.
- * Data: `[ADVANCE_DISCRIMINATOR, nextKey..., signature...]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, {nextKey, signature}...]`.
  */
 export function createMultiAdvanceInstruction(
   signers: {
@@ -147,8 +146,7 @@ export function createMultiAdvanceInstruction(
     ],
     data: Buffer.concat([
       Uint8Array.of(ADVANCE_DISCRIMINATOR),
-      ...nextKeys,
-      ...signers.map((s) => s.signature),
+      ...signers.flatMap((s, i) => [nextKeys[i], s.signature]),
     ]),
   });
 }
@@ -156,106 +154,99 @@ export function createMultiAdvanceInstruction(
 // ── Passthrough ──────────────────────────────────────────────────────
 
 /**
+ * Who a passthrough signs as: a vector account, or with `system` its system
+ * PDA ({@link findSystemPda}) for what only a system account can do, such as
+ * a System `Transfer`.
+ */
+export type PassthroughSigner = { scheme: Scheme; identity: Uint8Array; system?: boolean };
+
+/**
  * Build a `passthrough`: run `subInstructions` as the vector account, which
- * signs each of them. It needs an `advance` for the same account earlier in
- * the transaction. That advance's signature covers the whole transaction, so
- * there is no second signature here.
- *
- * It points at the `advance` as the transaction's first instruction, with
- * this account first; {@link setAdvancePosition} points it elsewhere.
- *
- * Data: `[disc, advance_index(u8), account_index(u8), num_ixs(u8), {num_accounts(u8),
- * data_len(u16 LE), data}...]`.
+ * signs each of them. It needs an `advance` listing the same account earlier
+ * in the transaction. That advance's signature covers the whole transaction,
+ * so there is no second signature here.
  */
 export function createPassthroughInstruction(
   scheme: Scheme,
   identity: Uint8Array,
   subInstructions: TransactionInstruction[]
 ): TransactionInstruction {
-  const [vectorPda] = findVectorPda(scheme, identity);
-  return passthroughInstruction(
-    PASSTHROUGH_DISCRIMINATOR,
-    [
-      { pubkey: vectorPda, isSigner: false, isWritable: true },
-      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
-    ],
-    vectorPda,
-    subInstructions
-  );
+  return createMultiPassthroughInstruction([{ scheme, identity }], subInstructions);
 }
 
 /**
  * {@link createPassthroughInstruction}, signing as the account's system PDA
- * ({@link findSystemPda}) instead of the account: for what only a system
- * account can do, such as a System `Transfer`.
+ * instead of the account.
  */
 export function createSystemPassthroughInstruction(
   scheme: Scheme,
   identity: Uint8Array,
   subInstructions: TransactionInstruction[]
 ): TransactionInstruction {
-  const [vectorPda] = findVectorPda(scheme, identity);
-  const [systemPda] = findSystemPda(vectorPda);
-  return passthroughInstruction(
-    SYSTEM_PASSTHROUGH_DISCRIMINATOR,
-    [
-      { pubkey: vectorPda, isSigner: false, isWritable: false },
-      { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
-      { pubkey: systemPda, isSigner: false, isWritable: false },
-    ],
-    systemPda,
+  return createMultiPassthroughInstruction(
+    [{ scheme, identity, system: true }],
     subInstructions
   );
 }
 
 /**
- * Point a passthrough at its `advance`: `advanceIndex` is that instruction's
- * index in the transaction, `accountIndex` this account's index in it.
- * Needed when other instructions come before the `advance`, or the account
- * is not its first signer.
+ * Build a `passthrough` for several signers, each a vector account or its
+ * system PDA. The transaction's first `advance` must come earlier and list
+ * every one of the accounts.
+ *
+ * Accounts: `[instructions_sysvar, vector_pda..., sub_ix_program, ...sub_ix
+ * accounts...]`. Data: `[disc, num_signers(u8), system(u8)..., num_ixs(u8),
+ * {num_accounts(u8), data_len(u16 LE), data}...]`.
  */
-export function setAdvancePosition(
-  passthrough: TransactionInstruction,
-  advanceIndex: number,
-  accountIndex: number
-): void {
-  passthrough.data[1] = advanceIndex;
-  passthrough.data[2] = accountIndex;
-}
-
-function passthroughInstruction(
-  discriminator: number,
-  keys: { pubkey: Address; isSigner: boolean; isWritable: boolean }[],
-  signer: Address,
+export function createMultiPassthroughInstruction(
+  signers: PassthroughSigner[],
   subInstructions: TransactionInstruction[]
 ): TransactionInstruction {
+  if (signers.length > 255) {
+    throw new Error(`Too many signers: ${signers.length} (max 255)`);
+  }
   if (subInstructions.length > 255) {
     throw new Error(
       `Too many sub-instructions: ${subInstructions.length} (max 255)`
     );
   }
 
+  const keys = [
+    { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
+  ];
+  const addresses: Address[] = [];
+  for (const { scheme, identity, system = false } of signers) {
+    const [vectorPda] = findVectorPda(scheme, identity);
+    keys.push({ pubkey: vectorPda, isSigner: false, isWritable: false });
+    addresses.push(system ? findSystemPda(vectorPda)[0] : vectorPda);
+  }
+
   for (const ix of subInstructions) {
     keys.push({ pubkey: ix.programId, isSigner: false, isWritable: false });
     for (const meta of ix.keys) {
-      // Only the PDA receives its signer privilege during CPI.
+      // The program gives the signers their signature during CPI.
       keys.push({
         pubkey: meta.pubkey,
-        isSigner: meta.isSigner && !meta.pubkey.equals(signer),
+        isSigner: meta.isSigner && !addresses.some((a) => a.equals(meta.pubkey)),
         isWritable: meta.isWritable,
       });
     }
   }
 
-  let dataLen = 4;
+  const header = Uint8Array.of(
+    PASSTHROUGH_DISCRIMINATOR,
+    signers.length,
+    ...signers.map(({ system = false }) => Number(system)),
+    subInstructions.length
+  );
+  let dataLen = header.length;
   for (const ix of subInstructions) {
     dataLen += 1 + 2 + ix.data.length;
   }
 
   const data = new Uint8Array(dataLen);
-  data[0] = discriminator;
-  data[3] = subInstructions.length;
-  let off = 4;
+  data.set(header);
+  let off = header.length;
 
   for (const ix of subInstructions) {
     if (ix.keys.length > 255) {

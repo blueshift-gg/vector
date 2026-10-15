@@ -103,7 +103,7 @@ The program makes a signature that lands use its key up:
 
 - **Winternitz.** `Advance` replaces the key, and refuses the same key as the next one. A Winternitz account that only co-signs needs nothing but its `Advance`.
 - **XMSS.** The account stores the lowest leaf that may sign next. `Advance` refuses a lower leaf and moves the counter past the leaf that signed; a signer may skip leaves. Give the same key to keep it, with its counter; a new key starts again at leaf 0. After the last leaf, the key must change.
-- **Listed twice.** `Advance` holds every account it lists until it is done, so an account listed twice fails: one key cannot sign two digests in one `Advance`.
+- **Listed twice.** An account listed twice is advanced twice, and its second signature must verify against what the first stored: the next Winternitz key, or the XMSS counter past the first leaf. One key cannot sign two digests in one `Advance`.
 
 What the program cannot see is signing off chain. Never sign different authorizations with the same Winternitz key or XMSS leaf: once one of them lands the key or leaf is dead, but until then two signatures are public. The program does not check that a replacement key is fresh, so callers still manage key freshness and persistent signing state. Failed salt sampling and abandoned authorizations consume signing attempts too.
 
@@ -112,14 +112,14 @@ Rotation and actions are atomic. If any instruction fails, the nonce and key cha
 The workspace pins `solana-winternitz` to a git revision. Publish that crate and depend on the release before deploying. Build the program with `cargo build-sbf --manifest-path programs/vector/Cargo.toml`. It is undeployed.
 
 ### Digest Construction
-Every signer of an `Advance` approves the same message: the instructions sysvar buffer with the signatures cut out. The signatures are the tail of the `Advance` instruction's data, after any next keys, so that tail is the only thing missing:
+Every signer of an `Advance` approves the same message: the instructions sysvar buffer with the `Advance`'s data cut out after its discriminator. Each signer's digest then adds its own next key, so the signatures are the only bytes nobody signs:
 
 ```
-message = SHA256(buffer[..signatures_start] || buffer[advance_data_end..])
-digest  = SHA256(message || nonce || vector_address)
+message = SHA256(buffer[..advance_data_start + 1] || buffer[advance_data_end..])
+digest  = SHA256(message || nonce || vector_address || next_key)
 ```
 
-Each signer signs its own `digest`: the shared message, then its account's current nonce and address.
+Each signer signs its own `digest`: the shared message, then its account's current nonce, address and next key (empty for a key that never changes).
 
 Everything else in the buffer — the discriminator, the accounts, CPI payload, surrounding instructions, and sysvar framing — is committed to by the message.
 
@@ -128,12 +128,12 @@ One `Advance` takes any number of signers, of any schemes:
 
 ```
 accounts: [vector_1, ..., vector_n, instructions_sysvar]
-data:     [0, next_key_1 || ... || next_key_n, sig_1 || ... || sig_n]
+data:     [0, next_key_1 || sig_1 || ... || next_key_n || sig_n]
 ```
 
 A next key is present only for an account whose key rotates (Winternitz, XMSS).
 
-The program verifies one signature per account, taking each signature's length from its account's scheme, and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature. The `Passthrough` names that `Advance`'s index in the transaction and the account's index in it, so the program looks once instead of searching; the SDKs default to `0, 0` (the `Advance` first, the account its first signer) and `set_advance_position` / `setAdvancePosition` changes them, for a wallet that puts instructions first or a second signer.
+The program verifies one signature per account, taking each signature's length from its account's scheme, and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature. The `Passthrough` looks for the transaction's first `Advance` before it, wherever a wallet put it. Only one `Advance` can land in a transaction: each one's message covers the other's signatures, so neither can be signed first.
 
 A one-time key (Winternitz, XMSS) should sign last: its signature only lands if every other signer's does, and it must not be used for a second message.
 
@@ -143,25 +143,31 @@ Each instruction starts with its discriminator byte.
 | Disc | Name        | Top-Level Callable? | Authorisation                                |
 |------|-------------|---------------------|----------------------------------------------|
 | `0`  | Advance     | **only** top-level (CPI guarded) | offchain signature over the canonical digest |
-| `1`  | Passthrough | **only** top-level (CPI guarded) | the earlier Advance it names lists the vector PDA |
+| `1`  | Passthrough | **only** top-level (CPI guarded) | the first Advance, earlier, lists every signer |
 | `2`  | Initialize  | yes | payer funds creation; later calls grow an account too big for one (ML-DSA-44) |
 | `3`  | Withdraw    | only via Passthrough reentry | inherited from the authorising Advance       |
 | `4`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
-| `5`  | SystemPassthrough | **only** top-level (CPI guarded) | as Passthrough; signs as the account's system PDA |
 
-`Advance` carries the next key of each rotating account, then one signature per account — its handler verifies each, installs the digest as the next nonce (and the next key), and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler refuses to run unless the earlier `Advance` it names lists the vector PDA. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
+`Advance` carries the next key of each rotating account, then one signature per account — its handler verifies each, installs the digest as the next nonce (and the next key), and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler refuses to run unless the first `Advance`, earlier in the transaction, lists every account it signs for. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
 
 ## Passthrough CPI
-Vector acts as a narrow CPI gate in front of ordinary Solana execution. Its role is limited to verifying that the current transaction exactly matches the transaction that was signed offchain against the current Vector state. Once `Advance`'s check succeeds, a sibling top-level `Passthrough` instruction in the same transaction replays its embedded sub-instructions, taking its trailing accounts along with the embedded instruction data and performing CPI actions for the owner. The passthrough handler authorises itself by reading, from the instructions sysvar, the earlier `Advance` its data names and checking it lists the vector PDA — transaction atomicity guarantees that advance verified, or the whole transaction aborted.
+Vector acts as a narrow CPI gate in front of ordinary Solana execution. Its role is limited to verifying that the current transaction exactly matches the transaction that was signed offchain against the current Vector state. Once `Advance`'s check succeeds, a sibling top-level `Passthrough` instruction in the same transaction replays its embedded sub-instructions, taking its trailing accounts along with the embedded instruction data and performing CPI actions for the owner. The passthrough handler authorises itself by reading, from the instructions sysvar, the first `Advance` before it and checking it lists every signer — transaction atomicity guarantees that advance verified, or the whole transaction aborted.
 
 After Passthrough CPI, the downstream instruction flow proceeds as normal. As Vector does not alter downstream semantics, it composes naturally with all existing Solana instruction patterns, including those that depend on temporary authority transfer or intra-transaction liquidity, such as flash loans.
 
 Although `passthrough` only replays its own embedded sub-instructions, the digest `advance` verifies covers every top-level instruction in the hosting transaction — including the passthrough's data and account layout. Pre- and post-instructions placed alongside `advance` are committed to by the same signature even though Vector never executes them itself. This is what lets a compute-budget instruction, balance check, or memo coexist with a Vector-authorized payload without weakening the signer's authority — provided they are part of the buffer at signing time; a relayer cannot add them afterwards without invalidating the signature.
 
-### SystemPassthrough
-The vector account belongs to the program, so it cannot be the `from` of a System `Transfer`, or `Allocate` and `Assign` like a wallet. Each account therefore has a system PDA, `[vector address, system_bump]` under the program and owned by the System program; `find_system_pda` / `findSystemPda` derives it. `SystemPassthrough` is `Passthrough` signing as that PDA instead: accounts `[vector, instructions_sysvar, system_pda, ...]`, the same data. The program derives the PDA from the vector's address and its stored `system_bump` and refuses any other account (about 1,500 CUs).
+### Signers
+```
+accounts: [instructions_sysvar, vector_1, ..., vector_n, {program, accounts...}...]
+data:     [1, n, system_1, ..., system_n, num_ixs, {num_accounts, data_len(u16), data}...]
+```
 
-For each sub-instruction in the passthrough payload, Vector promotes any account whose address matches the vector PDA (or the system PDA, for `SystemPassthrough`) to `is_signer = true` before invoking. This is what lets `Close`/`Withdraw` pass their `vector.is_signer()` gate when reached via re-entry, and lets arbitrary downstream programs treat the PDA as the signer for authority operations (e.g. SPL Token `set_authority`).
+One `Passthrough` signs for any number of accounts, each listed in the `Advance`. Each signs as its vector account (`system = 0`) or as its system PDA (`system = 1`); list an account twice to sign as both.
+
+The vector account belongs to the program, so it cannot be the `from` of a System `Transfer`, or `Allocate` and `Assign` like a wallet. Each account therefore has a system PDA, `[vector address, system_bump]` under the program and owned by the System program; `find_system_pda` / `findSystemPda` derives it. The program derives it from the vector's address and stored `system_bump` (about 1,500 CUs), and never takes it from the caller.
+
+For each sub-instruction in the passthrough payload, Vector promotes any account whose address matches one of its signers to `is_signer = true`, and signs with the seeds of those signers only, before invoking. This is what lets `Close`/`Withdraw` pass their `vector.is_signer()` gate when reached via re-entry, and lets arbitrary downstream programs treat the PDA as the signer for authority operations (e.g. SPL Token `set_authority`).
 
 ## Security Model
 The signer is authorizing a concrete transaction buffer, not a reusable nonce and not a partially specified intent. Since the signed digest is reconstructed from the instruction sysvar onchain, any material change to the transaction changes the digest and invalidates the signature.
@@ -287,8 +293,8 @@ The `vector-core` crate provides off-chain helpers for constructing Vector trans
 - `find_system_pda(&vector)` — the account's system PDA.
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
 - `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature. `create_multi_advance_instruction(&[(AdvanceSigner::new(&scheme, identity), signature)])` does the same for several signers. For Winternitz and XMSS use `create_rotating_advance_instruction(&scheme, identity, next_key, signature)`.
-- `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. `create_system_passthrough_instruction` signs as the system PDA; `set_advance_position(&mut ix, advance_index, account_index)` points either at its `Advance`.
-- `advance_vector_digest(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify. For Winternitz and XMSS use `rotating_advance_vector_digest`. With several signers, compute `advance_message(&[AdvanceSigner::new(&scheme, identity)], pre, post, fee_payer)` once, then `signer_digest(&message, nonce, &vector)` for each.
+- `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. `create_system_passthrough_instruction` signs as the system PDA; `create_multi_passthrough_instruction(&[PassthroughSigner::vector(&scheme, identity), PassthroughSigner::system(..)], sub_ixs)` signs for several.
+- `advance_vector_digest(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify. For Winternitz and XMSS use `rotating_advance_vector_digest`. With several signers, compute `advance_message(&[AdvanceSigner::new(&scheme, identity)], pre, post, fee_payer)` once, then `signer_digest(&message, nonce, &vector, next_key)` for each.
 - `sign_advance_instruction_ed25519(signing_key, nonce, pre, post, fee_payer)` — sign with Ed25519.
 - `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post, fee_payer)` — sign with EIP-191 (envelope, 65-byte sig).
 - `sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, pre, post, fee_payer)` — sign with plain secp256k1 ECDSA (64-byte sig).
@@ -308,8 +314,8 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `findSystemPda(vector)` — the account's system PDA.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.
 - `createAdvanceInstruction(scheme, identity, signature)` — assemble from precomputed signature (signature only, no embedded payload). `createMultiAdvanceInstruction([{ scheme, identity, nextKey?, signature }])` does the same for several signers. For Winternitz and XMSS use `createRotatingAdvanceInstruction(scheme, identity, nextKey, signature)`.
-- `createPassthroughInstruction(scheme, identity, subIxs)` — assemble the passthrough instruction that replays `subIxs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. `createSystemPassthroughInstruction` signs as the system PDA; `setAdvancePosition(ix, advanceIndex, accountIndex)` points either at its `Advance`.
-- `advanceVectorDigest(scheme, nonce, identity, pre, post, feePayer?)` — recompute the digest. For Winternitz and XMSS use `rotatingAdvanceVectorDigest`. With several signers, `advanceMessage([{ scheme, identity, nextKey? }], pre, post, feePayer?)` once, then `signerDigest(message, nonce, vector)` for each.
+- `createPassthroughInstruction(scheme, identity, subIxs)` — assemble the passthrough instruction that replays `subIxs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. `createSystemPassthroughInstruction` signs as the system PDA; `createMultiPassthroughInstruction([{ scheme, identity, system? }], subIxs)` signs for several.
+- `advanceVectorDigest(scheme, nonce, identity, pre, post, feePayer?)` — recompute the digest. For Winternitz and XMSS use `rotatingAdvanceVectorDigest`. With several signers, `advanceMessage([{ scheme, identity, nextKey? }], pre, post, feePayer?)` once, then `signerDigest(message, nonce, vector, nextKey?)` for each.
 - `signAdvanceInstructionEd25519(signingKey, nonce, pre, post, feePayer?)` — sign with Ed25519.
 - `signAdvanceInstructionEip191(privateKey, nonce, pre, post, feePayer?)` — sign with EIP-191 secp256k1.
 - `signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer?)` — sign with plain secp256k1 ECDSA.

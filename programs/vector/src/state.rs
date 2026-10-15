@@ -22,8 +22,8 @@ pub const VECTOR_SEED: &[u8] = b"vector";
 /// ```
 ///
 /// The system PDA, `[vector address, system_bump]`, belongs to the System
-/// program: `SystemPassthrough` signs as it, for what only a system account
-/// can do.
+/// program: `Passthrough` can sign as it, for what only a system account can
+/// do.
 ///
 /// The pad keeps the identity at a multiple of 4 in the account: Falcon-512
 /// and ML-DSA-44 read their prepared key in place.

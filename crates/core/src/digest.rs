@@ -36,7 +36,7 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
 }
 
 /// The message every signer of one advance approves: the SHA-256 of the
-/// instructions sysvar without the advance's signatures.
+/// instructions sysvar without the advance's data.
 ///
 /// `signers` are the advance's, in order. The advance goes after
 /// `pre_instructions`. A passthrough is one of the pre or post instructions,
@@ -49,6 +49,7 @@ pub fn advance_message(
     post_instructions: &[Instruction],
     fee_payer: Option<&Address>,
 ) -> [u8; 32] {
+    // Only the length of the advance's data shows: it moves what follows.
     let placeholders: Vec<Vec<u8>> = signers
         .iter()
         .map(|signer| vec![0; signer.scheme.signature_len])
@@ -90,27 +91,34 @@ pub fn advance_message(
 
     // Header: num_instructions (u16) + one offset u16 per instruction.
     // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-    // u16 data_len + data. The signatures are the end of the data.
+    // u16 data_len + data. Everything after the discriminator is cut.
     let offset_pos = 2 + 2 * advance_index;
     let offset = u16::from_le_bytes([buffer[offset_pos], buffer[offset_pos + 1]]) as usize;
     let advance = &all[advance_index];
     let data_end = offset + 2 + 33 * advance.accounts.len() + 32 + 2 + advance.data.len();
-    let signatures_len: usize = placeholders.iter().map(Vec::len).sum();
+    let cut = advance.data.len() - 1;
 
     let mut hasher = Sha256::new();
-    hasher.update(&buffer[..data_end - signatures_len]);
+    hasher.update(&buffer[..data_end - cut]);
     hasher.update(&buffer[data_end..]);
     hasher.finalize().into()
 }
 
 /// What one signer signs, and the account's next nonce: `SHA256(message ||
-/// nonce || vector)`, with `message` from [`advance_message`] and `vector`
-/// the signer's account address.
-pub fn signer_digest(message: &[u8; 32], nonce: &[u8; 32], vector: &Address) -> [u8; 32] {
+/// nonce || vector || next_key)`, with `message` from [`advance_message`],
+/// `vector` the signer's account address and `next_key` its
+/// [`AdvanceSigner::next_key`].
+pub fn signer_digest(
+    message: &[u8; 32],
+    nonce: &[u8; 32],
+    vector: &Address,
+    next_key: &[u8],
+) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(message);
     hasher.update(nonce);
     hasher.update(vector);
+    hasher.update(next_key);
     hasher.finalize().into()
 }
 
@@ -158,7 +166,12 @@ pub fn rotating_advance_vector_digest(
         next_key,
     };
     let message = advance_message(&[signer], pre_instructions, post_instructions, fee_payer);
-    signer_digest(&message, nonce, &find_vector_pda(scheme, identity).0)
+    signer_digest(
+        &message,
+        nonce,
+        &find_vector_pda(scheme, identity).0,
+        next_key,
+    )
 }
 
 /// The digest of an advance with nothing around it. Landing that advance only

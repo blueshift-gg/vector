@@ -66,7 +66,7 @@ export type AdvanceSigner = { scheme: Scheme; identity: Uint8Array; nextKey?: Ui
 
 /**
  * The message every signer of one advance approves: the SHA-256 of the
- * instructions sysvar without the advance's signatures.
+ * instructions sysvar without the advance's data.
  *
  * The advance goes after `preInstructions`. A passthrough is one of the pre
  * or post instructions, so the message covers it. `feePayer` only matters
@@ -95,31 +95,34 @@ export function advanceMessage(
   writeU16LE(buffer, advanceIndex, buffer.length - 2);
 
   // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-  // u16 data_len + data. The signatures are the end of the data.
+  // u16 data_len + data. Everything after the discriminator is cut.
   const offset = readU16LE(buffer, 2 + 2 * advanceIndex);
   const dataEnd = offset + 2 + 33 * advanceIx.keys.length + 32 + 2 + advanceIx.data.length;
-  const signaturesLen = signers.reduce((n, s) => n + s.scheme.signatureLen, 0);
+  const cut = advanceIx.data.length - 1;
 
   const h = createHash("sha256");
-  h.update(buffer.subarray(0, dataEnd - signaturesLen));
+  h.update(buffer.subarray(0, dataEnd - cut));
   h.update(buffer.subarray(dataEnd));
   return new Uint8Array(h.digest());
 }
 
 /**
  * What one signer signs, and the account's next nonce: `SHA256(message ||
- * nonce || vector)`, with `message` from {@link advanceMessage} and `vector`
- * the signer's account address.
+ * nonce || vector || nextKey)`, with `message` from {@link advanceMessage},
+ * `vector` the signer's account address and `nextKey` its
+ * {@link AdvanceSigner} `nextKey`.
  */
 export function signerDigest(
   message: Uint8Array,
   nonce: Uint8Array,
-  vector: Address
+  vector: Address,
+  nextKey: Uint8Array = new Uint8Array()
 ): Uint8Array {
   const h = createHash("sha256");
   h.update(message);
   h.update(nonce);
   h.update(vector.toBytes());
+  h.update(nextKey);
   return new Uint8Array(h.digest());
 }
 
@@ -164,7 +167,7 @@ export function rotatingAdvanceVectorDigest(
     postInstructions,
     feePayer
   );
-  return signerDigest(message, nonce, findVectorPda(scheme, identity)[0]);
+  return signerDigest(message, nonce, findVectorPda(scheme, identity)[0], nextKey);
 }
 
 /**

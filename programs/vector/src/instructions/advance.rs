@@ -1,8 +1,5 @@
-use alloc::vec::Vec;
-
 use pinocchio::{
-    account::RefMut, error::ProgramError, sysvars::instructions::Instructions, AccountView,
-    ProgramResult,
+    error::ProgramError, sysvars::instructions::Instructions, AccountView, ProgramResult,
 };
 use solana_nostd_sha256::hashv;
 
@@ -13,31 +10,32 @@ use crate::{instructions::top_level_only, state::VectorAccount};
 /// Verify that every listed account signed this transaction, and move each
 /// account to its next nonce. It runs no CPI: pair it with `Passthrough`.
 ///
-/// Every signer signs the same message, the whole transaction with the
-/// signatures left out. The signatures are the tail of this instruction's
-/// data, so they are the only bytes of the transaction that nobody signs.
+/// Every signer signs the same message, the whole transaction with this
+/// instruction's data left out. Each signer's digest then covers its own
+/// next key, so the signatures are the only bytes nobody signs.
 ///
-/// > Borrow every account, which refuses one listed twice
-/// > Hash the transaction without the signatures into the message
+/// > Hash the transaction without this instruction's data into the message
 /// > For each account, verify its signature over
-/// >   `SHA256(message || nonce || address)`
+/// >   `SHA256(message || nonce || address || next_key)`
 /// > Store that digest as the account's next nonce, and its next key
+///
+/// An account listed twice is advanced twice, and needs a signature for
+/// each: the second is over the nonce the first stored.
 ///
 /// Accounts:
 ///
 /// 1..n. vector:             [mut]   one per signer
 /// n+1.  instructions_sysvar
 ///
-/// Parameters:
+/// Parameters, for each account in order:
 ///
-/// - next_keys: one per account, in order, each as long as its account's
-///   scheme says (none for a scheme whose key never changes)
-/// - signatures: one per account, in order, each as long as its account's
-///   scheme says
+/// - next_key: as long as its scheme says (none for a scheme whose key never
+///   changes)
+/// - signature: as long as its scheme says
 ///
 /// Account Checks:
 /// - Vector: at least one, each owned by the program, complete, of a known
-///   scheme, and listed once
+///   scheme
 /// - InstructionsSysvar: the instructions sysvar
 pub struct Advance<'a> {
     vectors: &'a mut [AccountView],
@@ -72,38 +70,26 @@ impl<'a> Advance<'a> {
     pub const DISCRIMINATOR: &'a u8 = &0;
 
     pub fn process(&mut self) -> ProgramResult {
-        // Every borrow is held to the end, so an account listed twice fails.
-        let mut accounts = self
-            .vectors
-            .iter_mut()
-            .map(|vector| Ok((vector.address().to_bytes(), VectorAccount::borrow(vector)?)))
-            .collect::<Result<Vec<([u8; 32], RefMut<'_, [u8]>)>, ProgramError>>()?;
+        let message = message(self.instructions_sysvar, self.data.len())?;
+        let mut data = self.data;
 
-        let mut next_keys_len = 0;
-        for (_, data) in &accounts {
-            next_keys_len += VectorAccount::scheme(data)?.next_key_len();
-        }
-        let (mut next_keys, mut signatures) = self
-            .data
-            .split_at_checked(next_keys_len)
-            .ok_or(ProgramError::InvalidInstructionData)?;
-        let message = message(self.instructions_sysvar, signatures.len())?;
+        for vector in self.vectors.iter_mut() {
+            let address = vector.address().to_bytes();
+            let mut account = VectorAccount::borrow(vector)?;
+            let scheme = VectorAccount::scheme(&account)?;
+            let (header, identity) = VectorAccount::split(&mut account)?;
+            let next_key = take(&mut data, scheme.next_key_len())?;
+            let signature = take(&mut data, scheme.signature_len())?;
 
-        for (address, data) in &mut accounts {
-            let scheme = VectorAccount::scheme(data)?;
-            let (account, identity) = VectorAccount::split(data)?;
-            let next_key = take(&mut next_keys, scheme.next_key_len())?;
-            let signature = take(&mut signatures, scheme.signature_len())?;
-
-            // The message is the same for every signer. The nonce and the
-            // address make the digest this account's own.
-            let digest = hashv(&[&message, &account.nonce, address]);
+            // The message is the same for every signer. The nonce, the
+            // address and the next key make the digest this account's own.
+            let digest = hashv(&[&message, &header.nonce, &address, next_key]);
             scheme.advance(identity, &digest, signature, next_key)?;
-            account.nonce = digest;
+            header.nonce = digest;
         }
 
         // The data was next keys and signatures and nothing else.
-        if !signatures.is_empty() {
+        if !data.is_empty() {
             return Err(ProgramError::InvalidInstructionData);
         }
         Ok(())
@@ -111,18 +97,15 @@ impl<'a> Advance<'a> {
 }
 
 /// The SHA-256 of the transaction with the executing `Advance`'s last
-/// `signatures_len` bytes, its signatures, cut out.
-fn message(
-    instructions_sysvar: &AccountView,
-    signatures_len: usize,
-) -> Result<[u8; 32], ProgramError> {
+/// `cut` bytes cut out.
+fn message(instructions_sysvar: &AccountView, cut: usize) -> Result<[u8; 32], ProgramError> {
     let instructions = Instructions::try_from(instructions_sysvar)?;
     let data = instructions_sysvar.try_borrow()?;
     let advance = instructions.load_instruction_at(instructions.load_current_index().into())?;
 
     let advance_data = advance.get_instruction_data();
     let end = advance_data.as_ptr() as usize - data.as_ptr() as usize + advance_data.len();
-    Ok(hashv(&[&data[..end - signatures_len], &data[end..]]))
+    Ok(hashv(&[&data[..end - cut], &data[end..]]))
 }
 
 /// Take the next `len` bytes off the front of `data`.

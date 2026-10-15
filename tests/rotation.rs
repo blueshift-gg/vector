@@ -280,16 +280,17 @@ fn winternitz_key_signs_once() {
         expected_advanced_data(digest, &WINTERNITZ, &identity, &next_key)
     );
 
-    // Listed twice in one `Advance`, the key would sign two digests. The
-    // second borrow of the account fails.
+    // Listed twice in one `Advance`, the account is advanced twice: the
+    // second signature must be by the key the first stored, so the key
+    // cannot sign two digests.
     let signer = AdvanceSigner {
         scheme: &WINTERNITZ,
         identity: &identity,
         next_key: &next_key,
     };
     let message = advance_message(&[signer, signer], &[], &[], None);
-    let first = signer_digest(&message, &NONCE, &vector);
-    let second = signer_digest(&message, &first, &vector);
+    let first = signer_digest(&message, &NONCE, &vector, &next_key);
+    let second = signer_digest(&message, &first, &vector, &next_key);
     let first = key.sign_at(0, &first, fill(&mut state)).unwrap();
     let second = key.sign_at(0, &second, fill(&mut state)).unwrap();
     let twice = create_multi_advance_instruction(&[
@@ -299,7 +300,7 @@ fn winternitz_key_signs_once() {
     let result = process_transaction(&mollusk, &[&twice], &accounts, &[]);
     assert_eq!(
         result.program_result,
-        TransactionProgramResult::Failure(0, ProgramError::AccountBorrowFailed)
+        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
     );
     assert_eq!(result.resulting_accounts, accounts);
 }

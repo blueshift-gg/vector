@@ -1,5 +1,5 @@
 //! Several signers in one `Advance`. Each signs the same message: the
-//! transaction with the signatures cut out.
+//! transaction with the `Advance`'s data cut out.
 
 use ed25519_dalek::{Signer, SigningKey};
 use k256::ecdsa::{
@@ -14,8 +14,7 @@ use solana_program_error::ProgramError;
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
-    set_advance_position, sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme,
-    ED25519, SECP256K1,
+    sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, ED25519, SECP256K1,
 };
 
 use crate::common::{
@@ -71,12 +70,10 @@ impl World {
     fn alice_and_bob(&self) -> (Vec<Instruction>, [u8; 32], [u8; 32]) {
         let alice = ed25519_pubkey(&self.alice);
         let bob = secp256k1_compressed_pubkey(&self.bob);
-        let mut post = [
+        let post = [
             self.withdraw(&ED25519, &alice, 1_000_000_000),
             self.withdraw(&SECP256K1, &bob, 2_000_000_000),
         ];
-        // Bob is the `Advance`'s second account.
-        set_advance_position(&mut post[1], 0, 1);
         let message = advance_message(
             &[
                 AdvanceSigner::new(&ED25519, &alice),
@@ -86,8 +83,9 @@ impl World {
             &post,
             None,
         );
-        let alice_digest = signer_digest(&message, &NONCE, &find_vector_pda(&ED25519, &alice).0);
-        let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0);
+        let alice_digest =
+            signer_digest(&message, &NONCE, &find_vector_pda(&ED25519, &alice).0, &[]);
+        let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0, &[]);
         let alice_signature = self.alice.sign(&alice_digest).to_bytes();
         let bob_signature: Secp256k1Signature = self.bob.sign_prehash(&bob_digest).unwrap();
         let advance = create_multi_advance_instruction(&[
@@ -199,8 +197,14 @@ fn every_change_to_the_transaction_is_rejected() {
             let key = transaction[i].accounts[account].pubkey;
             if ![vector_core::INSTRUCTIONS_SYSVAR_ID, vector_core::PROGRAM_ID].contains(&key) {
                 let mut changed = transaction.clone();
+                let writable = changed
+                    .iter()
+                    .flat_map(|ix| &ix.accounts)
+                    .any(|meta| meta.pubkey == key && meta.is_writable);
                 for meta in changed.iter_mut().flat_map(|ix| &mut ix.accounts) {
-                    meta.is_writable ^= meta.pubkey == key;
+                    if meta.pubkey == key {
+                        meta.is_writable = !writable;
+                    }
                 }
                 world.assert_rejected(&changed, &what);
             }

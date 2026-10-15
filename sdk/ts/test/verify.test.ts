@@ -198,7 +198,7 @@ describe("sign → verify round trips", () => {
       MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
     );
     expect(Buffer.from(pinned).toString("hex")).toBe(
-      "12559b843a7b96dc782728dae8b1e4040ca5227b10bb47fbfc8b91bf8b16a22f"
+      "da5f342afda099bf54e78072cfb1c5a6490171bafe756ec6c94e700321e16440"
     );
   });
 });

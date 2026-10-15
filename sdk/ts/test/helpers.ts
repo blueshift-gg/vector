@@ -34,7 +34,6 @@ import {
   advanceVectorDigest,
   fetchVectorAccount,
   createPassthroughInstruction,
-  setAdvancePosition,
 } from "../src/index.js";
 
 // ── Address shims (spl-token@0.4 expects v1 API) ─────────────────────
@@ -204,7 +203,6 @@ export async function splMintAuthorityRoundTrip(
   //    must appear before `advance` in the actual transaction in the
   //    same order.
   const passthroughIx = createPassthroughInstruction(scheme, identity, [pdaToEoa]);
-  setAdvancePosition(passthroughIx, extraPreInstructions.length, 0);
   const postIxs = [passthroughIx, mintToIx, eoaToPda];
   const advanceIx = signAdvance(currentNonce, extraPreInstructions, postIxs);
   await sendTx(

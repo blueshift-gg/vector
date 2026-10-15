@@ -13,7 +13,6 @@ export const PASSTHROUGH_DISCRIMINATOR = 1;
 export const INITIALIZE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
 export const CLOSE_DISCRIMINATOR = 4;
-export const SYSTEM_PASSTHROUGH_DISCRIMINATOR = 5;
 
 /** The Vector program: one program for every signing scheme. */
 export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
@@ -143,7 +142,7 @@ export function findVectorPda(
 
 /**
  * Derive the vector account's system PDA, `[vector]`, and its bump. It
- * belongs to the System program; `SystemPassthrough` signs as it.
+ * belongs to the System program; a passthrough can sign as it.
  */
 export function findSystemPda(vector: Address): [Address, number] {
   return findProgramAddressSync([vector.toBytes()], PROGRAM_ID);

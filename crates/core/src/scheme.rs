@@ -18,7 +18,6 @@ pub const ADVANCE_DISCRIMINATOR: u8 = *vector::Advance::DISCRIMINATOR;
 pub const CLOSE_DISCRIMINATOR: u8 = *vector::Close::DISCRIMINATOR;
 pub const WITHDRAW_DISCRIMINATOR: u8 = *vector::Withdraw::DISCRIMINATOR;
 pub const PASSTHROUGH_DISCRIMINATOR: u8 = *vector::Passthrough::DISCRIMINATOR;
-pub const SYSTEM_PASSTHROUGH_DISCRIMINATOR: u8 = *vector::SystemPassthrough::DISCRIMINATOR;
 
 pub use vector::state::VECTOR_SEED as VECTOR_PDA_SEED;
 
@@ -72,7 +71,7 @@ pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
 }
 
 /// Derive the vector account's system PDA, `[vector]`, and its bump. It
-/// belongs to the System program; `SystemPassthrough` signs as it.
+/// belongs to the System program; a passthrough can sign as it.
 pub fn find_system_pda(vector: &Address) -> (Address, u8) {
     Address::find_program_address(&[vector.as_ref()], &PROGRAM_ID)
 }
