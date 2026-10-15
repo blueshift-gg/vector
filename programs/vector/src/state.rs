@@ -60,6 +60,16 @@ impl VectorAccount {
         schemes::scheme(id).map_err(|_| ProgramError::InvalidAccountData)
     }
 
+    /// The header at the start of account data.
+    pub fn header(data: &[u8]) -> Result<&Self, ProgramError> {
+        let header = data
+            .get(..Self::HEADER_LEN)
+            .ok_or(ProgramError::AccountDataTooSmall)?;
+        // SAFETY: `header` is `HEADER_LEN` bytes, and `Self` is `repr(C)` with
+        // alignment 1, no padding and no invalid bit patterns.
+        Ok(unsafe { &*header.as_ptr().cast::<Self>() })
+    }
+
     /// Split account data into the header and the identity bytes after it.
     pub fn split(data: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ProgramError> {
         let (header, identity) = data
