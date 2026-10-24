@@ -24,6 +24,13 @@ import {
   createWithdrawSubinstruction,
   signAdvanceInstructionEd25519,
   advanceVectorDigest,
+  closeNonceAccount,
+  createNonceAccount,
+  getNonce,
+  NonceAccount,
+  NoncedTransaction,
+  systemAccount,
+  NONCE_ACCOUNT_LEN,
 } from "../src/index.js";
 import {
   RPC_URL,
@@ -186,6 +193,80 @@ describe("vector-ed25519", () => {
 
     expect(Number(await connection.getBalance(systemPda))).toBe(3_000_000);
     expect(Number(await connection.getBalance(receiver))).toBe(2_000_000);
+  });
+
+  test("durable nonce flow: sign offline, relay a plain Transaction", async () => {
+    // A cold key with its vector, a nonce account and SOL at its system account.
+    const authority = await Keypair.generate();
+    const nonceKeypair = await Keypair.generate();
+    const nonceAccount = nonceKeypair.address;
+    const recipient = (await Keypair.generate()).address;
+    const lamports = await connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_LEN);
+    const setup = createNonceAccount({
+      fromPubkey: feePayer.address,
+      noncePubkey: nonceAccount,
+      authorizedPubkey: authority.address,
+      lamports,
+    });
+    setup.instructions.unshift(
+      createInitializeEd25519(feePayer.address, authority.address.toBytes()),
+      SystemProgram.transfer({
+        fromPubkey: feePayer.address,
+        toPubkey: systemAccount(authority.address),
+        lamports: 10_000_000,
+      })
+    );
+    await sendTx(connection, setup, [feePayer, nonceKeypair]);
+    // It signs from the slot after its creation.
+    const { created } = NonceAccount.fromAccountData(
+      (await connection.getAccountInfo(nonceAccount))!.data
+    );
+    while (BigInt(await connection.getSlot()) <= created) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Offline: the transfer names the authority, as under durable nonces.
+    const signOver = async (amount: number) => {
+      const nonce = await getNonce(connection, nonceAccount);
+      const tx = new NoncedTransaction({
+        feePayer: feePayer.address,
+        nonceInfo: { nonce, nonceAccount, authority: authority.address },
+      }).add(
+        SystemProgram.transfer({ fromPubkey: authority.address, toPubkey: recipient, lamports: amount })
+      );
+      await tx.partialSign(authority);
+      return tx;
+    };
+    const signed = await signOver(1_000_000);
+    await expect(signed.partialSign(authority, feePayer)).rejects.toThrow("signs alone");
+    const bytes = await signed.serialize({ requireAllSignatures: false });
+
+    // The relayer: a plain Transaction, a recent blockhash, its own signature.
+    const relay = async () => {
+      const tx = Transaction.from(bytes);
+      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      await tx.partialSign(feePayer);
+      const signature = await connection.sendRawTransaction(await tx.serialize());
+      return connection.confirmTransaction(signature, "confirmed");
+    };
+    expect((await relay()).value.err).toBeNull();
+    expect(await connection.getBalance(recipient)).toBe(1_000_000n);
+    // The same signed message never lands twice.
+    await expect(relay()).rejects.toThrow(/missing required signature/);
+
+    // Or in one process, with web3.js's own sender.
+    await sendTx(connection, await signOver(2_000_000), [feePayer]);
+    expect(await connection.getBalance(recipient)).toBe(3_000_000n);
+
+    // Closing it returns the rent, as `nonceWithdraw` would.
+    const close = new NoncedTransaction({
+      feePayer: feePayer.address,
+      nonceInfo: { nonce: await getNonce(connection, nonceAccount), nonceAccount, authority: authority.address },
+    }).add(closeNonceAccount({ noncePubkey: nonceAccount, authorizedPubkey: authority.address, toPubkey: recipient }));
+    await close.partialSign(authority);
+    await sendTx(connection, close, [feePayer]);
+    expect(await connection.getAccountInfo(nonceAccount)).toBeNull();
+    expect(await connection.getBalance(recipient)).toBe(3_000_000n + BigInt(lamports));
   });
 
   test("close vector account via advance", async () => {

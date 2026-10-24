@@ -7,7 +7,7 @@ use solana_instruction::Instruction;
 
 use crate::digest::advance_message;
 use crate::instructions::AdvanceSigner;
-use crate::scheme::{find_vector_pda, Scheme, VectorAccount};
+use crate::scheme::{find_vector_pda, VectorAccount};
 
 /// Why an offline check failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,18 +41,22 @@ impl std::error::Error for VerifyError {}
 
 /// Verify an advance signature: recompute the digest and check `signature`
 /// over it, as the program would for a new account. Returns the digest,
-/// which is the account's next nonce.
+/// which is the next nonce of the signer's nonce account, or of its own.
 ///
-/// `fee_payer` is as in [`advance_vector_digest`](crate::advance_vector_digest).
+/// `nonce` is the one the signer signed over, [`signed_nonce`](crate::signed_nonce)
+/// for a nonce account; `fee_payer` is as in
+/// [`advance_vector_digest`](crate::advance_vector_digest).
 pub fn verify_advance_signature(
-    scheme: &Scheme,
-    identity: &[u8],
+    signer: AdvanceSigner,
     nonce: &[u8; 32],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
     fee_payer: Option<&Address>,
     signature: &[u8],
 ) -> Result<[u8; 32], VerifyError> {
+    let AdvanceSigner {
+        scheme, identity, ..
+    } = signer;
     if scheme.next_key_len != 0 {
         return Err(VerifyError::RotatingKey);
     }
@@ -73,12 +77,7 @@ pub fn verify_advance_signature(
     let stored = &mut account[VectorAccount::HEADER_LEN..];
     (scheme.initialize)(identity, stored).map_err(|_| VerifyError::InvalidIdentity)?;
 
-    let message = advance_message(
-        &[AdvanceSigner::new(scheme, identity)],
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
+    let message = advance_message(&[signer], pre_instructions, post_instructions, fee_payer);
     let (vector, _) = find_vector_pda(scheme, identity);
     let mut nonce = *nonce;
     (scheme.advance)(

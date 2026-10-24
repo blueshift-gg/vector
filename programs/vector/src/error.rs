@@ -19,6 +19,16 @@ pub enum VectorError {
     LeafUsed,
     /// XMSS: the tree's last leaf signed, and the key was not replaced.
     TreeExhausted,
+    /// `Advance` or `Close`: the nonce account belongs to another vector.
+    ForeignNonce,
+    /// `InitializeNonce`: a Winternitz or XMSS vector signs over its own nonce
+    /// only. Its key changes with every signature, so two nonces in flight
+    /// would be two signatures by one key.
+    KeyRotates,
+    /// `Advance` or `Close`: the nonce account was created in this slot. It
+    /// signs and closes from the next, so it is never created again at a
+    /// nonce it held.
+    FreshNonce,
 }
 
 impl From<VectorError> for ProgramError {

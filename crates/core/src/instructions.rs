@@ -7,8 +7,8 @@ use solana_instruction::{AccountMeta, Instruction};
 
 use crate::scheme::{
     find_system_pda, find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR,
-    INITIALIZE_DISCRIMINATOR, INSTRUCTIONS_SYSVAR_ID, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID,
-    SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
+    INITIALIZE_DISCRIMINATOR, INITIALIZE_NONCE_DISCRIMINATOR, INSTRUCTIONS_SYSVAR_ID,
+    PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
 };
 
 /// Build an `initialize` instruction for `identity`, the key the account is
@@ -62,13 +62,17 @@ pub fn create_initialize_instructions(
         .collect()
 }
 
-/// One signer of an `advance`: its account, and for a scheme whose key
-/// rotates (Winternitz, XMSS), the key that signs next.
+/// One signer of an `advance`: its account, the nonce account it signs
+/// over if not its own nonce, and for a scheme whose key rotates
+/// (Winternitz, XMSS), the key that signs next.
 #[derive(Clone, Copy, Debug)]
 pub struct AdvanceSigner<'a> {
     pub scheme: &'a Scheme,
     /// The key the account was created with.
     pub identity: &'a [u8],
+    /// A nonce account of the vector, whose nonce this
+    /// signature is over and moves; `None` for the account's own nonce.
+    pub nonce_account: Option<Address>,
     /// The key that signs next; empty for a scheme whose key never changes.
     pub next_key: &'a [u8],
 }
@@ -79,6 +83,7 @@ impl<'a> AdvanceSigner<'a> {
         Self {
             scheme,
             identity,
+            nonce_account: None,
             next_key: &[],
         }
     }
@@ -109,9 +114,8 @@ pub fn create_rotating_advance_instruction(
     advance_vector_signature: &[u8],
 ) -> Instruction {
     let signer = AdvanceSigner {
-        scheme,
-        identity,
         next_key,
+        ..AdvanceSigner::new(scheme, identity)
     };
     create_multi_advance_instruction(&[(signer, advance_vector_signature)])
 }
@@ -121,7 +125,8 @@ pub fn create_rotating_advance_instruction(
 /// [`signer_digest`](crate::signer_digest) of the one
 /// [`advance_message`](crate::advance_message).
 ///
-/// Accounts: `[vector_pda(writable)..., instructions_sysvar]`. Data:
+/// Accounts: `[{vector_pda(writable), nonce_account(writable)?}...,
+/// instructions_sysvar]`. Data:
 /// `[ADVANCE_DISCRIMINATOR, {next_key, signature}...]`.
 pub fn create_multi_advance_instruction(signers: &[(AdvanceSigner, &[u8])]) -> Instruction {
     let mut accounts = Vec::with_capacity(signers.len() + 1);
@@ -134,6 +139,9 @@ pub fn create_multi_advance_instruction(signers: &[(AdvanceSigner, &[u8])]) -> I
         );
         let (vector, _) = find_vector_pda(signer.scheme, signer.identity);
         accounts.push(AccountMeta::new(vector, false));
+        if let Some(nonce_account) = signer.nonce_account {
+            accounts.push(AccountMeta::new(nonce_account, false));
+        }
         data.extend_from_slice(signer.next_key);
         data.extend_from_slice(signature);
     }
@@ -276,6 +284,28 @@ pub fn create_multi_passthrough_instruction(
     }
 }
 
+/// Build an `initialize_nonce` instruction: make `nonce_account` a nonce
+/// account of `vector`. It signs from the next slot.
+/// Put it after the System `create_account` that creates the account,
+/// assigned to the program with [`NonceAccount::LEN`](crate::NonceAccount)
+/// bytes; the nonce account signs both.
+///
+/// Accounts: `[nonce_account(signer, writable), vector]`. Data:
+/// `[INITIALIZE_NONCE_DISCRIMINATOR]`.
+pub fn create_initialize_nonce_instruction(
+    nonce_account: &Address,
+    vector: &Address,
+) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(*nonce_account, true),
+            AccountMeta::new_readonly(*vector, false),
+        ],
+        data: vec![INITIALIZE_NONCE_DISCRIMINATOR],
+    }
+}
+
 /// Build a `close` instruction to run inside a
 /// [`create_passthrough_instruction`]. On its own it fails: only a
 /// passthrough makes the vector account a signer.
@@ -293,6 +323,19 @@ pub fn create_close_subinstruction(
         ],
         data: vec![CLOSE_DISCRIMINATOR],
     }
+}
+
+/// [`create_close_subinstruction`] for one of the vector's nonce accounts:
+/// its lamports go to `close_to`, and it is removed.
+pub fn create_close_nonce_subinstruction(
+    scheme: &Scheme,
+    identity: &[u8],
+    nonce_account: &Address,
+    close_to: &Address,
+) -> Instruction {
+    let mut close = create_close_subinstruction(scheme, identity, close_to);
+    close.accounts.push(AccountMeta::new(*nonce_account, false));
+    close
 }
 
 /// Build a `withdraw` instruction to run inside a

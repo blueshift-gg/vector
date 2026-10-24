@@ -105,7 +105,8 @@ pub fn advance_message(
 }
 
 /// What one signer signs, and the account's next nonce: `SHA256(message ||
-/// nonce || vector || next_key)`, with `message` from [`advance_message`],
+/// nonce || vector || next_key)`, with `nonce` the vector's own or, over a
+/// nonce account, [`signed_nonce`](crate::signed_nonce), `message` from [`advance_message`],
 /// `vector` the signer's account address and `next_key` its
 /// [`AdvanceSigner::next_key`].
 pub fn signer_digest(
@@ -161,9 +162,8 @@ pub fn rotating_advance_vector_digest(
     fee_payer: Option<&Address>,
 ) -> [u8; 32] {
     let signer = AdvanceSigner {
-        scheme,
-        identity,
         next_key,
+        ..AdvanceSigner::new(scheme, identity)
     };
     let message = advance_message(&[signer], pre_instructions, post_instructions, fee_payer);
     signer_digest(

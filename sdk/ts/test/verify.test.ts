@@ -93,7 +93,7 @@ describe("sign → verify round trips", () => {
     const { pre, post } = fixedIxLists();
 
     const advance = signAdvanceInstructionEd25519(key, NONCE, pre, post);
-    const digest = verifyAdvanceSignature(ED25519, pubkey, NONCE, pre, post, sigOf(advance));
+    const digest = verifyAdvanceSignature({ scheme: ED25519, identity: pubkey }, NONCE, pre, post, sigOf(advance));
 
     const expected = advanceVectorDigest(ED25519, NONCE, pubkey, pre, post);
     expect(bytesToHex(digest)).toBe(bytesToHex(expected));
@@ -106,13 +106,13 @@ describe("sign → verify round trips", () => {
 
     const advance = signAdvanceInstructionSecp256k1(key, NONCE, pre, post);
     const wire = sigOf(advance);
-    const digest = verifyAdvanceSignature(SECP256K1, pubkey, NONCE, pre, post, wire);
+    const digest = verifyAdvanceSignature({ scheme: SECP256K1, identity: pubkey }, NONCE, pre, post, wire);
     expect(digest.length).toBe(32);
 
     // On-chain `solana-secp256k1-ecdsa` accepts both s normalizations, so
     // the offline check must accept the malleated twin too.
     expect(() =>
-      verifyAdvanceSignature(SECP256K1, pubkey, NONCE, pre, post, malleateHighS(wire))
+      verifyAdvanceSignature({ scheme: SECP256K1, identity: pubkey }, NONCE, pre, post, malleateHighS(wire))
     ).not.toThrow();
   });
 
@@ -123,7 +123,7 @@ describe("sign → verify round trips", () => {
 
     const advance = signAdvanceInstructionEip191(key, NONCE, pre, post);
     const wire = sigOf(advance);
-    const digest = verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, wire);
+    const digest = verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, wire);
     expect(digest.length).toBe(32);
 
     // High-S twin: the recovery id's parity bit flips with the negated s,
@@ -132,7 +132,7 @@ describe("sign → verify round trips", () => {
     malleated.set(malleateHighS(wire.subarray(0, 64)));
     malleated[64] = wire[64] ^ 1;
     expect(() =>
-      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, malleated)
+      verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, malleated)
     ).not.toThrow();
   });
 
@@ -142,7 +142,7 @@ describe("sign → verify round trips", () => {
 
     const advance = signAdvanceInstructionFalcon512(keypair, NONCE, pre, post);
     const signature = sigOf(advance);
-    const digest = verifyAdvanceSignature(FALCON512, keypair.publicKey, NONCE, pre, post, signature
+    const digest = verifyAdvanceSignature({ scheme: FALCON512, identity: keypair.publicKey }, NONCE, pre, post, signature
     );
     expect(digest.length).toBe(32);
 
@@ -150,7 +150,7 @@ describe("sign → verify round trips", () => {
     const badNonce = new Uint8Array(NONCE);
     badNonce[0] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignature(FALCON512, keypair.publicKey, badNonce, pre, post, signature)
+      verifyAdvanceSignature({ scheme: FALCON512, identity: keypair.publicKey }, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
   });
 
@@ -162,19 +162,19 @@ describe("sign → verify round trips", () => {
     const advance = signAdvanceInstructionMlDsa44(keypair, NONCE, pre, post);
     const signature = sigOf(advance);
     expect(signature.length).toBe(MLDSA44.signatureLen);
-    const digest = verifyAdvanceSignature(MLDSA44, keypair.publicKey, NONCE, pre, post, signature
+    const digest = verifyAdvanceSignature({ scheme: MLDSA44, identity: keypair.publicKey }, NONCE, pre, post, signature
     );
     expect(digest).toEqual(advanceVectorDigest(MLDSA44, NONCE, keypair.publicKey, pre, post));
 
     const badNonce = new Uint8Array(NONCE);
     badNonce[0] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignature(MLDSA44, keypair.publicKey, badNonce, pre, post, signature)
+      verifyAdvanceSignature({ scheme: MLDSA44, identity: keypair.publicKey }, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
     const tampered = new Uint8Array(signature);
     tampered[100] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignature(MLDSA44, keypair.publicKey, NONCE, pre, post, tampered)
+      verifyAdvanceSignature({ scheme: MLDSA44, identity: keypair.publicKey }, NONCE, pre, post, tampered)
     ).toThrow(SignatureVerificationError);
 
     // Registration is three initialize calls; only the first carries the key.
@@ -216,27 +216,27 @@ describe("tamper detection", () => {
     const a = fixedIxLists();
     a.pre[0].data[0] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignature(ED25519, pubkey, NONCE, a.pre, a.post, signature)
+      verifyAdvanceSignature({ scheme: ED25519, identity: pubkey }, NONCE, a.pre, a.post, signature)
     ).toThrow(SignatureVerificationError);
 
     // Account pubkey.
     const b = fixedIxLists();
     b.post[0].keys[0].pubkey = addr(0x55);
     expect(() =>
-      verifyAdvanceSignature(ED25519, pubkey, NONCE, b.pre, b.post, signature)
+      verifyAdvanceSignature({ scheme: ED25519, identity: pubkey }, NONCE, b.pre, b.post, signature)
     ).toThrow(SignatureVerificationError);
 
     // Nonce.
     const badNonce = new Uint8Array(NONCE);
     badNonce[31] ^= 0x01;
     expect(() =>
-      verifyAdvanceSignature(ED25519, pubkey, badNonce, pre, post, signature)
+      verifyAdvanceSignature({ scheme: ED25519, identity: pubkey }, badNonce, pre, post, signature)
     ).toThrow(SignatureVerificationError);
 
     // Identity (a different — still valid — pubkey).
     const other = ed25519Identity(new Uint8Array(32).fill(0x43));
     expect(() =>
-      verifyAdvanceSignature(ED25519, other, NONCE, pre, post, signature)
+      verifyAdvanceSignature({ scheme: ED25519, identity: other }, NONCE, pre, post, signature)
     ).toThrow(SignatureVerificationError);
   });
 });
@@ -253,10 +253,10 @@ describe("eip191 recovery byte", () => {
     const legacy = new Uint8Array(signature);
     legacy[64] = signature[64] + 27; // what Ethereum tooling emits
     expect(() =>
-      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, legacy)
+      verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, legacy)
     ).toThrow(MalformedSignatureError);
     expect(() =>
-      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, legacy)
+      verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, legacy)
     ).toThrow(/27\/28.*subtract 27/s);
   });
 
@@ -269,14 +269,14 @@ describe("eip191 recovery byte", () => {
     const normalized = new Uint8Array(signature);
     normalized[64] = normalizeEip191RecoveryByte(signature[64] + 27);
     expect(() =>
-      verifyAdvanceSignature(EIP191, ethAddress, NONCE, pre, post, normalized)
+      verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, normalized)
     ).not.toThrow();
   });
 
   test("signature from a different key reports an identity mismatch", () => {
     const otherAddress = eip191Identity(new Uint8Array(32).fill(0x44));
     expect(() =>
-      verifyAdvanceSignature(EIP191, otherAddress, NONCE, pre, post, signature)
+      verifyAdvanceSignature({ scheme: EIP191, identity: otherAddress }, NONCE, pre, post, signature)
     ).toThrow(IdentityMismatchError);
   });
 });
@@ -304,7 +304,7 @@ describe("cross-language digest pin", () => {
 
     // And the pinned digest is exactly what a signer commits to.
     const advance = signAdvanceInstructionEd25519(key, NONCE, pre, post);
-    const verified = verifyAdvanceSignature(ED25519, pubkey, NONCE, pre, post, sigOf(advance));
+    const verified = verifyAdvanceSignature({ scheme: ED25519, identity: pubkey }, NONCE, pre, post, sigOf(advance));
     expect(bytesToHex(verified)).toBe(PINNED_DIGEST_HEX);
   });
 });
@@ -328,7 +328,7 @@ describe("revocation (inert advance)", () => {
     // A revocation is just an advance with empty pre/post, so it verifies
     // through the ordinary advance verifier with empty arrays.
     const revocation = signRevocationInstructionEd25519(key, NONCE);
-    const digest = verifyAdvanceSignature(ED25519, pubkey, NONCE, [], [], sigOf(revocation));
+    const digest = verifyAdvanceSignature({ scheme: ED25519, identity: pubkey }, NONCE, [], [], sigOf(revocation));
 
     expect(bytesToHex(digest)).toBe(bytesToHex(revocationDigest(ED25519, NONCE, pubkey)));
     expect(bytesToHex(digest)).toBe(PINNED_REVOCATION_DIGEST_HEX);

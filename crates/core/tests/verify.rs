@@ -13,8 +13,8 @@ use vector_core::{
     advance_vector_digest, ed25519_pubkey, revocation_digest, secp256k1_compressed_pubkey,
     secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
     sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
-    sign_revocation_instruction_ed25519, verify_advance_signature, VerifyError, ED25519, EIP191,
-    FALCON512, SECP256K1, SYSTEM_PROGRAM_ID,
+    sign_revocation_instruction_ed25519, verify_advance_signature, AdvanceSigner, VerifyError,
+    ED25519, EIP191, FALCON512, SECP256K1, SYSTEM_PROGRAM_ID,
 };
 
 const NONCE: [u8; 32] = [0x01; 32];
@@ -60,8 +60,7 @@ fn ed25519_round_trip() {
 
     let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post, None);
     let digest = verify_advance_signature(
-        &ED25519,
-        &pubkey,
+        AdvanceSigner::new(&ED25519, &pubkey),
         &NONCE,
         &pre,
         &post,
@@ -91,13 +90,19 @@ fn secp256k1_round_trip_and_high_s_twin() {
 
     let advance = sign_advance_instruction_secp256k1_ecdsa(&key, &NONCE, &pre, &post, None);
     let wire = signature_of(&advance);
-    verify_advance_signature(&SECP256K1, &pubkey, &NONCE, &pre, &post, None, wire)
-        .expect("round trip must verify");
+    verify_advance_signature(
+        AdvanceSigner::new(&SECP256K1, &pubkey),
+        &NONCE,
+        &pre,
+        &post,
+        None,
+        wire,
+    )
+    .expect("round trip must verify");
 
     let high_s = malleate_high_s(&k256::ecdsa::Signature::from_slice(wire).unwrap());
     verify_advance_signature(
-        &SECP256K1,
-        &pubkey,
+        AdvanceSigner::new(&SECP256K1, &pubkey),
         &NONCE,
         &pre,
         &post,
@@ -115,8 +120,15 @@ fn eip191_round_trip_high_s_twin_and_legacy_v() {
 
     let advance = sign_advance_instruction_secp256k1_eip191(&key, &NONCE, &pre, &post, None);
     let wire = signature_of(&advance);
-    verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, wire)
-        .expect("round trip must verify");
+    verify_advance_signature(
+        AdvanceSigner::new(&EIP191, &eth_address),
+        &NONCE,
+        &pre,
+        &post,
+        None,
+        wire,
+    )
+    .expect("round trip must verify");
 
     // High-S twin: the recovery id's parity bit flips with the negated s,
     // recovering the same key — exactly what `sol_secp256k1_recover` does
@@ -124,15 +136,29 @@ fn eip191_round_trip_high_s_twin_and_legacy_v() {
     let low_s = k256::ecdsa::Signature::from_slice(&wire[..64]).unwrap();
     let mut malleated = malleate_high_s(&low_s).to_bytes().to_vec();
     malleated.push(wire[64] ^ 1);
-    verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, &malleated)
-        .expect("high-S eip191 twin must verify offline, matching on-chain acceptance");
+    verify_advance_signature(
+        AdvanceSigner::new(&EIP191, &eth_address),
+        &NONCE,
+        &pre,
+        &post,
+        None,
+        &malleated,
+    )
+    .expect("high-S eip191 twin must verify offline, matching on-chain acceptance");
 
     // The legacy 27/28 recovery byte Ethereum tooling emits fails
     // `sol_secp256k1_recover` on chain, so it fails here too.
     let mut legacy = wire.to_vec();
     legacy[64] += 27;
     assert_eq!(
-        verify_advance_signature(&EIP191, &eth_address, &NONCE, &pre, &post, None, &legacy),
+        verify_advance_signature(
+            AdvanceSigner::new(&EIP191, &eth_address),
+            &NONCE,
+            &pre,
+            &post,
+            None,
+            &legacy
+        ),
         Err(VerifyError::SignatureInvalid),
     );
 }
@@ -150,16 +176,29 @@ fn falcon512_round_trip() {
     let mut signature = [0u8; FALCON512.signature_len];
     signature[..detached.as_bytes().len()].copy_from_slice(detached.as_bytes());
 
-    let verified =
-        verify_advance_signature(&FALCON512, &wire, &NONCE, &pre, &post, None, &signature)
-            .expect("round trip must verify");
+    let verified = verify_advance_signature(
+        AdvanceSigner::new(&FALCON512, &wire),
+        &NONCE,
+        &pre,
+        &post,
+        None,
+        &signature,
+    )
+    .expect("round trip must verify");
     assert_eq!(verified, digest);
 
     // Same signature against a tampered nonce must fail.
     let mut bad_nonce = NONCE;
     bad_nonce[0] ^= 0x01;
     assert_eq!(
-        verify_advance_signature(&FALCON512, &wire, &bad_nonce, &pre, &post, None, &signature),
+        verify_advance_signature(
+            AdvanceSigner::new(&FALCON512, &wire),
+            &bad_nonce,
+            &pre,
+            &post,
+            None,
+            &signature
+        ),
         Err(VerifyError::SignatureInvalid),
     );
 }
@@ -177,7 +216,14 @@ fn tampering_any_committed_byte_fails_verification() {
     let sig = signature_of(&advance);
     let verify =
         |pubkey: &[u8; 32], nonce: &[u8; 32], pre: &[Instruction], post: &[Instruction]| {
-            verify_advance_signature(&ED25519, pubkey, nonce, pre, post, None, sig)
+            verify_advance_signature(
+                AdvanceSigner::new(&ED25519, pubkey),
+                nonce,
+                pre,
+                post,
+                None,
+                sig,
+            )
         };
 
     // Instruction data.
@@ -224,8 +270,7 @@ fn digest_matches_the_cross_language_pin() {
     // And the pinned digest is exactly what a signer commits to.
     let advance = sign_advance_instruction_ed25519(&key, &NONCE, &pre, &post, None);
     let verified = verify_advance_signature(
-        &ED25519,
-        &pubkey,
+        AdvanceSigner::new(&ED25519, &pubkey),
         &NONCE,
         &pre,
         &post,
@@ -256,8 +301,7 @@ fn revocation_round_trip_and_cross_language_pin() {
     // through the ordinary advance verifier with empty slices.
     let revocation = sign_revocation_instruction_ed25519(&key, &NONCE);
     let digest = verify_advance_signature(
-        &ED25519,
-        &pubkey,
+        AdvanceSigner::new(&ED25519, &pubkey),
         &NONCE,
         &[],
         &[],

@@ -8,6 +8,8 @@ use solana_address::{address, Address};
 
 /// The program's own errors, as `ProgramError::Custom`.
 pub use vector::error::VectorError;
+/// A nonce account, as the program defines it.
+pub use vector::state::NonceAccount;
 /// The account header, as the program defines it.
 pub use vector::state::VectorAccount;
 /// The Vector program: one program for every signing scheme.
@@ -20,8 +22,9 @@ pub const ADVANCE_DISCRIMINATOR: u8 = *vector::Advance::DISCRIMINATOR;
 pub const CLOSE_DISCRIMINATOR: u8 = *vector::Close::DISCRIMINATOR;
 pub const WITHDRAW_DISCRIMINATOR: u8 = *vector::Withdraw::DISCRIMINATOR;
 pub const PASSTHROUGH_DISCRIMINATOR: u8 = *vector::Passthrough::DISCRIMINATOR;
+pub const INITIALIZE_NONCE_DISCRIMINATOR: u8 = *vector::InitializeNonce::DISCRIMINATOR;
 
-pub use vector::state::VECTOR_SEED as VECTOR_PDA_SEED;
+pub use vector::state::{NONCE_TAG, VECTOR_SEED as VECTOR_PDA_SEED};
 
 /// Everything a client needs to use one signing scheme: its scheme byte and
 /// lengths, as the program defines them. The concrete instances live in
@@ -45,6 +48,17 @@ pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
         &[VECTOR_PDA_SEED, &[scheme.id], &vector_seed(identity)],
         &PROGRAM_ID,
     )
+}
+
+/// What a signature over a nonce account is over, in place of a nonce:
+/// `SHA256(nonce account's nonce || vector's own nonce)`. Moving the vector's
+/// own nonce changes it for every nonce account of the vector.
+pub fn signed_nonce(nonce_account_nonce: &[u8; 32], vector_nonce: &[u8; 32]) -> [u8; 32] {
+    Sha256::new()
+        .chain_update(nonce_account_nonce)
+        .chain_update(vector_nonce)
+        .finalize()
+        .into()
 }
 
 /// Derive the vector account's system PDA, `[vector]`, and its bump. It

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "programs/vector",
     "crates/core",
+    "crates/nonce",
     "tests",
 ]
 # Default scope for `cargo build` / `cargo build-sbf` / `cargo check` when no

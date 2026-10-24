@@ -6,8 +6,8 @@ import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
 
-import { Scheme } from "./scheme.js";
-import { advanceVectorDigest } from "./digest.js";
+import { findVectorPda } from "./scheme.js";
+import { AdvanceSigner, advanceMessage, signerDigest } from "./digest.js";
 import { ED25519 } from "./schemes/ed25519.js";
 import { EIP191, eip191EnvelopeHash } from "./schemes/eip191.js";
 import { SECP256K1 } from "./schemes/secp256k1.js";
@@ -78,22 +78,23 @@ function trimFalconSignature(signature: Uint8Array): Uint8Array {
 
 /**
  * Verify an advance signature: recompute the digest and check `signature`
- * over it with the scheme's verifier. Returns the digest, which is the
- * account's next nonce.
+ * over it with the scheme's verifier. Returns the digest, which is the next
+ * nonce of the signer's nonce account, or of its own.
  *
- * Pass `feePayer` when it is also an account of one of the instructions: the
- * runtime then marks it a writable signer there, and the digest covers that
- * flag. Winternitz and XMSS have no offline verifier.
+ * `nonce` is the one the signer signed over. Pass `feePayer` when it is also
+ * an account of one of the instructions: the runtime then marks it a writable
+ * signer there, and the digest covers that flag. Winternitz and XMSS have no
+ * offline verifier.
  */
 export function verifyAdvanceSignature(
-  scheme: Scheme,
-  identity: Uint8Array,
+  signer: AdvanceSigner,
   nonce: Uint8Array,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
   signature: Uint8Array,
   feePayer?: Address
 ): Uint8Array {
+  const { scheme, identity } = signer;
   const verify = VERIFIERS[scheme.id];
   if (!verify) {
     throw new IdentityMismatchError("this scheme has no offline verifier");
@@ -112,9 +113,8 @@ export function verifyAdvanceSignature(
     );
   }
 
-  const digest = advanceVectorDigest(
-    scheme, nonce, identity, preInstructions, postInstructions, feePayer
-  );
+  const message = advanceMessage([signer], preInstructions, postInstructions, feePayer);
+  const digest = signerDigest(message, nonce, findVectorPda(scheme, identity)[0]);
   let ok = false;
   try {
     ok = verify(identity, digest, signature);
