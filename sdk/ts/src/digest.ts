@@ -59,10 +59,16 @@ function promoteToMessageFlags(
 }
 
 /**
- * One signer of an `advance`: its account, and for a scheme whose key
- * rotates (Winternitz, XMSS), the key that signs next.
+ * One signer of an `advance`: its account, the nonce account it signs over if
+ * not its own nonce, and for a scheme whose key rotates
+ * (Winternitz, XMSS), the key that signs next.
  */
-export type AdvanceSigner = { scheme: Scheme; identity: Uint8Array; nextKey?: Uint8Array };
+export type AdvanceSigner = {
+  scheme: Scheme;
+  identity: Uint8Array;
+  nonceAccount?: Address;
+  nextKey?: Uint8Array;
+};
 
 /**
  * The message every signer of one advance approves: the SHA-256 of the

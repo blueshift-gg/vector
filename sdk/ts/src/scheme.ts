@@ -13,6 +13,7 @@ export const PASSTHROUGH_DISCRIMINATOR = 1;
 export const INITIALIZE_DISCRIMINATOR = 2;
 export const WITHDRAW_DISCRIMINATOR = 3;
 export const CLOSE_DISCRIMINATOR = 4;
+export const INITIALIZE_NONCE_DISCRIMINATOR = 5;
 
 /** The Vector program: one program for every signing scheme. */
 export const PROGRAM_ID = new Address("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
@@ -38,12 +39,20 @@ export enum VectorError {
   LeafUsed = 3,
   /** XMSS: the tree's last leaf signed, and the key was not replaced. */
   TreeExhausted = 4,
+  /** `advance`, `close`: the nonce account belongs to another vector. */
+  ForeignNonce = 5,
+  /** `initializeNonce`: a Winternitz or XMSS vector signs over its own nonce only. */
+  KeyRotates = 6,
+  /** `advance`, `close`: the nonce account was created in this slot. */
+  FreshNonce = 7,
 }
 
 export const VECTOR_HEADER_LEN = 68;
 /** What one instruction can allocate; a bigger account takes more `initialize` calls. */
 export const MAX_PERMITTED_DATA_INCREASE = 10_240;
 export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
+/** What a nonce account's first nonce hashes before its address. */
+export const NONCE_TAG = new TextEncoder().encode("nonce");
 
 // ── Schemes ──────────────────────────────────────────────────────────
 
@@ -143,6 +152,37 @@ export function findSystemPda(vector: Address): [Address, number] {
   return findProgramAddressSync([vector.toBytes()], PROGRAM_ID);
 }
 
+/**
+ * What a signature over a nonce account is over, in place of a nonce:
+ * `SHA256(nonce account's nonce || vector's own nonce)`. Moving the vector's
+ * own nonce changes it for every nonce account of the vector.
+ */
+export function signedNonce(nonce: Uint8Array, vectorNonce: Uint8Array): Uint8Array {
+  return new Uint8Array(createHash("sha256").update(nonce).update(vectorNonce).digest());
+}
+
+/** A nonce account: `nonce[32] || vector[32] || created slot (u64 LE)`. */
+export const NONCE_ACCOUNT_LEN = 72;
+export class NonceAccount {
+  constructor(
+    /** The chain's current link; sign over {@link signedNonce} of it. */
+    readonly nonce: Uint8Array,
+    /** The vector account whose key signs over it. */
+    readonly vector: Address,
+    /** The slot it was created in. It signs and closes from the next. */
+    readonly created: bigint
+  ) {}
+
+  /** Read a nonce account's data, as `@solana/web3.js`'s `NonceAccount`. */
+  static fromAccountData(data: Uint8Array): NonceAccount {
+    if (data.length !== NONCE_ACCOUNT_LEN) {
+      throw new Error(`NonceAccount data must be ${NONCE_ACCOUNT_LEN} bytes, got ${data.length}`);
+    }
+    const created = new DataView(data.buffer, data.byteOffset).getBigUint64(64, true);
+    return new NonceAccount(data.slice(0, 32), new Address(data.slice(32, 64)), created);
+  }
+}
+
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 
 /**
@@ -201,6 +241,17 @@ export async function fetchVectorAccount(
     throw new Error("Vector account not found");
   }
   return deserializeVectorAccount(info.data);
+}
+
+export async function fetchNonceAccount(
+  connection: Connection,
+  nonceAccount: Address
+): Promise<NonceAccount> {
+  const info = await connection.getAccountInfo(nonceAccount);
+  if (!info) {
+    throw new Error("Nonce account not found");
+  }
+  return NonceAccount.fromAccountData(info.data);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

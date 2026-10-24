@@ -131,6 +131,8 @@ accounts: [vector_1, ..., vector_n, instructions_sysvar]
 data:     [0, next_key_1 || sig_1 || ... || next_key_n || sig_n]
 ```
 
+Any vector may be followed by one of its [nonce accounts](#nonce-accounts); its signature is then over `SHA256(that account's nonce || the vector's nonce)`, and only the nonce account moves.
+
 A next key is present only for an account whose key rotates (Winternitz, XMSS).
 
 The program verifies one signature per account, taking each signature's length from its account's scheme, and advances each nonce. Because each signature is over the whole transaction, every signer approves everything in it, including what the other accounts do. A `Passthrough` is authorised when an earlier `Advance` lists its account; listing an account is only possible with its signature. The `Passthrough` looks for the transaction's first `Advance` before it, wherever a wallet put it. Only one `Advance` can land in a transaction: each one's message covers the other's signatures, so neither can be signed first.
@@ -146,7 +148,8 @@ Each instruction starts with its discriminator byte.
 | `1`  | Passthrough | **only** top-level (CPI guarded) | the first Advance, earlier, lists every signer |
 | `2`  | Initialize  | yes | payer funds creation; later calls grow an account too big for one (ML-DSA-44) |
 | `3`  | Withdraw    | only via Passthrough reentry | inherited from the authorising Advance       |
-| `4`  | Close       | only via Passthrough reentry | inherited from the authorising Advance       |
+| `4`  | Close       | only via Passthrough reentry | inherited from the authorising Advance; with a third account, closes that nonce account of the vector |
+| `5`  | InitializeNonce | yes | the nonce account signs, as it does its `CreateAccount`; the vector must exist and not rotate its key |
 
 `Advance` carries the next key of each rotating account, then one signature per account — its handler verifies each, installs the digest as the next nonce (and the next key), and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler refuses to run unless the first `Advance`, earlier in the transaction, lists every account it signs for. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
 
@@ -181,6 +184,9 @@ A bad signature is `MissingRequiredSignature`, and every other standard `Program
 | `2` | `KeyReused` | Winternitz: the next key is the key that just signed |
 | `3` | `LeafUsed` | XMSS: the signature's leaf has signed before |
 | `4` | `TreeExhausted` | XMSS: the last leaf signed, and the key was not replaced |
+| `5` | `ForeignNonce` | `Advance`, `Close`: the nonce account belongs to another vector |
+| `6` | `KeyRotates` | `InitializeNonce`: the vector is Winternitz or XMSS |
+| `7` | `FreshNonce` | `Advance`, `Close`: the nonce account was created in this slot |
 
 ## Security Model
 The signer is authorizing a concrete transaction buffer, not a reusable nonce and not a partially specified intent. Since the signed digest is reconstructed from the instruction sysvar onchain, any material change to the transaction changes the digest and invalidates the signature.
@@ -248,6 +254,16 @@ identity: [u8; N]   // offset 68 — N = stored identity length
 
 The system PDA is `[vector address, system_bump]` under the program and belongs to the System program. The pad keeps the identity at a multiple of 4, where Falcon-512 and ML-DSA-44 read their prepared key in place.
 
+A nonce account is a keypair account, as a System nonce account is: 72 bytes, owned by the program:
+
+```
+nonce:   [u8; 32]  // offset  0 — the chain's current link
+vector:  [u8; 32]  // offset 32 — the vector account whose key signs over it
+created: u64       // offset 64 — the slot it was created in
+```
+
+No vector account is 72 bytes, so the program tells the two apart by length.
+
 The seed is the SHA-256 of the key given to `Initialize`, for every scheme. It is stored so the account can sign as itself without re-deriving it. For Winternitz/XMSS it is the hash of the first key, also after rotation.
 
 | Scheme      | Total Account Size | Identity Bytes (offset 68)                      |
@@ -311,7 +327,8 @@ The `vector-core` crate provides off-chain helpers for constructing Vector trans
 - `sign_advance_instruction_ed25519(signing_key, nonce, pre, post, fee_payer)` — sign with Ed25519.
 - `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post, fee_payer)` — sign with EIP-191 (envelope, 65-byte sig).
 - `sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, pre, post, fee_payer)` — sign with plain secp256k1 ECDSA (64-byte sig).
-- `verify_advance_signature(&scheme, identity, nonce, pre, post, fee_payer, signature)` — verify an advance signature fully offline with the program's own code, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
+- `signed_nonce(&nonce, &vector_nonce)` / `create_initialize_nonce_instruction(&nonce_account, &vector)` / `create_close_nonce_subinstruction(&scheme, identity, &nonce_account, &close_to)` / `NonceAccount::LEN` — nonce accounts.
+- `verify_advance_signature(AdvanceSigner::new(&scheme, identity), nonce, pre, post, fee_payer, signature)` — verify an advance signature fully offline with the program's own code, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
 - `ed25519_pubkey` / `secp256k1_eip191_eth_address` / `secp256k1_compressed_pubkey` / `eth_address_from_pubkey` / `eip191_envelope_hash(digest)` — identity/envelope utilities.
 
 Falcon-512 and ML-DSA-44 signing are intentionally left to the caller (`solana-falcon512` and `solana-ml-dsa` are verify-only) — pair with an external signer such as `pqcrypto-falcon` or `fips204` (empty context) and feed the wire-format signature into `create_advance_instruction`.
@@ -326,7 +343,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `createInitializeInstruction(payer, scheme, identity)` — generic init builder; `createInitializeInstructions` returns every call the scheme needs.
 - `findSystemPda(vector)` — the account's system PDA.
 - `createCloseSubinstruction(scheme, identity, closeTo)` / `createWithdrawSubinstruction(scheme, identity, receiver, lamports)` — sub-instruction builders.
-- `createAdvanceInstruction(scheme, identity, signature)` — assemble from precomputed signature (signature only, no embedded payload). `createMultiAdvanceInstruction([{ scheme, identity, nextKey?, signature }])` does the same for several signers. For Winternitz and XMSS use `createRotatingAdvanceInstruction(scheme, identity, nextKey, signature)`.
+- `createAdvanceInstruction(scheme, identity, signature)` — assemble from precomputed signature (signature only, no embedded payload). `createMultiAdvanceInstruction([{ scheme, identity, nonceAccount?, nextKey?, signature }])` does the same for several signers. For Winternitz and XMSS use `createRotatingAdvanceInstruction(scheme, identity, nextKey, signature)`.
 - `createPassthroughInstruction(scheme, identity, subIxs)` — assemble the passthrough instruction that replays `subIxs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. `createSystemPassthroughInstruction` signs as the system PDA; `createMultiPassthroughInstruction([{ scheme, identity, system? }], subIxs)` signs for several.
 - `advanceVectorDigest(scheme, nonce, identity, pre, post, feePayer?)` — recompute the digest. For Winternitz and XMSS use `rotatingAdvanceVectorDigest`. With several signers, `advanceMessage([{ scheme, identity, nextKey? }], pre, post, feePayer?)` once, then `signerDigest(message, nonce, vector, nextKey?)` for each.
 - `signAdvanceInstructionEd25519(signingKey, nonce, pre, post, feePayer?)` — sign with Ed25519.
@@ -334,7 +351,8 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer?)` — sign with plain secp256k1 ECDSA.
 - `signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer?)` — sign with Falcon-512 (post-quantum) via [`@noble/post-quantum/falcon.js`](https://github.com/paulmillr/noble-post-quantum); plus `falcon512Keygen`, `falcon512PublicKey`.
 - `signAdvanceInstructionMlDsa44(keypair, nonce, pre, post, feePayer?)` — sign with ML-DSA-44 (FIPS 204, post-quantum) via `@noble/post-quantum/ml-dsa.js`, empty context; plus `mldsa44Keygen`, `mldsa44PublicKey`.
-- `verifyAdvanceSignature(scheme, identity, nonce, pre, post, signature, feePayer?)` — verify an advance signature fully offline, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
+- `signedNonce(nonce, vectorNonce)` / `createInitializeNonceInstruction(nonceAccount, vector)` / `createCloseSubinstruction(scheme, identity, closeTo, nonceAccount?)` / `NONCE_ACCOUNT_LEN` / `NonceAccount.fromAccountData(data)` / `fetchNonceAccount(connection, nonceAccount)` — nonce accounts; `createNonceAccount`, `getNonce`, `closeNonceAccount`, `systemAccount` and `NoncedTransaction` take web3.js durable nonce shapes (see [Migrating](#migrating-from-durable-nonces-blueshift-nonce)).
+- `verifyAdvanceSignature({ scheme, identity, nonceAccount? }, nonce, pre, post, signature, feePayer?)` — verify an advance signature fully offline, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
 The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1, Falcon-512 and ML-DSA-44. Winternitz and XMSS signing are supplied by the caller. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
@@ -345,25 +363,73 @@ The signed digest doubles as the next on-chain nonce, so a successful advance al
 
 ## Operational Patterns
 
-Everything below is native protocol behaviour — no extra programs, accounts, or formats. The building blocks are the digest (`SHA256(message || nonce || vector_address || next_key)`), digest-as-next-nonce progression, and the fact that one vector account holds exactly one outstanding nonce.
+Everything below is native protocol behaviour — no extra programs or formats. The building blocks are the digest (`SHA256(message || nonce || vector_address || next_key)`), digest-as-next-nonce progression, and the fact that each nonce, a vector's own or a nonce account's, has exactly one outstanding value.
 
 ### Offline verification
 
 Both SDKs ship a verify function that recomputes the digest from the full instruction layout and checks the signature as the on-chain program will — no RPC. The Rust one runs the program's own `initialize` and `advance` for the scheme, with `sol_secp256k1_recover` as the runtime implements it, so it cannot disagree with the chain. The TypeScript one verifies with `@noble`, and shares its digest pins and `fixtures/program.json` with the Rust tests. A PASS means the transaction will verify on-chain against the same nonce; the returned digest is the account's next nonce.
 
 ```rust
-use vector_core::{verify_advance_signature, ED25519};
+use vector_core::{verify_advance_signature, AdvanceSigner, ED25519};
 
 let next_nonce = verify_advance_signature(
-    &ED25519, &pubkey, &nonce, &pre_ixs, &post_ixs, None, signature,
+    AdvanceSigner::new(&ED25519, &pubkey), &nonce, &pre_ixs, &post_ixs, None, signature,
 )?;
 ```
 
 The fee payer affects the digest only when its key appears in a committed instruction: message-level flag promotion then folds it in as a writable signer.
 
-### Concurrency
+### Nonce accounts
 
-One identity = one vector account = one outstanding pre-signed transaction. Signatures against the same nonce are mutually exclusive: the first to land advances the nonce and permanently orphans the rest. For N concurrent in-flight transactions, register N identities (N accounts) and treat each as an independent lane.
+A vector account holds one nonce, so the transactions signed over it run one at a time. For more in flight at once, give the vector nonce accounts: each is a nonce of its own, and a chain of its own, while the vector account still signs, holds the funds and is the authority. It is the System program's durable nonce flow: one authority, many nonce accounts.
+
+- **Create.** As with the System program: a System `CreateAccount` of `NONCE_ACCOUNT_LEN` bytes assigned to Vector, then `InitializeNonce`, both signed by the new account's keypair, so no one can initialize it in between. Anyone can pay for one, for any vector: only the vector's key can advance or close it. Its first nonce is `SHA256("nonce" || address || latest slot hash)`, as a vector's takes in the slot hash. `InitializeNonce` costs 727 CUs.
+- **Sign over one.** List it right after its vector in the `Advance` (`AdvanceSigner { nonce_account: Some(address), .. }` / `{ nonceAccount }`). The signer signs over `SHA256(nonce account's nonce || vector's own nonce)` (`signed_nonce` / `signedNonce`) in place of a nonce; the digest is otherwise unchanged. The message covers the account list, so a signature over one nonce account cannot be moved to another. Landing it moves that account's nonce only.
+- **In any order.** Transactions over different nonce accounts land, fail and retry independently. Over one nonce account they stay ordered, with the same chain and pre-signing as the vector's own nonce, while the vector's own nonce stays put.
+- **Cancel everything.** Move the vector's own nonce: one `Advance` entry, with nothing else in its transaction. Every signature outstanding over the vector or any of its nonce accounts dies, since each took in that nonce. The nonce accounts themselves do not move; sign over their new `signed_nonce`.
+- **Not in its creation slot.** `Advance` and `Close` refuse a nonce account in the slot it was created in (`FreshNonce`). So an account closed and created again starts from a slot hash it never had, and never holds a nonce it held before.
+- **Close.** `Close` inside a `Passthrough`, with the nonce account as a third account, sends its lamports to the receiver and removes it. `close_nonce_account` / `closeNonceAccount` build it.
+- **Not for Winternitz or XMSS.** Two nonces in flight would be two signatures by one key, so `InitializeNonce` refuses those vectors (`KeyRotates`).
+
+### Migrating from durable nonces (`blueshift-nonce`)
+
+`crates/nonce` is the `blueshift-nonce` crate: a library with the shapes durable nonce code already uses, and a CLI with the `solana` CLI's nonce commands. The cold key stays the nonce authority and signs offline with any `solana_signer::Signer`, a `Keypair` included.
+
+The one move: the authority's SOL, token accounts, and mint, freeze and stake authorities go once to `system_account(authority)` (`blueshift-nonce address`), a System account like any wallet. Instructions keep naming the cold key; `NoncedMessage` puts `system_account` in its place, and Vector signs as it.
+
+| Durable nonce | `blueshift-nonce` |
+|---|---|
+| `create_nonce_account(from, nonce, authority, lamports)` | the same |
+| `Message::new_with_nonce(ixs, payer, nonce, authority)` | `NoncedMessage::new_with_nonce(ixs, payer, nonce, authority)` |
+| `Transaction::new_unsigned(message)` | `NoncedTransaction::new_unsigned(message)` |
+| `tx.try_partial_sign(&[&authority], nonce)`, offline | the same |
+| `bincode::serialize(&tx)`, to carry it | the same: it serializes as a plain `Transaction` |
+| `tx.try_partial_sign(&[&payer, ..], nonce)`, then send | `tx.try_partial_sign(&[&payer, ..], recent_blockhash)` on that `Transaction`, then send |
+| `advance_nonce_account` (cancel) | `NoncedMessage::new_with_nonce(vec![], ..)` |
+| `withdraw_nonce_account` | `close_nonce_account(nonce, authority, to)`, for all its lamports, in a `NoncedMessage` |
+| `solana_nonce::state::{State, Data}`, `state_from_account`, `data_from_account`, `data_from_state`, `account_identity_ok` | the same names; `state_from_account` / `data_from_account` also take the vector account, whose nonce is part of `Data::blockhash()`. Fetch both with your own RPC client |
+| `solana create-nonce-account KEYPAIR AMOUNT --nonce-authority PUBKEY` | `blueshift-nonce create-nonce-account ..`, which also creates the authority's vector |
+| `solana nonce` / `new-nonce` / `withdraw-from-nonce-account` | `blueshift-nonce nonce` (also `nonce-account`) / `new-nonce` / `close-nonce-account` |
+| `solana transfer TO AMOUNT --nonce N --nonce-authority KEY --sign-only` | `blueshift-nonce transfer TO AMOUNT --nonce N --nonce-authority KEY --sign-only`, from `system_account`; `--blockhash NONCE` signs with no RPC |
+| `--signer AUTHORITY=SIG`: submit later | the same |
+
+Whoever submits handles a plain `Transaction` and needs nothing from this crate: the nonce authority's signature travels inside Vector's `Advance`, and the fee payer and any other signer, such as a new account, sign the transaction over a recent blockhash.
+
+TypeScript, on `@solana/web3.js`, takes the same shapes:
+
+| `@solana/web3.js` durable nonce | Vector SDK |
+|---|---|
+| `SystemProgram.createNonceAccount({ fromPubkey, noncePubkey, authorizedPubkey, lamports })` | `createNonceAccount({ .. })`, the same parameters |
+| `connection.getNonce(nonceAccount).nonce` | `getNonce(connection, nonceAccount)`, as bytes |
+| `SystemProgram.nonceWithdraw(..)` | `closeNonceAccount({ noncePubkey, authorizedPubkey, toPubkey })`, for all its lamports |
+| `new Transaction({ feePayer, nonceInfo: { nonce, nonceInstruction } })` | `new NoncedTransaction({ feePayer, nonceInfo: { nonce, nonceAccount, authority } })` |
+| `tx.add(SystemProgram.transfer({ fromPubkey: authority, .. }))` | the same; the authority becomes `systemAccount(authority)` |
+| `await tx.partialSign(authority)`, `tx.serialize({ requireAllSignatures: false })` | the same |
+| `Transaction.from(bytes)`, `partialSign(feePayer)`, send | the same, after `tx.recentBlockhash = latest` |
+
+The library needs no RPC client; the CLI is its default `cli` feature (`default-features = false` leaves it out). The CLI reads `solana config` for the URL and the fee payer (`--fee-payer` takes a pubkey with `--sign-only`). Its signers are keypair files for now, not `usb://` or `prompt:`.
+
+What else changes: whoever submits sets a recent blockhash, while the authority's signature stays valid until its nonce moves. `authorize_nonce_account` has no counterpart: a nonce account belongs to one vector. `BlockhashQuery` is left out, because the nonce and the blockhash are now separate values.
 
 ### Unilateral revocation
 

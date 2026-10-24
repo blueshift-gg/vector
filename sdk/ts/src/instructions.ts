@@ -23,6 +23,7 @@ import {
   CLOSE_DISCRIMINATOR,
   PASSTHROUGH_DISCRIMINATOR,
   WITHDRAW_DISCRIMINATOR,
+  INITIALIZE_NONCE_DISCRIMINATOR,
 } from "./scheme.js";
 
 // ── Initialize ───────────────────────────────────────────────────────
@@ -117,13 +118,15 @@ export function createRotatingAdvanceInstruction(
  * Build an `advance` instruction for several signers. Every signer signs
  * its own `signerDigest` of the one `advanceMessage`.
  *
- * Accounts: `[vector_pda(writable)..., instructions_sysvar]`.
+ * Accounts: `[{vector_pda(writable), nonceAccount(writable)?}..., instructions_sysvar]`.
+ * A signer with a `nonceAccount` signs over that account's nonce.
  * Data: `[ADVANCE_DISCRIMINATOR, {nextKey, signature}...]`.
  */
 export function createMultiAdvanceInstruction(
   signers: {
     scheme: Scheme;
     identity: Uint8Array;
+    nonceAccount?: Address;
     nextKey?: Uint8Array;
     signature: Uint8Array;
   }[]
@@ -137,11 +140,11 @@ export function createMultiAdvanceInstruction(
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys: [
-      ...signers.map(({ scheme, identity }) => ({
-        pubkey: findVectorPda(scheme, identity)[0],
-        isSigner: false,
-        isWritable: true,
-      })),
+      ...signers.flatMap(({ scheme, identity, nonceAccount }) =>
+        [findVectorPda(scheme, identity)[0], ...(nonceAccount ? [nonceAccount] : [])].map(
+          (pubkey) => ({ pubkey, isSigner: false, isWritable: true })
+        )
+      ),
       { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
     ],
     data: Buffer.concat([
@@ -273,16 +276,43 @@ export function createMultiPassthroughInstruction(
   });
 }
 
+// ── Nonce accounts ───────────────────────────────────────────────────
+
+/**
+ * Build an `initializeNonce`: make `nonceAccount` a nonce account of `vector`.
+ * It signs from the next slot. Put it after the System `createAccount` that
+ * creates the account, assigned to the program with `NONCE_ACCOUNT_LEN`
+ * bytes; the nonce account signs both.
+ *
+ * Accounts: `[nonceAccount(signer, writable), vector]`.
+ * Data: `[INITIALIZE_NONCE_DISCRIMINATOR]`.
+ */
+export function createInitializeNonceInstruction(
+  nonceAccount: Address,
+  vector: Address
+): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: PROGRAM_ID,
+    keys: [
+      { pubkey: nonceAccount, isSigner: true, isWritable: true },
+      { pubkey: vector, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.from([INITIALIZE_NONCE_DISCRIMINATOR]),
+  });
+}
+
 // ── Close / Withdraw subinstructions ──────────────────────────────────
 
 /**
- * Build a `close` to run inside a `passthrough`. On its own it fails: only a
+ * Build a `close` to run inside a `passthrough`: of the vector account, or
+ * with `nonceAccount` of that nonce account. On its own it fails: only a
  * passthrough makes the vector account a signer.
  */
 export function createCloseSubinstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  closeTo: Address
+  closeTo: Address,
+  nonceAccount?: Address
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
   return new TransactionInstruction({
@@ -290,6 +320,7 @@ export function createCloseSubinstruction(
     keys: [
       { pubkey: vectorPda, isSigner: false, isWritable: true },
       { pubkey: closeTo, isSigner: false, isWritable: true },
+      ...(nonceAccount ? [{ pubkey: nonceAccount, isSigner: false, isWritable: true }] : []),
     ],
     data: Buffer.from([CLOSE_DISCRIMINATOR]),
   });

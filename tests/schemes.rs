@@ -137,6 +137,9 @@ fn the_program_fixture_is_the_programs() {
         VectorError::KeyReused,
         VectorError::LeafUsed,
         VectorError::TreeExhausted,
+        VectorError::ForeignNonce,
+        VectorError::KeyRotates,
+        VectorError::FreshNonce,
     ]
     .map(|error| format!(r#"    "{error:?}": {}"#, error as u32))
     .join(",\n");
