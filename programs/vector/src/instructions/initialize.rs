@@ -1,10 +1,10 @@
-use core::{mem::MaybeUninit, slice::from_ref};
+use core::slice::from_ref;
 
 use pinocchio::{
     account::MAX_PERMITTED_DATA_INCREASE,
     cpi::{Seed, Signer},
     error::ProgramError,
-    sysvars::{rent::Rent, slot_hashes, Sysvar},
+    sysvars::{rent::Rent, Sysvar},
     AccountView, Address, ProgramResult, Resize,
 };
 use pinocchio_system::{
@@ -15,7 +15,7 @@ use solana_nostd_sha256::{hash, hashv};
 use crate::{
     scheme::Scheme,
     schemes,
-    state::{VectorAccount, VECTOR_SEED},
+    state::{latest_slot_hash, VectorAccount, VECTOR_SEED},
 };
 
 /// # Initialize
@@ -188,16 +188,4 @@ fn grow(vector: &mut AccountView) -> ProgramResult {
     let mut data = vector.try_borrow_mut()?;
     let (_, identity) = VectorAccount::split(&mut data)?;
     (scheme.grow)(identity, old_len.saturating_sub(VectorAccount::HEADER_LEN))
-}
-
-/// The newest entry of the slot hashes sysvar: a slot (u64) and its hash.
-/// It is the same for every instruction in a slot and different in the next.
-fn latest_slot_hash() -> Result<[u8; 40], ProgramError> {
-    let mut entry = MaybeUninit::<[u8; 40]>::uninit();
-    // SAFETY: the syscall writes all 40 bytes or fails. The entries start
-    // after the sysvar's 8-byte length.
-    unsafe {
-        slot_hashes::fetch_into_unchecked(&mut *entry.as_mut_ptr(), 8)?;
-        Ok(entry.assume_init())
-    }
 }

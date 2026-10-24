@@ -3,7 +3,10 @@ use pinocchio::{
 };
 use solana_nostd_sha256::hashv;
 
-use crate::{instructions::top_level_only, state::VectorAccount};
+use crate::{
+    instructions::top_level_only,
+    state::{NonceAccount, VectorAccount},
+};
 
 /// # Advance
 ///
@@ -19,12 +22,20 @@ use crate::{instructions::top_level_only, state::VectorAccount};
 /// >   `SHA256(message || nonce || address || next_key)`
 /// > Store that digest as the account's next nonce, and its next key
 ///
+/// A signer signs over its account's own nonce, or over a nonce account of
+/// its vector listed right after it: `SHA256(nonce account's nonce ||
+/// vector's nonce)` stands in for the nonce, and the digest moves the nonce
+/// account only. Each nonce account is a chain of its own, so transactions
+/// signed over different ones land in any order; moving the vector's own
+/// nonce cancels them all.
+///
 /// An account listed twice is advanced twice, and needs a signature for
 /// each: the second is over the nonce the first stored.
 ///
 /// Accounts:
 ///
-/// 1..n. vector:             [mut]   one per signer
+/// 1..n. vector:             [mut]   one per signer, each optionally
+///                                   followed by its nonce account [mut]
 /// n+1.  instructions_sysvar
 ///
 /// Parameters, for each account in order:
@@ -36,6 +47,7 @@ use crate::{instructions::top_level_only, state::VectorAccount};
 /// Account Checks:
 /// - Vector: at least one, each owned by the program, complete, of a known
 ///   scheme
+/// - Nonce: one of the vector before it, past the slot it was created in
 /// - InstructionsSysvar: the instructions sysvar
 pub struct Advance<'a> {
     vectors: &'a mut [AccountView],
@@ -72,13 +84,32 @@ impl<'a> Advance<'a> {
     pub fn process(&mut self) -> ProgramResult {
         let message = message(self.instructions_sysvar, self.data.len())?;
         let mut data = self.data;
+        let mut accounts = &mut *self.vectors;
 
-        for vector in self.vectors.iter_mut() {
+        while let [vector, rest @ ..] = core::mem::take(&mut accounts) {
+            // A nonce account right after the vector holds the nonce it signs.
+            let listed = rest.first().is_some_and(NonceAccount::is);
+            let (nonce, rest) = rest.split_at_mut(listed as usize);
+            accounts = rest;
+
             let address = vector.address().to_bytes();
+            let mut external = nonce
+                .first_mut()
+                .map(|nonce| NonceAccount::borrow(nonce, &address))
+                .transpose()?;
             let mut account = VectorAccount::borrow(vector)?;
             let scheme = VectorAccount::scheme(&account)?;
             let (header, identity) = VectorAccount::split(&mut account)?;
-            (scheme.advance)(identity, &mut header.nonce, &message, &address, &mut data)?;
+            match &mut external {
+                Some(external) => {
+                    let mut nonce = external.signed(&header.nonce);
+                    (scheme.advance)(identity, &mut nonce, &message, &address, &mut data)?;
+                    external.nonce = nonce;
+                }
+                None => {
+                    (scheme.advance)(identity, &mut header.nonce, &message, &address, &mut data)?
+                }
+            }
         }
 
         // The data was next keys and signatures and nothing else.

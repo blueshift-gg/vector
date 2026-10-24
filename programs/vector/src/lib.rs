@@ -45,6 +45,9 @@ pub fn process_instruction(
         }
         Some((Withdraw::DISCRIMINATOR, data)) => Withdraw::try_from((data, accounts))?.process(),
         Some((Close::DISCRIMINATOR, data)) => Close::try_from((data, accounts))?.process(),
+        Some((InitializeNonce::DISCRIMINATOR, data)) => {
+            InitializeNonce::try_from((data, accounts))?.process()
+        }
 
         _ => Err(ProgramError::InvalidInstructionData),
     }

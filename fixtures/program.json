@@ -14,6 +14,9 @@
     "NotAdvanced": 1,
     "KeyReused": 2,
     "LeafUsed": 3,
-    "TreeExhausted": 4
+    "TreeExhausted": 4,
+    "ForeignNonce": 5,
+    "KeyRotates": 6,
+    "FreshNonce": 7
   }
 }

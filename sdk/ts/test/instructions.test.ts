@@ -2,7 +2,11 @@ import { expect, test } from "vitest";
 import { Address, TransactionInstruction } from "@solana/web3.js";
 import { readFileSync } from "fs";
 import {
+  createInitializeNonceInstruction,
   createPassthroughInstruction,
+  NONCE_ACCOUNT_LEN,
+  signedNonce,
+  PROGRAM_ID,
   ED25519,
   EIP191,
   FALCON512,
@@ -48,4 +52,16 @@ test("passthrough preserves external signers", () => {
     { pubkey: cosigner, isSigner: true, isWritable: true },
   ]);
   expect(nested.keys.every((meta) => meta.isSigner)).toBe(true);
+});
+
+test("nonce accounts match the program", () => {
+  // SHA256([0x11; 32] || [0xff; 32]), as Python's hashlib computes it.
+  expect(
+    Buffer.from(signedNonce(new Uint8Array(32).fill(0x11), new Uint8Array(32).fill(0xff))).toString("hex")
+  ).toBe("95984e1ad523403222d2c8b9c201264f2c144f6fad168d4c29c13073ac603df9");
+  expect(NONCE_ACCOUNT_LEN).toBe(72);
+  const nonce = new Address(new Uint8Array(32).fill(7));
+  const init = createInitializeNonceInstruction(nonce, PROGRAM_ID);
+  expect(Array.from(init.data)).toEqual([5]);
+  expect(init.keys[0]).toMatchObject({ isSigner: true, isWritable: true });
 });

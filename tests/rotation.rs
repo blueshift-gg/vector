@@ -283,9 +283,8 @@ fn winternitz_key_signs_once() {
     // second signature must be by the key the first stored, so the key
     // cannot sign two digests.
     let signer = AdvanceSigner {
-        scheme: &WINTERNITZ,
-        identity: &identity,
         next_key: &next_key,
+        ..AdvanceSigner::new(&WINTERNITZ, &identity)
     };
     let message = advance_message(&[signer, signer], &[], &[], None);
     let first = signer_digest(&message, &NONCE, &vector, &next_key);

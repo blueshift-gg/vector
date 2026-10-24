@@ -17,7 +17,7 @@ use solana_program_error::ProgramError;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_initialize_mldsa44,
     create_passthrough_instruction, create_withdraw_subinstruction, find_system_pda,
-    find_vector_pda, verify_advance_signature, MLDSA44,
+    find_vector_pda, verify_advance_signature, AdvanceSigner, MLDSA44,
 };
 
 use crate::common::{
@@ -164,7 +164,14 @@ fn advance_empty() {
     let digest = advance_vector_digest(&MLDSA44, &NONCE, &pk, &[], &[], None);
     let signature = sign(&digest, &sk);
     assert_eq!(
-        verify_advance_signature(&MLDSA44, &pk, &NONCE, &[], &[], None, &signature),
+        verify_advance_signature(
+            AdvanceSigner::new(&MLDSA44, &pk),
+            &NONCE,
+            &[],
+            &[],
+            None,
+            &signature
+        ),
         Ok(digest)
     );
     let advance_ix = create_advance_instruction(&MLDSA44, &pk, &signature);
@@ -195,7 +202,14 @@ fn advance_empty() {
     tampered[100] ^= 1;
     for invalid in [tampered, wrong_context] {
         assert_eq!(
-            verify_advance_signature(&MLDSA44, &pk, &NONCE, &[], &[], None, &invalid),
+            verify_advance_signature(
+                AdvanceSigner::new(&MLDSA44, &pk),
+                &NONCE,
+                &[],
+                &[],
+                None,
+                &invalid
+            ),
             Err(vector_core::VerifyError::SignatureInvalid)
         );
         let bad_ix = create_advance_instruction(&MLDSA44, &pk, &invalid);

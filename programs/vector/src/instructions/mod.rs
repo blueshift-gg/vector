@@ -15,6 +15,9 @@ pub use withdraw::Withdraw;
 pub mod close;
 pub use close::Close;
 
+pub mod initialize_nonce;
+pub use initialize_nonce::InitializeNonce;
+
 /// `Advance` and `Passthrough` read the instructions sysvar, which describes
 /// the transaction's top-level instructions. Called from inside another
 /// instruction, they would be reading their caller's place in the list.
