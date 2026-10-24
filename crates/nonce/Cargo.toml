@@ -1,0 +1,46 @@
+[package]
+name = "blueshift-nonce"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Durable nonces that outlive durable nonces: the nonce crates' API and the `solana` CLI's nonce commands, on Vector"
+
+[[bin]]
+name = "blueshift-nonce"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+# The CLI and its RPC client; the library needs neither.
+cli = [
+    "dep:clap",
+    "dep:solana-cli-config",
+    "dep:solana-commitment-config",
+    "dep:solana-keypair",
+    "dep:solana-native-token",
+    "dep:solana-presigner",
+    "dep:solana-rpc-client",
+]
+
+[dependencies]
+vector-core = { path = "../core" }
+serde = "1"
+solana-account = "4"
+solana-hash = { version = "4", features = ["copy"] }
+solana-instruction = { workspace = true }
+solana-message = "4"
+solana-pubkey = "4"
+solana-signature = "3"
+solana-signer = "3"
+solana-system-interface = { version = "3.3", features = ["bincode"] }
+solana-transaction = { version = "4", features = ["serde", "wincode"] }
+thiserror = "2"
+
+clap = { version = "4.6", features = ["derive"], optional = true }
+solana-cli-config = { version = "4.3", optional = true }
+solana-commitment-config = { version = "3", optional = true }
+solana-keypair = { version = "3.1", optional = true }
+solana-native-token = { version = "3", optional = true }
+solana-presigner = { version = "3", optional = true }
+solana-rpc-client = { version = "4", optional = true }

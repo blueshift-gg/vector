@@ -13,6 +13,11 @@ path = "lib.rs"
 
 [dependencies]
 vector-core = { path = "../crates/core" }
+blueshift-nonce = { path = "../crates/nonce", default-features = false }
+solana-hash = "4"
+solana-keypair = "3.1"
+solana-signer = "3"
+solana-signature = "3"
 mollusk-svm = "0.16.0"
 mollusk-svm-programs-token = "0.16.0"
 solana-account = "4.3.1"
@@ -23,6 +28,8 @@ solana-program-option = "3.1"
 solana-program-pack = "3.1"
 spl-token-interface = "2.0"
 solana-system-interface = { version = "3.3", features = ["bincode"] }
+solana-transaction = { version = "4", features = ["serde", "verify"] }
+bincode = "1"
 k256 = { version = "0.13", features = ["ecdsa"] }
 ed25519-dalek = "=2.1.1"
 solana-falcon512 = { workspace = true }

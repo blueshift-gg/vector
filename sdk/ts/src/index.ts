@@ -19,6 +19,7 @@ export * from "./scheme.js";
 export * from "./instructions.js";
 export * from "./digest.js";
 export * from "./verify.js";
+export * from "./nonce.js";
 
 export * from "./schemes/ed25519.js";
 export * from "./schemes/eip191.js";

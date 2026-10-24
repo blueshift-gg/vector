@@ -351,7 +351,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `signAdvanceInstructionSecp256k1(privateKey, nonce, pre, post, feePayer?)` — sign with plain secp256k1 ECDSA.
 - `signAdvanceInstructionFalcon512(keypair, nonce, pre, post, feePayer?)` — sign with Falcon-512 (post-quantum) via [`@noble/post-quantum/falcon.js`](https://github.com/paulmillr/noble-post-quantum); plus `falcon512Keygen`, `falcon512PublicKey`.
 - `signAdvanceInstructionMlDsa44(keypair, nonce, pre, post, feePayer?)` — sign with ML-DSA-44 (FIPS 204, post-quantum) via `@noble/post-quantum/ml-dsa.js`, empty context; plus `mldsa44Keygen`, `mldsa44PublicKey`.
-- `signedNonce(nonce, vectorNonce)` / `createInitializeNonceInstruction(nonceAccount, vector)` / `createCloseSubinstruction(scheme, identity, closeTo, nonceAccount?)` / `NONCE_ACCOUNT_LEN` / `NonceAccount.fromAccountData(data)` / `fetchNonceAccount(connection, nonceAccount)` — nonce accounts.
+- `signedNonce(nonce, vectorNonce)` / `createInitializeNonceInstruction(nonceAccount, vector)` / `createCloseSubinstruction(scheme, identity, closeTo, nonceAccount?)` / `NONCE_ACCOUNT_LEN` / `NonceAccount.fromAccountData(data)` / `fetchNonceAccount(connection, nonceAccount)` — nonce accounts; `createNonceAccount`, `getNonce`, `closeNonceAccount`, `systemAccount` and `NoncedTransaction` take web3.js durable nonce shapes (see [Migrating](#migrating-from-durable-nonces-blueshift-nonce)).
 - `verifyAdvanceSignature({ scheme, identity, nonceAccount? }, nonce, pre, post, signature, feePayer?)` — verify an advance signature fully offline, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
@@ -388,8 +388,48 @@ A vector account holds one nonce, so the transactions signed over it run one at 
 - **In any order.** Transactions over different nonce accounts land, fail and retry independently. Over one nonce account they stay ordered, with the same chain and pre-signing as the vector's own nonce, while the vector's own nonce stays put.
 - **Cancel everything.** Move the vector's own nonce: one `Advance` entry, with nothing else in its transaction. Every signature outstanding over the vector or any of its nonce accounts dies, since each took in that nonce. The nonce accounts themselves do not move; sign over their new `signed_nonce`.
 - **Not in its creation slot.** `Advance` and `Close` refuse a nonce account in the slot it was created in (`FreshNonce`). So an account closed and created again starts from a slot hash it never had, and never holds a nonce it held before.
-- **Close.** `Close` inside a `Passthrough`, with the nonce account as a third account, sends its lamports to the receiver and removes it. `create_close_nonce_subinstruction` / `createCloseSubinstruction` build it.
+- **Close.** `Close` inside a `Passthrough`, with the nonce account as a third account, sends its lamports to the receiver and removes it. `close_nonce_account` / `closeNonceAccount` build it.
 - **Not for Winternitz or XMSS.** Two nonces in flight would be two signatures by one key, so `InitializeNonce` refuses those vectors (`KeyRotates`).
+
+### Migrating from durable nonces (`blueshift-nonce`)
+
+`crates/nonce` is the `blueshift-nonce` crate: a library with the shapes durable nonce code already uses, and a CLI with the `solana` CLI's nonce commands. The cold key stays the nonce authority and signs offline with any `solana_signer::Signer`, a `Keypair` included.
+
+The one move: the authority's SOL, token accounts, and mint, freeze and stake authorities go once to `system_account(authority)` (`blueshift-nonce address`), a System account like any wallet. Instructions keep naming the cold key; `NoncedMessage` puts `system_account` in its place, and Vector signs as it.
+
+| Durable nonce | `blueshift-nonce` |
+|---|---|
+| `create_nonce_account(from, nonce, authority, lamports)` | the same |
+| `Message::new_with_nonce(ixs, payer, nonce, authority)` | `NoncedMessage::new_with_nonce(ixs, payer, nonce, authority)` |
+| `Transaction::new_unsigned(message)` | `NoncedTransaction::new_unsigned(message)` |
+| `tx.try_partial_sign(&[&authority], nonce)`, offline | the same |
+| `bincode::serialize(&tx)`, to carry it | the same: it serializes as a plain `Transaction` |
+| `tx.try_partial_sign(&[&payer, ..], nonce)`, then send | `tx.try_partial_sign(&[&payer, ..], recent_blockhash)` on that `Transaction`, then send |
+| `advance_nonce_account` (cancel) | `NoncedMessage::new_with_nonce(vec![], ..)` |
+| `withdraw_nonce_account` | `close_nonce_account(nonce, authority, to)`, for all its lamports, in a `NoncedMessage` |
+| `solana_nonce::state::{State, Data}`, `state_from_account`, `data_from_account`, `data_from_state`, `account_identity_ok` | the same names; `state_from_account` / `data_from_account` also take the vector account, whose nonce is part of `Data::blockhash()`. Fetch both with your own RPC client |
+| `solana create-nonce-account KEYPAIR AMOUNT --nonce-authority PUBKEY` | `blueshift-nonce create-nonce-account ..`, which also creates the authority's vector |
+| `solana nonce` / `new-nonce` / `withdraw-from-nonce-account` | `blueshift-nonce nonce` (also `nonce-account`) / `new-nonce` / `close-nonce-account` |
+| `solana transfer TO AMOUNT --nonce N --nonce-authority KEY --sign-only` | `blueshift-nonce transfer TO AMOUNT --nonce N --nonce-authority KEY --sign-only`, from `system_account`; `--blockhash NONCE` signs with no RPC |
+| `--signer AUTHORITY=SIG`: submit later | the same |
+
+Whoever submits handles a plain `Transaction` and needs nothing from this crate: the nonce authority's signature travels inside Vector's `Advance`, and the fee payer and any other signer, such as a new account, sign the transaction over a recent blockhash.
+
+TypeScript, on `@solana/web3.js`, takes the same shapes:
+
+| `@solana/web3.js` durable nonce | Vector SDK |
+|---|---|
+| `SystemProgram.createNonceAccount({ fromPubkey, noncePubkey, authorizedPubkey, lamports })` | `createNonceAccount({ .. })`, the same parameters |
+| `connection.getNonce(nonceAccount).nonce` | `getNonce(connection, nonceAccount)`, as bytes |
+| `SystemProgram.nonceWithdraw(..)` | `closeNonceAccount({ noncePubkey, authorizedPubkey, toPubkey })`, for all its lamports |
+| `new Transaction({ feePayer, nonceInfo: { nonce, nonceInstruction } })` | `new NoncedTransaction({ feePayer, nonceInfo: { nonce, nonceAccount, authority } })` |
+| `tx.add(SystemProgram.transfer({ fromPubkey: authority, .. }))` | the same; the authority becomes `systemAccount(authority)` |
+| `await tx.partialSign(authority)`, `tx.serialize({ requireAllSignatures: false })` | the same |
+| `Transaction.from(bytes)`, `partialSign(feePayer)`, send | the same, after `tx.recentBlockhash = latest` |
+
+The library needs no RPC client; the CLI is its default `cli` feature (`default-features = false` leaves it out). The CLI reads `solana config` for the URL and the fee payer (`--fee-payer` takes a pubkey with `--sign-only`). Its signers are keypair files for now, not `usb://` or `prompt:`.
+
+What else changes: whoever submits sets a recent blockhash, while the authority's signature stays valid until its nonce moves. `authorize_nonce_account` has no counterpart: a nonce account belongs to one vector. `BlockhashQuery` is left out, because the nonce and the blockhash are now separate values.
 
 ### Unilateral revocation
 
