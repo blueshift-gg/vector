@@ -8,6 +8,8 @@ use solana_address::{address, Address};
 
 /// The program's own errors, as `ProgramError::Custom`.
 pub use vector::error::VectorError;
+/// What a key signs, and how an `Advance` expires: `"vector:" || digest`.
+pub use vector::scheme::{signed, NEVER_EXPIRES, SIGNED_LEN, SIGNED_PREFIX, VALID_UNTIL_LEN};
 /// A nonce account, as the program defines it.
 pub use vector::state::NonceAccount;
 /// The account header, as the program defines it.

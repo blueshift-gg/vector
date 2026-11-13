@@ -10,6 +10,7 @@ use pqcrypto_traits::sign::{DetachedSignature, PublicKey as _};
 use solana_account::Account;
 use solana_address::Address;
 use solana_falcon512::Falcon512Pubkey;
+use solana_program_error::ProgramError;
 use vector_core::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
     create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
@@ -23,8 +24,8 @@ use crate::common::{
 
 /// Sign via PQClean and zero-pad the variable-length detached signature to
 /// the wire-format 666 bytes the on-chain verifier expects.
-fn sign(msg: &[u8], sk: &falcon512::SecretKey) -> [u8; FALCON512.signature_len] {
-    let sig = falcon512::detached_sign(msg, sk);
+fn sign(digest: &[u8; 32], sk: &falcon512::SecretKey) -> [u8; FALCON512.signature_len] {
+    let sig = falcon512::detached_sign(&vector_core::signed(digest), sk);
     let sig_bytes = sig.as_bytes();
     assert!(sig_bytes.len() <= FALCON512.signature_len);
     let mut out = [0u8; FALCON512.signature_len];
@@ -42,7 +43,7 @@ fn wire_pubkey(pk: &falcon512::PublicKey) -> [u8; FALCON512.identity_len] {
 
 /// What the account stores: the prepared public key.
 fn stored_identity(wire: &[u8; FALCON512.identity_len]) -> Vec<u8> {
-    let pk = Falcon512Pubkey::try_from_slice(wire).expect("valid wire pubkey");
+    let pk = Falcon512Pubkey::<false>::try_from_slice(wire).expect("valid wire pubkey");
     let prepared = pk.try_prepare_pubkey().expect("preparable pubkey");
     prepared.as_bytes().to_vec()
 }
@@ -249,4 +250,97 @@ fn withdraw_via_advance() {
                 .build(),
         ],
     );
+}
+
+// Rejection of malformed Falcon signatures (encoding, padding, header, norm
+// bound) is tested in `solana-falcon512` itself, against PQClean. These check
+// only that the program refuses what the verifier refuses, and changes nothing.
+
+/// An account at `NONCE` and the digest an empty advance on it signs.
+struct Rejection {
+    mollusk: mollusk_svm::Mollusk,
+    identity: [u8; FALCON512.identity_len],
+    vector: Address,
+    account: Account,
+    digest: [u8; 32],
+    sk: falcon512::SecretKey,
+}
+
+impl Rejection {
+    fn new() -> Self {
+        let mut mollusk = mollusk();
+        mollusk.compute_budget.compute_unit_limit = 500_000;
+        let (pk, sk) = falcon512::keypair();
+        let identity = wire_pubkey(&pk);
+        let (vector, _) = find_vector_pda(&FALCON512, &identity);
+        let account = build_vector_account(
+            NONCE,
+            &FALCON512,
+            &identity,
+            mollusk.sysvars.rent.minimum_balance(FALCON512.account_len),
+            &stored_identity(&identity),
+        );
+        let digest = advance_vector_digest(&FALCON512, &NONCE, &identity, &[], &[], None);
+        Self {
+            mollusk,
+            identity,
+            vector,
+            account,
+            digest,
+            sk,
+        }
+    }
+
+    /// The advance fails and leaves the account as it was.
+    fn assert_rejected(&self, signature: &[u8; FALCON512.signature_len]) {
+        let ix = create_advance_instruction(&FALCON512, &self.identity, signature);
+        let accounts = [(self.vector, self.account.clone())];
+        let result = self.mollusk.process_instruction(&ix, &accounts);
+        assert_eq!(
+            result.program_result,
+            mollusk_svm::result::ProgramResult::Failure(ProgramError::MissingRequiredSignature)
+        );
+        assert_eq!(result.resulting_accounts, accounts);
+    }
+}
+
+#[test]
+fn advance_untouched_signature_succeeds() {
+    let fixture = Rejection::new();
+    let signature = sign(&fixture.digest, &fixture.sk);
+    let ix = create_advance_instruction(&FALCON512, &fixture.identity, &signature);
+    let expected = expected_advanced_data(
+        fixture.digest,
+        &FALCON512,
+        &fixture.identity,
+        &stored_identity(&fixture.identity),
+    );
+    fixture.mollusk.process_and_validate_instruction_chain(
+        &[(
+            &ix,
+            &[
+                Check::success(),
+                Check::account(&fixture.vector).data(&expected).build(),
+            ],
+        )],
+        &[(fixture.vector, fixture.account.clone())],
+    );
+}
+
+#[test]
+fn advance_signature_over_another_digest_fails() {
+    let fixture = Rejection::new();
+    fixture.assert_rejected(&sign(&[7; 32], &fixture.sk));
+}
+
+#[test]
+fn advance_signature_of_another_key_fails() {
+    let fixture = Rejection::new();
+    let (_, other) = falcon512::keypair();
+    fixture.assert_rejected(&sign(&fixture.digest, &other));
+}
+
+#[test]
+fn advance_all_zero_signature_fails() {
+    Rejection::new().assert_rejected(&[0; FALCON512.signature_len]);
 }

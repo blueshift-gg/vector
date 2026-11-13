@@ -1,7 +1,7 @@
 # Vector
-Vector is a Solana primitive for offchain transaction signing that can be used in place of durable nonce workflows.
+Vector is a Solana primitive for offchain transaction signing: it lets an account be controlled by a key that Solana does not verify natively, and it expires and replays-protects what that key signs without durable nonces.
 
-It works by computing a SHA-256 digest of a transaction offchain, signing that digest with one of several supported schemes, and then reproducing the same digest onchain from the instructions sysvar at execution time. The on-chain program verifies the signature before allowing execution to proceed.
+It works by computing a SHA-256 digest of a transaction offchain, signing `vector:` followed by that digest with one of several supported schemes, and then reproducing the same digest onchain from the instructions sysvar at execution time. The on-chain program verifies the signature before allowing execution to proceed.
 
 This means a Vector account can be controlled by a standard Solana Ed25519 keypair, a plain secp256k1 ECDSA key, an Ethereum (EIP-191) secp256k1 address, or a post-quantum ML-DSA-44, Falcon-512, Winternitz or XMSS key. One program serves every scheme; all of them share the account header and authorization flow. Winternitz and XMSS additionally support key rotation and require persistent signing state.
 
@@ -10,9 +10,9 @@ A Vector authorization flow proceeds as follows:
 
 1. A transaction is constructed offchain.
 2. Its instruction buffer, with the signatures left out, is SHA-256 hashed into a message.
-3. The message is hashed again with the current Vector nonce and the account address, and that digest is signed offchain.
+3. The message is hashed again with the current Vector nonce, the account address and the signature's expiry slot, and `"vector:" || digest` is signed offchain.
 4. The transaction is submitted onchain.
-5. Vector reads the instruction sysvar, recomputes the same digest, and verifies the signature against it.
+5. Vector reads the instruction sysvar, checks the signature has not expired, recomputes the same digest, and verifies the signature against `"vector:" || digest`.
 
 If verification succeeds, Vector installs that same digest as its next nonce, creating a history-based hashchain. Any CPIs the signer authorized run in a sibling top-level `Passthrough` instruction in the same transaction (see [Passthrough CPI](#passthrough-cpi)); the digest commits to its exact bytes.
 
@@ -26,18 +26,18 @@ Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving ev
 
 | Scheme | Scheme byte | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
 |--------|------------|----------|-----------|---------------------------|------------------|
-| Ed25519    | `1` | 32-byte public key                | 64 bytes `(r, s)`    | 32 B pubkey                          | SHA-256          |
-| Secp256k1  | `3` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | SHA-256          |
-| EIP-191    | `2` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | EIP-191 + SHA-256|
-| Falcon-512 | `4` | 897-byte wire pubkey              | 666 bytes (zero-padded compressed) | 1024 B prepared pubkey | SHA-256 |
-| ML-DSA-44 | `5` | 1,312-byte public key | 2,420 bytes | 1,312 B pubkey + 20,544 B prepared key | SHA-256 |
-| Winternitz | `6` | 41-byte first public key | 849 bytes | 41 B current key | SHA-256 |
-| XMSS | `7` | 41-byte first public key | 1,037 bytes | 41 B current key + 4 B next leaf | SHA-256 |
+| Ed25519    | `1` | 32-byte public key                | 64 bytes `(r, s)`    | 32 B pubkey                          | `vector:` prefix |
+| Secp256k1  | `3` | 33-byte compressed pubkey         | 64 bytes `(r, s)`    | 33 B compressed pubkey               | `vector:` prefix, SHA-256 |
+| EIP-191    | `2` | 20-byte ETH address               | 65 bytes `(r, s, v)` | 20 B ETH address                     | `vector:` prefix, EIP-191 |
+| Falcon-512 | `4` | 897-byte wire pubkey              | 666 bytes (zero-padded compressed) | 1024 B prepared pubkey | `vector:` prefix |
+| ML-DSA-44 | `5` | 1,312-byte public key | 2,420 bytes | 1,312 B pubkey + 20,544 B prepared key | `vector:` prefix |
+| Winternitz | `6` | 41-byte first public key | 849 bytes | 41 B current key | `vector:` prefix, SHA-256 |
+| XMSS | `7` | 41-byte first public key | 1,037 bytes | 41 B current key + 4 B next leaf | `vector:` prefix, SHA-256 |
 
 The scheme byte is a field of the account header and a PDA seed. The program reads it from the account and routes to that scheme, so an account is always handled by the scheme that created it. Only `Initialize`, which has no account yet, takes the byte in its instruction data. Zero is not a scheme, so a zeroed account that someone assigns to the program belongs to none.
 
 ### Ed25519
-The signer's 32-byte Ed25519 public key is stored directly in the account. The 64-byte `(r, s)` signature is verified directly over the SHA-256 digest. Verification uses [`brine-ed25519`](https://github.com/zfedoran/brine-ed25519) with its `fast-sha512` feature, which keeps Ed25519 advance under ~14k CUs.
+The signer's 32-byte Ed25519 public key is stored directly in the account. `Initialize` refuses a key of small order (the eight torsion points) and a second encoding of a point (y at least p): the first can never sign and the second lets anyone sign. The 64-byte `(r, s)` signature is verified directly over the 39 bytes `"vector:" || digest`. Verification uses [`brine-ed25519`](https://github.com/zfedoran/brine-ed25519) with its `fast-sha512` feature, which keeps Ed25519 advance under ~14k CUs.
 
 ### Secp256k1 (plain ECDSA)
 A standard secp256k1 ECDSA signer with sec1-compressed public keys. The 33-byte compressed pubkey (`0x02`/`0x03` prefix + 32-byte x-coordinate) is the identity: stored verbatim after the account header and used directly (`> 32` bytes → `sha256`) as the PDA seed. Signatures are 64 bytes `(r, s)` with no recovery byte; verification runs standard ECDSA via the [`solana-secp256k1-ecdsa`](https://crates.io/crates/solana-secp256k1-ecdsa) crate (~72k CUs advance).
@@ -47,12 +47,12 @@ This scheme is the natural fit for non-EIP-191 secp256k1 contexts (Bitcoin-style
 ### EIP-191 (Ethereum)
 The signer's 20-byte Ethereum address is the identity, stored raw (no padding) after the account header and used directly as the PDA seed.
 
-Signatures are 65 bytes: `r(32) || s(32) || v(1)`, where `v` is the ECDSA recovery ID (0 or 1). Embedding `v` in the instruction data allows on-chain verification with a single `sol_secp256k1_recover` call. The recovery ID is part of the signature, so it is outside the signed message and does not create a circular dependency.
+Signatures are 65 bytes: `r(32) || s(32) || v(1)`, where `v` is the ECDSA recovery ID: 0 or 1, or 27 or 28 as wallets return it (the program takes `v % 27`). Embedding `v` in the instruction data allows on-chain verification with a single `sol_secp256k1_recover` call. The recovery ID is part of the signature, so it is outside the signed message and does not create a circular dependency.
 
-Before signing and recovery, the SHA-256 digest is wrapped in an EIP-191 personal-sign envelope:
+Before signing and recovery, the 39 bytes `"vector:" || digest` are wrapped in an EIP-191 personal-sign envelope:
 
 ```
-signed_hash = keccak256("\x19Ethereum Signed Message:\n32" || digest)
+signed_hash = keccak256("\x19Ethereum Signed Message:\n39" || "vector:" || digest)
 ```
 
 This means any standard Ethereum wallet that supports `personal_sign` can produce valid Vector signatures. On-chain, the program applies the same EIP-191 wrapping before calling `secp256k1_recover`, then derives the Ethereum address via `keccak256(recovered_pubkey)[12..32]` and compares it against the stored address.
@@ -60,9 +60,11 @@ This means any standard Ethereum wallet that supports `personal_sign` can produc
 ### Falcon-512
 Vector supports the post-quantum [Falcon-512](https://falcon-sign.info/) lattice signature scheme via [`solana-falcon512`](https://github.com/blueshift-gg/solana-falcon512), giving forward-secure account control even against an adversary with a cryptographically relevant quantum computer.
 
+**Reference.** The specification is [Falcon / FN-DSA](https://falcon-sign.info) (round 3, Falcon-512). `solana-falcon512` is a verify-only port; the reference implementation it is checked against is [PQClean](https://github.com/PQClean/PQClean)'s `falcon-512` (through `pqcrypto-falcon`, which signs in this repository's tests). Keys and signatures are made by a reference signer, never by Vector. The crate does not check that a public key came from real key generation, only that it parses, so a key nobody holds the secret to can be registered; that only strands the account of whoever registers it.
+
 Wire pubkeys are 897 bytes, and the wire pubkey is the client identity. Like every scheme, the PDA seed is its SHA-256.
 
-To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a 1024-byte form with the forward NTT and modular inverse pre-baked) in the account's identity region. The account stores only that prepared form; after the 68-byte header it sits at an even account offset, so the verifier can borrow it zero-copy (a 1024-byte stack copy would overflow the BPF frame). The prepared form is computed once at `initialize` (~60k CUs); subsequent `advance` calls only pay the signature-verify cost (173k–184k CUs, depending on the key and signature).
+To keep on-chain verification cheap, Vector stores Falcon's *prepared pubkey* (a 1024-byte form with the forward NTT and modular inverse pre-baked) in the account's identity region. The account stores only that prepared form; after the 76-byte header it sits at an even account offset, so the verifier can borrow it zero-copy (a 1024-byte stack copy would overflow the BPF frame). The prepared form is computed once at `initialize` (about 55K CU); subsequent `advance` calls only pay the signature-verify cost (about 170K CU, varying a little with the key and signature).
 
 Falcon signatures are variable-length (compressed Huffman); the wire format zero-pads to 666 bytes so the signature length is constant.
 
@@ -70,9 +72,9 @@ Falcon signatures are variable-length (compressed Huffman); the wire format zero
 
 Vector verifies [ML-DSA-44 (FIPS 204)](https://csrc.nist.gov/pubs/fips/204/final) through [`solana-ml-dsa`](https://github.com/blueshift-gg/solana-ml-dsa), using SHAKE128/256 and an empty context. The 1,312-byte public key is the identity and is hashed for the PDA seed. Rust callers supply signatures from an external signer; the TypeScript SDK uses Noble's `ml_dsa44`.
 
-The program prepares the key on chain once, following Falcon's approach. The 21,924-byte account holds the 68-byte header, then `public_key[1312] || prepared_key[20544]`. Registration is three `Initialize` calls: the first creates the account and carries the key, the next two are permissionless and grow it; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
+The program prepares the key on chain once, following Falcon's approach. The 21,932-byte account holds the 76-byte header, then `public_key[1312] || prepared_key[20544]`. Registration is three `Initialize` calls: the first creates the account and carries the key, the next two are permissionless and grow it; each allocation grows by at most 10,240 bytes. Account length records progress, and `Advance` rejects incomplete accounts. The public key remains fixed.
 
-Registration takes about 1.1M CU and a subsequent `Advance` about 264K CU in local SBPF tests. Registration and the 2,420-byte signature require [V1 transactions](https://solana.com/upgrades/larger-transaction-sizes); callers supply the transaction limits. The SDK builds instructions and does not submit transactions. The workspace pins `solana-ml-dsa` to a git revision; publish the crate with its required `solana-shake` revision and depend on the release before deploying.
+Registration takes about 1.1M CU and a subsequent `Advance` about 262K CU in local SBPF tests. Figures are approximate: the message hash grows with the transaction, so every `Advance` costs a little more or less than these. Registration and the 2,420-byte signature require [V1 transactions](https://solana.com/upgrades/larger-transaction-sizes); callers supply the transaction limits. The SDK builds instructions and does not submit transactions. The workspace pins `solana-ml-dsa` to a git revision; publish the crate with its required `solana-shake` revision and depend on the release before deploying.
 
 ### Winternitz and XMSS
 
@@ -107,19 +109,32 @@ The program makes a signature that lands use its key up:
 
 What the program cannot see is signing off chain. Never sign different authorizations with the same Winternitz key or XMSS leaf: once one of them lands the key or leaf is dead, but until then two signatures are public. The program does not check that a replacement key is fresh, so callers still manage key freshness and persistent signing state. Failed salt sampling and abandoned authorizations consume signing attempts too.
 
+**A broadcast signature burns its key or leaf.** A signature is public the moment it leaves the signer, whether or not it lands. If the transaction then fails, expires (`valid_until`), or is dropped, the account still holds the same key, and signing a *different* digest with that Winternitz key or XMSS leaf hands an attacker two signatures under one leaf. With this scheme's target-sum encoding that makes a forgery feasible by grinding, on the order of a million hashes by one estimate (not independently verified). So:
+
+- After a signature is released, only rebroadcast those exact bytes. Never re-sign the same key or leaf for a changed or refreshed transaction.
+- Persist the next key (Winternitz) or leaf counter (XMSS) *before* releasing a signature, not after it lands.
+- Prefer `NEVER_EXPIRES` (or a generous `valid_until`) for these two schemes: an expiry that lapses before the signature lands strands the account, because the only fix is to re-sign. This is the opposite of the advice for Ed25519 and the others, and it has a cost: a transaction nobody lands can be held and submitted later, so use the longest window you can accept and revoke (move the nonce) if you give up on it.
+- The program does not check that `next_key` is fresh or even well formed. Rotating back to an earlier key (A→B→A) is accepted, and for XMSS it reopens every leaf that key already used; a malformed `next_key` locks the account. Only the signer can choose `next_key`, because the digest covers it, but the signer's software must never reuse a retired key.
+- XMSS leaf 255 can only be used as a rotation, never to keep the key.
+
 Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
 
 The workspace pins `solana-winternitz` to a git revision. Publish that crate and depend on the release before deploying. Build the program with `cargo build-sbf --manifest-path programs/vector/Cargo.toml`. It is undeployed.
 
 ### Digest Construction
-Every signer of an `Advance` approves the same message: the instructions sysvar buffer with the `Advance`'s data cut out after its discriminator. Each signer's digest then adds its own next key, so the signatures are the only bytes nobody signs:
+Every signer of an `Advance` approves the same message: the instructions sysvar buffer with the `Advance`'s next keys and signatures cut out. The `Advance`'s discriminator and its one `valid_until` (a u64 LE slot, `u64::MAX` for none) stay in, so every signature covers the same expiry. Each signer's digest then adds its own nonce, address and next key, so the signatures are the only bytes nobody signs:
 
 ```
-message = SHA256(buffer[..advance_data_start + 1] || buffer[advance_data_end..])
+message = SHA256(buffer[..advance_data_start + 1 + 8] || buffer[advance_data_end..])
 digest  = SHA256(message || nonce || vector_address || next_key)
+signed  = "vector:" || digest
 ```
 
-Each signer signs its own `digest`: the shared message, then its account's current nonce, address and next key (empty for a key that never changes).
+Each signer signs its own `signed`: the shared message, then its account's current nonce, address and next key (empty for a key that never changes), behind the prefix `vector:`.
+
+**Why the prefix.** A key never signs a bare 32-byte hash. Without the prefix, anything that gets a wallet to sign 32 bytes (a login challenge, a hex nonce, another protocol's hash) would be a valid authorization over a digest the attacker chose, and a hardware wallet's "sign message" would show opaque hex. With it, a signature made for another purpose is not an `Advance` authorization, and a wallet shows `vector:` first. Ed25519 signs the 39 bytes directly; plain secp256k1 signs their SHA-256; EIP-191 is `personal_sign` of the 39 bytes; Falcon-512 and ML-DSA-44 sign the 39 bytes as their message; Winternitz and XMSS, which sign a fixed 32 bytes, sign their SHA-256.
+
+**Expiry.** One `valid_until` leads the `Advance`'s data, for every signer. `Advance` fails with `Expired` once the slot is past it. The message covers it, so every signature does: a relayer cannot extend it, and no signer can extend it for the others by signing again alone. Changing it needs every signer to sign again. A signed transaction that fails on chain does not move the nonce (the whole transaction rolls back), so without an expiry its signed bytes stay a valid authorization: whoever sees them can submit them again later, with their own fee payer. Set `valid_until` on anything signed in advance (Winternitz and XMSS are the exception: see [Key rotation](#key-rotation)), and move the nonce (see [Unilateral revocation](#unilateral-revocation)) to cancel one that has none.
 
 Everything else in the buffer — the discriminator, the accounts, CPI payload, surrounding instructions, and sysvar framing — is committed to by the message.
 
@@ -151,7 +166,7 @@ Each instruction starts with its discriminator byte.
 | `4`  | Close       | only via Passthrough reentry | inherited from the authorising Advance; with a third account, closes that nonce account of the vector |
 | `5`  | InitializeNonce | yes | the nonce account signs, as it does its `CreateAccount`; the vector must exist and not rotate its key |
 
-`Advance` carries the next key of each rotating account, then one signature per account — its handler verifies each, installs the digest as the next nonce (and the next key), and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler refuses to run unless the first `Advance`, earlier in the transaction, lists every account it signs for. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`). The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
+`Advance` carries one `valid_until`, then for each account its next key (rotating schemes only) and its signature — its handler checks the expiry, verifies each signature, installs the digest as the next nonce (and the next key), and rejects any trailing payload. CPIs under the PDA's signer seeds go in a separate top-level `Passthrough` instruction, whose handler refuses to run unless the first `Advance`, earlier in the transaction, lists every account it signs for. `Close` and `Withdraw` are reachable as top-level instructions in name only — their handlers gate on `vector.is_signer()`, which can only be true when the instruction is reached as a CPI from `Passthrough` (which signs as the PDA via `invoke_signed`), and on the account being a complete vector account of the program: a nonce account, whose own keypair can sign, is not one. The user authorises any combination of close/withdraw/arbitrary CPIs by signing an `Advance` whose digest commits to the sibling `Passthrough`'s exact bytes. Winterwallet combines key advancement and CPIs in one instruction; Vector keeps `Advance` and `Passthrough` separate.
 
 ## Passthrough CPI
 Vector acts as a narrow CPI gate in front of ordinary Solana execution. Its role is limited to verifying that the current transaction exactly matches the transaction that was signed offchain against the current Vector state. Once `Advance`'s check succeeds, a sibling top-level `Passthrough` instruction in the same transaction replays its embedded sub-instructions, taking its trailing accounts along with the embedded instruction data and performing CPI actions for the owner. The passthrough handler authorises itself by reading, from the instructions sysvar, the first `Advance` before it and checking it lists every signer — transaction atomicity guarantees that advance verified, or the whole transaction aborted.
@@ -187,6 +202,8 @@ A bad signature is `MissingRequiredSignature`, and every other standard `Program
 | `5` | `ForeignNonce` | `Advance`, `Close`: the nonce account belongs to another vector |
 | `6` | `KeyRotates` | `InitializeNonce`: the vector is Winternitz or XMSS |
 | `7` | `FreshNonce` | `Advance`, `Close`: the nonce account was created in this slot |
+| `8` | `FreshVector` | `Close`: the vector account was created in this slot |
+| `9` | `Expired` | `Advance`: the slot is past the transaction's `valid_until` |
 
 ## Security Model
 The signer is authorizing a concrete transaction buffer, not a reusable nonce and not a partially specified intent. Since the signed digest is reconstructed from the instruction sysvar onchain, any material change to the transaction changes the digest and invalidates the signature.
@@ -225,11 +242,13 @@ Vector avoids this breakdown of security assumptions entirely by deriving each V
 In addition to reducing exposure to such attacks from N+i to N+1, if at any point the immediate next state, or any chain of future states derived from it are believed to be compromised, it is sufficient to simply advance the Vector state with a single, inert transition. This invalidates every hypothetical future signature derived from the previous nonce, permanently orphaning the entire branch of potential future states.
 
 ## Transaction Expiration
-Vector only invalidates a signature once the Vector nonce advances. This means signatures revealed in transactions that failed due to transient conditions such as slippage could later become valid and be replayed. Furthermore, a malicious relayer could withold the transaction, waiting until conditions move in their favor, such as a stale quote, a shift in the market market or a liquidation threshold, before submitting.
+A signature is otherwise valid until the Vector nonce advances. This means signatures revealed in transactions that failed due to transient conditions such as slippage could later become valid and be replayed. Furthermore, a malicious relayer could withold the transaction, waiting until conditions move in their favor, such as a stale quote, a shift in the market market or a liquidation threshold, before submitting.
 
-The mitigation is a small timeout instruction placed as a top-level instruction alongside `advance`. Because the signature commits to the entire instructions sysvar, the timeout is part of the authorized buffer. A minimal program such as [sbpf-asm-timeout](https://github.com/deanmlittle/sbpf-asm-timeout) reads a deadline from its instruction data, reads the current slot or unix timestamp from the clock sysvar, and aborts if the deadline has passed. Any submission attempt after the deadline fails, invalidating the signature.
+The first mitigation is built in: every `Advance` carries one `valid_until` slot, which the message covers. `Advance` fails with `Expired` once the slot is past it, so a withheld or failed transaction dies on its own. `u64::MAX` means no expiry; use it only for what a kill-switch can cancel.
 
-Vector deliberately remains unopinionated about expiration so users can compose with whatever deadline primitive suits their needs (slot-based, unix-time-based, oracle-based) without bloating the core protocol.
+For deadlines `valid_until` cannot express, the other is a small timeout instruction placed as a top-level instruction alongside `advance`. Because the signature commits to the entire instructions sysvar, the timeout is part of the authorized buffer. A minimal program such as [sbpf-asm-timeout](https://github.com/deanmlittle/sbpf-asm-timeout) reads a deadline from its instruction data, reads the current slot or unix timestamp from the clock sysvar, and aborts if the deadline has passed. Any submission attempt after the deadline fails, invalidating the signature.
+
+Beyond the slot, Vector stays unopinionated about expiration so users can compose with whatever deadline primitive suits their needs (unix-time-based, oracle-based) without bloating the core protocol.
 
 ## Relayers and EOAs
 Vector constrains a relayer from modifying a user's transaction. It makes no attempt to eliminate the relayer's own trust and custody risks towards the user. Relayers may fail operationally even though Vector's transaction authorization remains intact.
@@ -240,16 +259,17 @@ One simple way to mitigate this is to require Vector users to place an ownership
 
 ## Account Layout
 
-A Vector account is a PDA at `["vector", [scheme], seed]`, with a fixed 68-byte header followed by the scheme's identity bytes:
+A Vector account is a PDA at `["vector", [scheme], seed]`, with a fixed 76-byte header followed by the scheme's identity bytes:
 
 ```
 nonce:    [u8; 32]  // offset  0 — current state nonce
 seed:     [u8; 32]  // offset 32 — sha256 of the key the account was created with
-scheme:   u8        // offset 64 — scheme byte
-bump:     u8        // offset 65 — PDA bump seed
-system_bump: u8     // offset 66 — bump of the account's system PDA
-pad:      u8        // offset 67 — zero
-identity: [u8; N]   // offset 68 — N = stored identity length
+created:  u64       // offset 64 — the slot the account was created in
+scheme:   u8        // offset 72 — scheme byte
+bump:     u8        // offset 73 — PDA bump seed
+system_bump: u8     // offset 74 — bump of the account's system PDA
+pad:      u8        // offset 75 — zero
+identity: [u8; N]   // offset 76 — N = stored identity length
 ```
 
 The system PDA is `[vector address, system_bump]` under the program and belongs to the System program. The pad keeps the identity at a multiple of 4, where Falcon-512 and ML-DSA-44 read their prepared key in place.
@@ -262,24 +282,24 @@ vector:  [u8; 32]  // offset 32 — the vector account whose key signs over it
 created: u64       // offset 64 — the slot it was created in
 ```
 
-No vector account is 72 bytes, so the program tells the two apart by length.
+No vector account is 72 bytes, so the program tells the two apart by length: every instruction that acts for a vector loads it with one check, that it is the program's, names a known scheme in its header, and is exactly as long as that scheme says. A nonce account never passes it.
 
 The seed is the SHA-256 of the key given to `Initialize`, for every scheme. It is stored so the account can sign as itself without re-deriving it. For Winternitz/XMSS it is the hash of the first key, also after rotation.
 
-| Scheme      | Total Account Size | Identity Bytes (offset 68)                      |
+| Scheme      | Total Account Size | Identity Bytes (offset 76)                      |
 |-------------|--------------------|-------------------------------------------------|
-| Ed25519     | 100 B              | 32 B public key                                 |
-| EIP-191     | 88 B               | 20 B ETH address                                |
-| Secp256k1   | 101 B              | 33 B compressed pubkey                          |
-| Falcon-512  | 1092 B             | 1024 B prepared public key                      |
-| ML-DSA-44   | 21,924 B           | 1,312 B public key + 20,544 B prepared key |
-| Winternitz | 109 B | 41 B current public key |
-| XMSS | 113 B | 41 B current public key + 4 B next leaf (u32 LE) |
+| Ed25519     | 108 B              | 32 B public key                                 |
+| EIP-191     | 96 B               | 20 B ETH address                                |
+| Secp256k1   | 109 B              | 33 B compressed pubkey                          |
+| Falcon-512  | 1100 B             | 1024 B prepared public key                      |
+| ML-DSA-44   | 21,932 B           | 1,312 B public key + 20,544 B prepared key |
+| Winternitz | 117 B | 41 B current public key |
+| XMSS | 121 B | 41 B current public key + 4 B next leaf (u32 LE) |
 
 Two schemes cannot share a PDA: the scheme byte is one of the seeds, so the same identity bytes derive a different address under each scheme. The header's scheme byte is what the program routes on.
 
 ## Initialization
-A Vector account is created via the `initialize` instruction, which allocates the `68 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...key]` (the only instruction that carries the scheme byte), where `key` is the identity:
+A Vector account is created via the `initialize` instruction, which allocates the `76 + stored_identity_len` byte PDA. Instruction data: `[disc, scheme, ...key]` (the only instruction that carries the scheme byte), where `key` is the identity:
 
 | Scheme      | `key`                     | Stored Identity                              |
 |-------------|---------------------------|----------------------------------------------|
@@ -291,7 +311,7 @@ A Vector account is created via the `initialize` instruction, which allocates th
 | Winternitz | 41-byte public key | the current 41-byte key |
 | XMSS | 41-byte public key | the current 41-byte key, then the next leaf |
 
-`initialize` allocates the full `68 + stored_identity_len` bytes, and every
+`initialize` allocates the full `76 + stored_identity_len` bytes, and every
 scheme but ML-DSA-44 registers in one call. An instruction can grow an account
 by at most 10,240 bytes, so ML-DSA-44's first `initialize` creates that much
 and two more, with no data, grow and fill the rest; the three fit one
@@ -299,9 +319,9 @@ transaction.
 An address that already holds lamports can still be initialized: the payer
 funds only the shortfall.
 
-For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte address must be non-zero. For Secp256k1, the compressed pubkey must start with `0x02` or `0x03`. For Falcon-512, the wire pubkey is validated and expanded into the 1024-byte prepared form at init time. For ML-DSA-44, the public key is stored verbatim and expanded across the three `initialize` calls.
+For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte address must be non-zero. For Secp256k1, the compressed pubkey must start with `0x02` or `0x03` and its x coordinate must lift to a point on the curve (a key that does not could never sign, and would hold the account for good). For Falcon-512, the wire pubkey is validated and expanded into the 1024-byte prepared form at init time. For ML-DSA-44, the public key is stored verbatim and expanded across the three `initialize` calls.
 
-The initial nonce is derived entirely onchain using the `sol_get_sysvar` syscall to read the most recent slot hash and height from the `SlotHashes` sysvar: `sha256(seed || latest_slot_entry)`. If an account is closed and the same identity is later re-initialized, the nonce differs, as the slot hash changes in every slot. Replaying a prior signature chain would require the account to be opened, used, closed, reopened and replayed all within the same slot. Do not create and close an account in the same slot.
+The initial nonce is derived entirely onchain using the `sol_get_sysvar` syscall to read the most recent slot hash and height from the `SlotHashes` sysvar: `sha256(seed || latest_slot_entry)`. If an account is closed and the same identity is later re-initialized, the nonce differs, as the slot hash changes in every slot. The header records the slot the account was created in, and `Close` refuses the account in that slot (`FreshVector`), so an account is never closed and created again within one slot, and never starts from a nonce it held before.
 
 ## Closing and Partial Withdraw
 `Close` empties the PDA's lamports into a `close_to` account; the runtime removes an account with no lamports at the end of the transaction. `Withdraw` moves a fixed amount of lamports out; the runtime refuses to leave the account below rent-exemption unless it leaves it empty.
@@ -321,24 +341,24 @@ The `vector-core` crate provides off-chain helpers for constructing Vector trans
 - `create_initialize_instruction(payer, &scheme, identity)` — generic init-instruction builder; `create_initialize_instructions` returns every call the scheme needs.
 - `find_system_pda(&vector)` — the account's system PDA.
 - `create_close_subinstruction(&scheme, identity, close_to)` / `create_withdraw_subinstruction(&scheme, identity, receiver, lamports)` — sub-instruction builders for embedding inside a `passthrough` payload.
-- `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature. `create_multi_advance_instruction(&[(AdvanceSigner::new(&scheme, identity), signature)])` does the same for several signers. For Winternitz and XMSS use `create_rotating_advance_instruction(&scheme, identity, next_key, signature)`.
+- `create_advance_instruction(&scheme, identity, signature)` — assemble an advance instruction (signature only, no embedded payload) from a precomputed signature. `create_multi_advance_instruction(valid_until, &[(AdvanceSigner::new(&scheme, identity), signature)])` does the same for several signers; the first argument is the one `valid_until` for all of them (`NEVER_EXPIRES` for none) and `nonce_account` names the nonce account it signs over. The builders check the signature and next-key lengths. For Winternitz and XMSS use `create_rotating_advance_instruction(&scheme, identity, next_key, signature)`.
 - `create_passthrough_instruction(&scheme, identity, sub_ixs)` — assemble the passthrough instruction that replays `sub_ixs` under the PDA's signer seeds; include it among the pre/post instructions so the digest commits to it. `create_system_passthrough_instruction` signs as the system PDA; `create_multi_passthrough_instruction(&[PassthroughSigner::vector(&scheme, identity), PassthroughSigner::system(..)], sub_ixs)` signs for several.
-- `advance_vector_digest(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify. For Winternitz and XMSS use `rotating_advance_vector_digest`. With several signers, compute `advance_message(&[AdvanceSigner::new(&scheme, identity)], pre, post, fee_payer)` once, then `signer_digest(&message, nonce, &vector, next_key)` for each.
+- `advance_vector_digest(&scheme, nonce, identity, pre, post, fee_payer)` — recompute the SHA-256 digest the on-chain program will verify. For Winternitz and XMSS use `rotating_advance_vector_digest`. With several signers, compute `advance_message(valid_until, &[AdvanceSigner::new(&scheme, identity)], pre, post, fee_payer)` once, then `signer_digest(&message, nonce, &vector, next_key)` for each. A key signs `signed(&digest)`, which is `"vector:" || digest`; the `sign_advance_instruction_*` helpers do that and sign a signature that never expires.
 - `sign_advance_instruction_ed25519(signing_key, nonce, pre, post, fee_payer)` — sign with Ed25519.
 - `sign_advance_instruction_secp256k1_eip191(signing_key, nonce, pre, post, fee_payer)` — sign with EIP-191 (envelope, 65-byte sig).
 - `sign_advance_instruction_secp256k1_ecdsa(signing_key, nonce, pre, post, fee_payer)` — sign with plain secp256k1 ECDSA (64-byte sig).
 - `signed_nonce(&nonce, &vector_nonce)` / `create_initialize_nonce_instruction(&nonce_account, &vector)` / `create_close_nonce_subinstruction(&scheme, identity, &nonce_account, &close_to)` / `NonceAccount::LEN` — nonce accounts.
-- `verify_advance_signature(AdvanceSigner::new(&scheme, identity), nonce, pre, post, fee_payer, signature)` — verify an advance signature fully offline with the program's own code, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) on success. See [Offline verification](#offline-verification).
-- `ed25519_pubkey` / `secp256k1_eip191_eth_address` / `secp256k1_compressed_pubkey` / `eth_address_from_pubkey` / `eip191_envelope_hash(digest)` — identity/envelope utilities.
+- `verify_advance(valid_until, &[AdvanceEntry], pre, post, fee_payer, slot)` — verify every signer of an advance fully offline with the program's own code, for every scheme: several signers, nonce accounts (`SignerNonce::Account { account, vector }`), expiry (against `slot`) and a rotated Winternitz/XMSS key (`AdvanceEntry::current_key`). Returns each signer's digest (= its next nonce). `verify_advance_signature(AdvanceSigner::new(&scheme, identity), nonce, pre, post, fee_payer, signature)` is the one-signer shorthand. See [Offline verification](#offline-verification).
+- `ed25519_pubkey` / `secp256k1_eip191_eth_address` / `secp256k1_compressed_pubkey` / `eth_address_from_pubkey` / `eip191_envelope_hash(digest)` — identity/envelope utilities. `signed(digest)` / `SIGNED_PREFIX` — what a key signs.
 
 Falcon-512 and ML-DSA-44 signing are intentionally left to the caller (`solana-falcon512` and `solana-ml-dsa` are verify-only) — pair with an external signer such as `pqcrypto-falcon` or `fips204` (empty context) and feed the wire-format signature into `create_advance_instruction`.
 
-### TypeScript (`vector-sdk`)
+### TypeScript (`@blueshift-gg/vector`)
 
 The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`):
 
 - `findVectorPda(scheme, identity)` — derive the canonical Vector PDA.
-- `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 68-byte header.
+- `fetchVectorAccount(connection, scheme, identity)` — fetch and deserialize the 76-byte header (`created` is the slot it was created in).
 - `createInitializeEd25519(payer, pubkey)` / `createInitializeEip191(payer, ethAddress)` / `createInitializeSecp256k1(payer, compressedPubkey)` / `createInitializeFalcon512(payer, wirePubkey)` / `createInitializeMlDsa44(payer, publicKey)` — convenience wrappers; ML-DSA-44's returns its three instructions.
 - `createInitializeInstruction(payer, scheme, identity)` — generic init builder; `createInitializeInstructions` returns every call the scheme needs.
 - `findSystemPda(vector)` — the account's system PDA.
@@ -353,17 +373,19 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - `signAdvanceInstructionMlDsa44(keypair, nonce, pre, post, feePayer?)` — sign with ML-DSA-44 (FIPS 204, post-quantum) via `@noble/post-quantum/ml-dsa.js`, empty context; plus `mldsa44Keygen`, `mldsa44PublicKey`.
 - `signedNonce(nonce, vectorNonce)` / `createInitializeNonceInstruction(nonceAccount, vector)` / `createCloseSubinstruction(scheme, identity, closeTo, nonceAccount?)` / `NONCE_ACCOUNT_LEN` / `NonceAccount.fromAccountData(data)` / `fetchNonceAccount(connection, nonceAccount)` — nonce accounts.
 - `verifyAdvanceSignature({ scheme, identity, nonceAccount? }, nonce, pre, post, signature, feePayer?)` — verify an advance signature fully offline, for every scheme but Winternitz and XMSS; returns the digest (= next nonce) or throws a named error. Plus `normalizeEip191RecoveryByte(v)` for converting Ethereum tooling's legacy 27/28 recovery byte at assembly time.
+- `verifyAdvanceTransaction({ transaction, vectors, nonceAccounts?, feePayer?, slot? })` — verify every signer of an assembled transaction (a `Transaction`, its bytes, or its instructions): finds the `Advance`, parses each signer including a nonce account listed after its vector, recomputes the message and each digest, and returns per-signer `{ ok, error, digest, validUntil, .. }`. Pass `slot` to refuse an expired signature.
+- Every sign, digest and builder function takes an optional trailing `validUntil` (default `NEVER_EXPIRES`); keys sign `signedMessage(digest)`, which is `"vector:" || digest` (`signedDigest` for Winternitz and XMSS). Requires `@solana/web3.js` ^3.2.1 as a peer dependency; the SDK runs in Node and browsers.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
 The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1, Falcon-512 and ML-DSA-44. Winternitz and XMSS signing are supplied by the caller. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
 
-Each scheme is its own importable entrypoint (the npm feature-flag analogue) so a consumer only pulls the crypto it uses: `import { signAdvanceInstructionFalcon512 } from "vector-sdk/falcon512"` (Falcon + PQ lib only), `"vector-sdk/mldsa44"` likewise vs `import { ... } from "vector-sdk"` (everything).
+Each scheme is its own importable entrypoint (the npm feature-flag analogue) so a consumer only pulls the crypto it uses: `import { signAdvanceInstructionFalcon512 } from "@blueshift-gg/vector/falcon512"` (Falcon + PQ lib only), `"@blueshift-gg/vector/mldsa44"` likewise vs `import { ... } from "@blueshift-gg/vector"` (everything).
 
 The signed digest doubles as the next on-chain nonce, so a successful advance always replaces `nonce` with the digest that authorized it.
 
 ## Operational Patterns
 
-Everything below is native protocol behaviour — no extra programs or formats. The building blocks are the digest (`SHA256(message || nonce || vector_address || next_key)`), digest-as-next-nonce progression, and the fact that each nonce, a vector's own or a nonce account's, has exactly one outstanding value.
+Everything below is native protocol behaviour — no extra programs or formats. The building blocks are the digest (`SHA256(message || nonce || vector_address || next_key)`, over a message that covers `valid_until`), digest-as-next-nonce progression, and the fact that each nonce, a vector's own or a nonce account's, has exactly one outstanding value.
 
 ### Offline verification
 
@@ -381,7 +403,7 @@ The fee payer affects the digest only when its key appears in a committed instru
 
 ### Nonce accounts
 
-A vector account holds one nonce, so the transactions signed over it run one at a time. For more in flight at once, give the vector nonce accounts: each is a nonce of its own, and a chain of its own, while the vector account still signs, holds the funds and is the authority. It is the System program's durable nonce flow: one authority, many nonce accounts.
+A vector account holds one nonce, so the transactions signed over it run one at a time. For more in flight at once, give the vector nonce accounts: each is a nonce of its own, and a chain of its own, while the vector account still signs, holds the funds and is the authority. One key, many nonce accounts.
 
 - **Create.** As with the System program: a System `CreateAccount` of `NONCE_ACCOUNT_LEN` bytes assigned to Vector, then `InitializeNonce`, both signed by the new account's keypair, so no one can initialize it in between. Anyone can pay for one, for any vector: only the vector's key can advance or close it. Its first nonce is `SHA256("nonce" || address || latest slot hash)`, as a vector's takes in the slot hash. `InitializeNonce` costs 727 CUs.
 - **Sign over one.** List it right after its vector in the `Advance` (`AdvanceSigner { nonce_account: Some(address), .. }` / `{ nonceAccount }`). The signer signs over `SHA256(nonce account's nonce || vector's own nonce)` (`signed_nonce` / `signedNonce`) in place of a nonce; the digest is otherwise unchanged. The message covers the account list, so a signature over one nonce account cannot be moved to another. Landing it moves that account's nonce only.
@@ -395,7 +417,7 @@ A vector account holds one nonce, so the transactions signed over it run one at 
 
 An `advance` with empty pre/post instructions is an inert transition: it verifies, installs the next nonce, and does nothing else. Signed at the outstanding nonce, it is a kill-switch — landing it orphans every signature derived from that nonce (see [Invalidation and Forward Exposure](#invalidation-and-forward-exposure)). Pre-sign the inert advance in the same session as the transactions it guards; broadcasting it later requires no further access to the key.
 
-Both SDKs ship this as sugar over the advance signers: `sign_revocation_instruction_ed25519(key, nonce)` / `_secp256k1_ecdsa` / `_secp256k1_eip191` (Rust), `signRevocationInstructionEd25519(key, nonce)` / `Secp256k1` / `Eip191` (TypeScript), plus `revocation_digest(scheme, nonce, identity)` / `revocationDigest(...)` to recompute what they commit to. Verifying one is just the ordinary advance verifier with empty pre/post. The digest commits to the broadcasting transaction's instructions sysvar, so the revocation must be broadcast as a transaction containing **only** the advance instruction — adding so much as a compute-budget ix afterwards invalidates the signature. The three covered schemes fit the default compute budget (~13k/26k/72k CUs); Falcon-512 has no zero-arg sugar by design — sign via the advance signer with a compute-budget pre-instruction committed at sign time, since its ~184k CU inert advance leaves no headroom under the 200k default.
+Both SDKs ship this as sugar over the advance signers: `sign_revocation_instruction_ed25519(key, nonce)` / `_secp256k1_ecdsa` / `_secp256k1_eip191` (Rust), `signRevocationInstructionEd25519(key, nonce)` / `Secp256k1` / `Eip191` (TypeScript), plus `revocation_digest(scheme, nonce, identity)` / `revocationDigest(...)` to recompute what they commit to. Verifying one is just the ordinary advance verifier with empty pre/post. The digest commits to the broadcasting transaction's instructions sysvar, so the revocation must be broadcast as a transaction containing **only** the advance instruction — adding so much as a compute-budget ix afterwards invalidates the signature. The three covered schemes fit the default compute budget (~13k/26k/72k CUs); Falcon-512 has no zero-arg sugar by design — sign via the advance signer with a compute-budget pre-instruction committed at sign time, since its ~172k CU inert advance leaves little headroom under the 200k default.
 
 ### Ordered pre-signing
 
@@ -403,7 +425,7 @@ The digest returned at sign time **is** the nonce after that advance lands, so a
 
 ### Expiry
 
-A timeout instruction placed inside the signed buffer is committed to by the digest like everything else (see [Transaction Expiration](#transaction-expiration)). Pair pre-signed transactions with a deadline instruction such as [sbpf-asm-timeout](https://github.com/deanmlittle/sbpf-asm-timeout) so a withheld transaction dies on its own instead of waiting for a kill-switch.
+Set `valid_until` (one per transaction) on every pre-signed transaction (see [Transaction Expiration](#transaction-expiration)). A timeout instruction placed inside the signed buffer is committed to by the digest like everything else, for a deadline a slot cannot express. Pair pre-signed transactions with one such as [sbpf-asm-timeout](https://github.com/deanmlittle/sbpf-asm-timeout) so a withheld transaction dies on its own instead of waiting for a kill-switch.
 
 ## License
 MIT

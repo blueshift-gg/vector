@@ -39,3 +39,9 @@ mod passthrough;
 
 #[cfg(test)]
 mod nonce;
+
+#[cfg(test)]
+mod hardening;
+
+#[cfg(test)]
+mod secp256k1_edge;

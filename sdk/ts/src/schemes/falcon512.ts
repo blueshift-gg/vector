@@ -4,7 +4,7 @@
  * The program expects the compressed detached signature, zero-padded to 666
  * bytes: noble's `falcon512`, not `falcon512padded`, which is another format.
  */
-import { Address, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 
 import { Scheme } from "../scheme.js";
@@ -12,7 +12,7 @@ import {
   createInitializeInstruction,
   createAdvanceInstruction,
 } from "../instructions.js";
-import { advanceVectorDigest } from "../digest.js";
+import { advanceVectorDigest, signedMessage } from "../digest.js";
 
 /** Falcon-512 secret key length (`@noble/post-quantum` encoding). */
 export const FALCON_SECRET_KEY_LEN = 1281;
@@ -52,7 +52,7 @@ export function falcon512PublicKey(secretKey: Uint8Array): Uint8Array {
  * prepares the 897-byte wire pubkey, which is also the client identity.
  */
 export function createInitializeFalcon512(
-  payer: Address,
+  payer: PublicKey,
   wirePubkey: Uint8Array
 ): TransactionInstruction {
   return createInitializeInstruction(payer, FALCON512, wirePubkey);
@@ -67,7 +67,8 @@ export function signAdvanceInstructionFalcon512(
   nonce: Uint8Array,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: Address
+  feePayer?: PublicKey,
+  validUntil?: bigint | number
 ): TransactionInstruction {
   const identity = keypair.publicKey;
   const digest = advanceVectorDigest(
@@ -76,10 +77,11 @@ export function signAdvanceInstructionFalcon512(
     identity,
     preInstructions,
     postInstructions,
-    feePayer
+    feePayer,
+    validUntil
   );
 
-  const detached = Uint8Array.from(nobleFalcon.sign(digest, keypair.secretKey));
+  const detached = Uint8Array.from(nobleFalcon.sign(signedMessage(digest), keypair.secretKey));
   if (detached.length > FALCON512.signatureLen) {
     throw new Error(
       `Falcon-512 signature ${detached.length} B exceeds wire size ${FALCON512.signatureLen}`
@@ -90,5 +92,5 @@ export function signAdvanceInstructionFalcon512(
   const signature = new Uint8Array(FALCON512.signatureLen);
   signature.set(detached, 0);
 
-  return createAdvanceInstruction(FALCON512, identity, signature);
+  return createAdvanceInstruction(FALCON512, identity, signature, validUntil);
 }

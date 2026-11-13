@@ -1,5 +1,5 @@
 /** Ed25519. The identity is the 32-byte public key. */
-import { Address, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519";
 
 import { Scheme } from "../scheme.js";
@@ -7,7 +7,7 @@ import {
   createInitializeInstruction,
   createAdvanceInstruction,
 } from "../instructions.js";
-import { advanceVectorDigest } from "../digest.js";
+import { advanceVectorDigest, signedMessage } from "../digest.js";
 
 /** Ed25519 — identity is the 32-byte public key. */
 // Checked against the program by `fixtures/program.json`.
@@ -26,23 +26,25 @@ export function ed25519Identity(signingKey: Uint8Array): Uint8Array {
 
 /** Initialize an Ed25519 vector account. `pubkey` is the 32-byte public key. */
 export function createInitializeEd25519(
-  payer: Address,
+  payer: PublicKey,
   pubkey: Uint8Array
 ): TransactionInstruction {
   return createInitializeInstruction(payer, ED25519, pubkey);
 }
 
 /**
- * Sign the advance digest with an Ed25519 key and return a ready-to-submit
+ * Sign `"vector:" || digest` with an Ed25519 key and return a ready-to-submit
  * advance instruction.
  * @param signingKey 32-byte Ed25519 private key seed
+ * @param validUntil last slot the signature may land in; default never expires
  */
 export function signAdvanceInstructionEd25519(
   signingKey: Uint8Array,
   nonce: Uint8Array,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: Address
+  feePayer?: PublicKey,
+  validUntil?: bigint | number
 ): TransactionInstruction {
   const identity = ed25519Identity(signingKey);
   const digest = advanceVectorDigest(
@@ -51,10 +53,11 @@ export function signAdvanceInstructionEd25519(
     identity,
     preInstructions,
     postInstructions,
-    feePayer
+    feePayer,
+    validUntil
   );
-  const signature = ed25519.sign(digest, signingKey);
-  return createAdvanceInstruction(ED25519, identity, signature);
+  const signature = ed25519.sign(signedMessage(digest), signingKey);
+  return createAdvanceInstruction(ED25519, identity, signature, validUntil);
 }
 
 /**

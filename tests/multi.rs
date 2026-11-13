@@ -15,7 +15,7 @@ use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
     sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, VectorError, ED25519,
-    SECP256K1,
+    NEVER_EXPIRES, SECP256K1,
 };
 
 use crate::common::{
@@ -69,6 +69,11 @@ impl World {
     /// Alice and Bob sign one `Advance`; each then withdraws from their own
     /// account. Returns the transaction and their two digests.
     fn alice_and_bob(&self) -> (Vec<Instruction>, [u8; 32], [u8; 32]) {
+        self.alice_and_bob_until(NEVER_EXPIRES)
+    }
+
+    /// [`Self::alice_and_bob`], good through slot `valid_until`.
+    fn alice_and_bob_until(&self, valid_until: u64) -> (Vec<Instruction>, [u8; 32], [u8; 32]) {
         let alice = ed25519_pubkey(&self.alice);
         let bob = secp256k1_compressed_pubkey(&self.bob);
         let post = [
@@ -76,6 +81,7 @@ impl World {
             self.withdraw(&SECP256K1, &bob, 2_000_000_000),
         ];
         let message = advance_message(
+            valid_until,
             &[
                 AdvanceSigner::new(&ED25519, &alice),
                 AdvanceSigner::new(&SECP256K1, &bob),
@@ -87,15 +93,24 @@ impl World {
         let alice_digest =
             signer_digest(&message, &NONCE, &find_vector_pda(&ED25519, &alice).0, &[]);
         let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0, &[]);
-        let alice_signature = self.alice.sign(&alice_digest).to_bytes();
-        let bob_signature: Secp256k1Signature = self.bob.sign_prehash(&bob_digest).unwrap();
-        let advance = create_multi_advance_instruction(&[
-            (AdvanceSigner::new(&ED25519, &alice), &alice_signature[..]),
-            (
-                AdvanceSigner::new(&SECP256K1, &bob),
-                &bob_signature.to_bytes()[..],
-            ),
-        ]);
+        let alice_signature = self
+            .alice
+            .sign(&vector_core::signed(&alice_digest))
+            .to_bytes();
+        let bob_signature: Secp256k1Signature = self
+            .bob
+            .sign_prehash(&crate::common::signed_hash_ecdsa(&bob_digest))
+            .unwrap();
+        let advance = create_multi_advance_instruction(
+            valid_until,
+            &[
+                (AdvanceSigner::new(&ED25519, &alice), &alice_signature[..]),
+                (
+                    AdvanceSigner::new(&SECP256K1, &bob),
+                    &bob_signature.to_bytes()[..],
+                ),
+            ],
+        );
         let [first, second] = post;
         (vec![advance, first, second], alice_digest, bob_digest)
     }
@@ -294,5 +309,37 @@ fn passthrough_without_its_account_in_an_advance_is_rejected() {
     assert_eq!(
         world.run(&[advance, take_from_bob], &world.accounts).0,
         TransactionProgramResult::Failure(1, VectorError::NotAdvanced.into())
+    );
+}
+
+/// One expiry covers the transaction: re-signing one signer for a later slot
+/// and keeping the other's old signature fails, whichever signer is stale.
+/// Neither can stretch the other's window.
+#[test]
+fn no_signer_can_extend_the_expiry_alone() {
+    let world = World::new();
+    let (short, ..) = world.alice_and_bob_until(5);
+    let (long, ..) = world.alice_and_bob_until(100);
+    let ed25519_signature = 9..9 + 64;
+    let secp256k1_signature = 9 + 64..9 + 64 + 64;
+
+    // Alice's signature is for slot 5, Bob's for slot 100, under either.
+    for (header, stale) in [(&short, &long), (&long, &short)] {
+        let mut mixed = header.clone();
+        mixed[0].data[secp256k1_signature.clone()]
+            .copy_from_slice(&stale[0].data[secp256k1_signature.clone()]);
+        let (result, after) = world.run(&mixed, &world.accounts);
+        assert_eq!(
+            result,
+            TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
+        );
+        assert_eq!(after, world.accounts);
+    }
+    let mut mixed = short.clone();
+    mixed[0].data[ed25519_signature.clone()].copy_from_slice(&long[0].data[ed25519_signature]);
+    let (result, _) = world.run(&mixed, &world.accounts);
+    assert_eq!(
+        result,
+        TransactionProgramResult::Failure(0, ProgramError::MissingRequiredSignature)
     );
 }

@@ -8,7 +8,7 @@ use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
-use crate::scheme::Scheme;
+use crate::scheme::{signed, Scheme};
 
 /// secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address.
 pub const EIP191: Scheme = Scheme::of::<vector::schemes::eip191::Eip191>();
@@ -45,12 +45,13 @@ pub fn create_initialize_secp256k1_eip191(
     create_initialize_instruction(payer, &EIP191, eth_address)
 }
 
-/// `keccak256("\x19Ethereum Signed Message:\n32" || digest)`: what an EIP-191
-/// signer actually signs. Public for signers that take a prehash.
+/// `keccak256("\x19Ethereum Signed Message:\n39" || "vector:" || digest)`: what
+/// an EIP-191 signer actually signs, for a wallet's `personal_sign` of the 39
+/// bytes `"vector:" || digest`. Public for signers that take a prehash.
 pub fn eip191_envelope_hash(digest: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Keccak256::new();
-    hasher.update(b"\x19Ethereum Signed Message:\n32");
-    hasher.update(digest);
+    hasher.update(b"\x19Ethereum Signed Message:\n39");
+    hasher.update(signed(digest));
     hasher.finalize().into()
 }
 

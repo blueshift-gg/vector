@@ -19,6 +19,19 @@ use vector_core::{
     vector_seed, Scheme, PROGRAM_ID,
 };
 
+/// What a hash-based key (Winternitz, XMSS) signs for `digest`: the SHA-256
+/// of `"vector:" || digest`.
+pub fn signed_hash(digest: &[u8; 32]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(vector_core::signed(digest)).into()
+}
+
+/// What a plain secp256k1 key signs for `digest`: the SHA-256 of
+/// `"vector:" || digest`. It is the same bytes as [`signed_hash`].
+pub fn signed_hash_ecdsa(digest: &[u8; 32]) -> [u8; 32] {
+    signed_hash(digest)
+}
+
 /// Initial nonce used for advance/close digests across the suite.
 pub const NONCE: [u8; 32] = [0xff; 32];
 
@@ -66,6 +79,7 @@ fn header(nonce: [u8; 32], scheme: &Scheme, identity: &[u8]) -> Vec<u8> {
     [
         &nonce[..],
         &vector_seed(identity),
+        &0u64.to_le_bytes(),
         &[scheme.id, bump, system_bump, 0],
     ]
     .concat()

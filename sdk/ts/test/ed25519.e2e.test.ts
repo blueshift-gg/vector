@@ -4,7 +4,7 @@
  */
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import {
-  Address,
+  PublicKey,
   Connection,
   Keypair,
   SystemProgram,
@@ -24,6 +24,9 @@ import {
   createWithdrawSubinstruction,
   signAdvanceInstructionEd25519,
   advanceVectorDigest,
+  NonceAccount,
+  NONCE_ACCOUNT_LEN,
+  VectorError,
 } from "../src/index.js";
 import {
   RPC_URL,
@@ -40,7 +43,7 @@ const ED25519_IDENTITY = ed25519Identity(SIGNER_KEY);
 describe("vector-ed25519", () => {
   let connection: Connection;
   let feePayer: Keypair;
-  let vectorPda: Address;
+  let vectorPda: PublicKey;
   let vectorBump: number;
   let currentNonce: Uint8Array;
 
@@ -59,7 +62,7 @@ describe("vector-ed25519", () => {
   });
 
   test("initialize vector account", async () => {
-    const ix = createInitializeEd25519(feePayer.address, ED25519_IDENTITY);
+    const ix = createInitializeEd25519(feePayer.publicKey, ED25519_IDENTITY);
     const tx = new Transaction().add(ix);
     await sendTx(connection, tx, [feePayer]);
 
@@ -83,7 +86,7 @@ describe("vector-ed25519", () => {
       vectorPda,
       currentNonce,
       (nonce, pre, post) =>
-        signAdvanceInstructionEd25519(SIGNER_KEY, nonce, pre, post, feePayer.address)
+        signAdvanceInstructionEd25519(SIGNER_KEY, nonce, pre, post, feePayer.publicKey)
     );
   });
 
@@ -93,7 +96,7 @@ describe("vector-ed25519", () => {
     // up first so there are withdrawable lamports above rent-exemption.
     const topUp = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: feePayer.address,
+        fromPubkey: feePayer.publicKey,
         toPubkey: vectorPda,
         lamports: 5_000_000,
       })
@@ -108,7 +111,7 @@ describe("vector-ed25519", () => {
     const withdrawSub = createWithdrawSubinstruction(
       ED25519,
       ED25519_IDENTITY,
-      feePayer.address,
+      feePayer.publicKey,
       withdrawAmount
     );
     const passthroughIx = createPassthroughInstruction(
@@ -121,7 +124,7 @@ describe("vector-ed25519", () => {
       currentNonce,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
     const tx = new Transaction().add(advanceIx, passthroughIx);
     await sendTx(connection, tx, [feePayer]);
@@ -132,7 +135,7 @@ describe("vector-ed25519", () => {
       ED25519_IDENTITY,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
 
     const after = await connection.getAccountInfo(vectorPda);
@@ -148,14 +151,14 @@ describe("vector-ed25519", () => {
       connection,
       new Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: feePayer.address,
+          fromPubkey: feePayer.publicKey,
           toPubkey: systemPda,
           lamports: 5_000_000,
         })
       ),
       [feePayer]
     );
-    const receiver = (await Keypair.generate()).address;
+    const receiver = (await Keypair.generate()).publicKey;
 
     const pay = SystemProgram.transfer({
       fromPubkey: systemPda,
@@ -172,7 +175,7 @@ describe("vector-ed25519", () => {
       currentNonce,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
     await sendTx(connection, new Transaction().add(advanceIx, passthroughIx), [feePayer]);
     currentNonce = advanceVectorDigest(
@@ -181,18 +184,36 @@ describe("vector-ed25519", () => {
       ED25519_IDENTITY,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
 
     expect(Number(await connection.getBalance(systemPda))).toBe(3_000_000);
     expect(Number(await connection.getBalance(receiver))).toBe(2_000_000);
   });
 
+  test("a signature past its validUntil slot is refused", async () => {
+    const slot = BigInt(await connection.getSlot());
+    const passthroughIx = createPassthroughInstruction(ED25519, ED25519_IDENTITY, [
+      createWithdrawSubinstruction(ED25519, ED25519_IDENTITY, feePayer.publicKey, 1n),
+    ]);
+    const advanceIx = signAdvanceInstructionEd25519(
+      SIGNER_KEY,
+      currentNonce,
+      [],
+      [passthroughIx],
+      feePayer.publicKey,
+      slot - 1n
+    );
+    await expect(
+      sendTx(connection, new Transaction().add(advanceIx, passthroughIx), [feePayer])
+    ).rejects.toThrow(new RegExp(`custom program error: 0x${VectorError.Expired.toString(16)}`));
+  });
+
   test("close vector account via advance", async () => {
     const closeSub = createCloseSubinstruction(
       ED25519,
       ED25519_IDENTITY,
-      feePayer.address
+      feePayer.publicKey
     );
     const passthroughIx = createPassthroughInstruction(
       ED25519,
@@ -204,7 +225,7 @@ describe("vector-ed25519", () => {
       currentNonce,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
     const tx = new Transaction().add(advanceIx, passthroughIx);
     await sendTx(connection, tx, [feePayer]);

@@ -1,10 +1,9 @@
 /**
- * secp256k1 (plain ECDSA) integration tests. See `helpers.ts` for shared
- * scaffolding.
+ * EIP-191 integration tests. See `helpers.ts` for shared scaffolding.
  */
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import {
-  Address,
+  PublicKey,
   Connection,
   Keypair,
   SystemProgram,
@@ -12,15 +11,15 @@ import {
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
-  SECP256K1,
-  secp256k1Identity,
+  EIP191,
+  eip191Identity,
   findVectorPda,
   fetchVectorAccount,
-  createInitializeSecp256k1,
+  createInitializeEip191,
   createCloseSubinstruction,
   createPassthroughInstruction,
   createWithdrawSubinstruction,
-  signAdvanceInstructionSecp256k1,
+  signAdvanceInstructionEip191,
   advanceVectorDigest,
 } from "../src/index.js";
 import {
@@ -33,12 +32,12 @@ import {
 
 const SECP_KEY = new Uint8Array(32);
 SECP_KEY[31] = 0x01;
-const SECP256K1_IDENTITY = secp256k1Identity(SECP_KEY);
+const EIP191_IDENTITY = eip191Identity(SECP_KEY);
 
-describe("vector-secp256k1", () => {
+describe("vector-eip191", () => {
   let connection: Connection;
   let feePayer: Keypair;
-  let vectorPda: Address;
+  let vectorPda: PublicKey;
   let vectorBump: number;
   let currentNonce: Uint8Array;
 
@@ -49,22 +48,22 @@ describe("vector-secp256k1", () => {
     });
     feePayer = await Keypair.fromSeed(FEE_PAYER_SEED);
 
-    [vectorPda, vectorBump] = findVectorPda(SECP256K1, SECP256K1_IDENTITY);
+    [vectorPda, vectorBump] = findVectorPda(EIP191, EIP191_IDENTITY);
   });
 
   afterAll(() => {
     (connection as any)._rpcWebSocket?.close();
   });
 
-  test("initialize secp256k1 vector account", async () => {
-    const ix = createInitializeSecp256k1(feePayer.address, SECP256K1_IDENTITY);
+  test("initialize eip191 vector account", async () => {
+    const ix = createInitializeEip191(feePayer.publicKey, EIP191_IDENTITY);
     const tx = new Transaction().add(ix);
     await sendTx(connection, tx, [feePayer]);
 
     const account = await fetchVectorAccount(
       connection,
-      SECP256K1,
-      SECP256K1_IDENTITY
+      EIP191,
+      EIP191_IDENTITY
     );
     expect(account.bump).toBe(vectorBump);
 
@@ -72,49 +71,49 @@ describe("vector-secp256k1", () => {
   });
 
   test("advance with empty payload", async () => {
-    const advanceIx = signAdvanceInstructionSecp256k1(
+    const advanceIx = signAdvanceInstructionEip191(
       SECP_KEY,
       currentNonce,
       [],
       [],
-      feePayer.address
+      feePayer.publicKey
     );
 
     const tx = new Transaction().add(advanceIx);
     await sendTx(connection, tx, [feePayer]);
 
     currentNonce = advanceVectorDigest(
-      SECP256K1,
+      EIP191,
       currentNonce,
-      SECP256K1_IDENTITY,
+      EIP191_IDENTITY,
       [],
       [],
-      feePayer.address
+      feePayer.publicKey
     );
 
     const account = await fetchVectorAccount(
       connection,
-      SECP256K1,
-      SECP256K1_IDENTITY
+      EIP191,
+      EIP191_IDENTITY
     );
-    expect(account.nonce).toEqual(currentNonce);
+    expect(Buffer.from(account.nonce)).toEqual(Buffer.from(currentNonce));
   });
 
   test("advance round-trips SPL mint authority", async () => {
     currentNonce = await splMintAuthorityRoundTrip(
       connection,
       feePayer,
-      SECP256K1,
-      SECP256K1_IDENTITY,
+      EIP191,
+      EIP191_IDENTITY,
       vectorPda,
       currentNonce,
       (nonce, pre, post) =>
-        signAdvanceInstructionSecp256k1(
+        signAdvanceInstructionEip191(
           SECP_KEY,
           nonce,
           pre,
           post,
-          feePayer.address
+          feePayer.publicKey
         )
     );
   });
@@ -125,7 +124,7 @@ describe("vector-secp256k1", () => {
     // up first so there are withdrawable lamports above rent-exemption.
     const topUp = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: feePayer.address,
+        fromPubkey: feePayer.publicKey,
         toPubkey: vectorPda,
         lamports: 5_000_000,
       })
@@ -138,33 +137,33 @@ describe("vector-secp256k1", () => {
     const withdrawAmount = 1_000n;
 
     const withdrawSub = createWithdrawSubinstruction(
-      SECP256K1,
-      SECP256K1_IDENTITY,
-      feePayer.address,
+      EIP191,
+      EIP191_IDENTITY,
+      feePayer.publicKey,
       withdrawAmount
     );
     const passthroughIx = createPassthroughInstruction(
-      SECP256K1,
-      SECP256K1_IDENTITY,
+      EIP191,
+      EIP191_IDENTITY,
       [withdrawSub]
     );
-    const advanceIx = signAdvanceInstructionSecp256k1(
+    const advanceIx = signAdvanceInstructionEip191(
       SECP_KEY,
       currentNonce,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
     const tx = new Transaction().add(advanceIx, passthroughIx);
     await sendTx(connection, tx, [feePayer]);
 
     currentNonce = advanceVectorDigest(
-      SECP256K1,
+      EIP191,
       currentNonce,
-      SECP256K1_IDENTITY,
+      EIP191_IDENTITY,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
 
     const after = await connection.getAccountInfo(vectorPda);
@@ -174,23 +173,23 @@ describe("vector-secp256k1", () => {
     );
   });
 
-  test("close secp256k1 vector account via advance", async () => {
+  test("close eip191 vector account via advance", async () => {
     const closeSub = createCloseSubinstruction(
-      SECP256K1,
-      SECP256K1_IDENTITY,
-      feePayer.address
+      EIP191,
+      EIP191_IDENTITY,
+      feePayer.publicKey
     );
     const passthroughIx = createPassthroughInstruction(
-      SECP256K1,
-      SECP256K1_IDENTITY,
+      EIP191,
+      EIP191_IDENTITY,
       [closeSub]
     );
-    const advanceIx = signAdvanceInstructionSecp256k1(
+    const advanceIx = signAdvanceInstructionEip191(
       SECP_KEY,
       currentNonce,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
     const tx = new Transaction().add(advanceIx, passthroughIx);
     await sendTx(connection, tx, [feePayer]);

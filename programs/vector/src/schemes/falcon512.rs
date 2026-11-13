@@ -6,7 +6,7 @@ use solana_falcon512::{
 };
 
 use crate::{
-    scheme::{write, SigningScheme},
+    scheme::{write, SigningScheme, SIGNED_LEN},
     state::VectorAccount,
 };
 
@@ -38,13 +38,13 @@ unsafe impl SigningScheme for Falcon512 {
 
     fn advance(
         &mut self,
-        digest: &[u8; 32],
+        signed: &[u8; SIGNED_LEN],
         signature: &Falcon512Signature,
         _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
-        let prepared = Falcon512PreparedPubkey::try_from_slice(&self.prepared)
+        let prepared = Falcon512PreparedPubkey::<false>::try_from_slice(&self.prepared)
             .map_err(|_| ProgramError::InvalidAccountData)?;
-        if signature.verify_with_prepared(digest, prepared) {
+        if signature.verify_with_prepared(signed, prepared) {
             Ok(())
         } else {
             Err(ProgramError::MissingRequiredSignature)

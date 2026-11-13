@@ -4,7 +4,7 @@ use pinocchio::{
     account::MAX_PERMITTED_DATA_INCREASE,
     cpi::{Seed, Signer},
     error::ProgramError,
-    sysvars::{rent::Rent, Sysvar},
+    sysvars::{clock::Clock, rent::Rent, Sysvar},
     AccountView, Address, ProgramResult, Resize,
 };
 use pinocchio_system::{
@@ -165,6 +165,7 @@ impl Create<'_> {
         let (account, identity) = VectorAccount::split(&mut data)?;
         account.nonce = hashv(&[&self.seed, &latest_slot_hash()?]);
         account.seed = self.seed;
+        account.set_created(Clock::get()?.slot);
         account.scheme = scheme.id;
         account.bump = self.bump;
         account.system_bump = system_bump;
@@ -176,7 +177,7 @@ impl Create<'_> {
 /// length, and let the scheme fill in the new bytes. What is written depends
 /// only on the key already stored.
 fn grow(vector: &mut AccountView) -> ProgramResult {
-    let scheme = VectorAccount::scheme(&vector.try_borrow()?)?;
+    let scheme = VectorAccount::growing_scheme(&vector.try_borrow()?)?;
 
     let old_len = vector.data_len();
     let full_len = scheme.account_len;

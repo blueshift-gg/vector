@@ -8,7 +8,8 @@ use solana_instruction::{AccountMeta, Instruction};
 use crate::scheme::{
     find_system_pda, find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR,
     INITIALIZE_DISCRIMINATOR, INITIALIZE_NONCE_DISCRIMINATOR, INSTRUCTIONS_SYSVAR_ID,
-    PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, SYSTEM_PROGRAM_ID, WITHDRAW_DISCRIMINATOR,
+    NEVER_EXPIRES, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, SYSTEM_PROGRAM_ID,
+    WITHDRAW_DISCRIMINATOR,
 };
 
 /// Build an `initialize` instruction for `identity`, the key the account is
@@ -63,8 +64,8 @@ pub fn create_initialize_instructions(
 }
 
 /// One signer of an `advance`: its account, the nonce account it signs
-/// over if not its own nonce, and for a scheme whose key rotates
-/// (Winternitz, XMSS), the key that signs next.
+/// over if not its own nonce, and for a scheme whose key rotates (Winternitz,
+/// XMSS), the key that signs next.
 #[derive(Clone, Copy, Debug)]
 pub struct AdvanceSigner<'a> {
     pub scheme: &'a Scheme,
@@ -97,10 +98,13 @@ pub fn create_advance_instruction(
     identity: &[u8],
     advance_vector_signature: &[u8],
 ) -> Instruction {
-    create_multi_advance_instruction(&[(
-        AdvanceSigner::new(scheme, identity),
-        advance_vector_signature,
-    )])
+    create_multi_advance_instruction(
+        NEVER_EXPIRES,
+        &[(
+            AdvanceSigner::new(scheme, identity),
+            advance_vector_signature,
+        )],
+    )
 }
 
 /// [`create_advance_instruction`] for Winternitz and XMSS, whose key
@@ -117,7 +121,7 @@ pub fn create_rotating_advance_instruction(
         next_key,
         ..AdvanceSigner::new(scheme, identity)
     };
-    create_multi_advance_instruction(&[(signer, advance_vector_signature)])
+    create_multi_advance_instruction(NEVER_EXPIRES, &[(signer, advance_vector_signature)])
 }
 
 /// Build an `advance` for several signers, each with its signature. Every
@@ -125,17 +129,31 @@ pub fn create_rotating_advance_instruction(
 /// [`signer_digest`](crate::signer_digest) of the one
 /// [`advance_message`](crate::advance_message).
 ///
+/// `valid_until` is the last slot the transaction may land in, for every
+/// signer: after it, `Advance` fails with `VectorError::Expired`. The message
+/// covers it, so no one can extend it without every signer signing again.
+/// [`NEVER_EXPIRES`] for none.
+///
 /// Accounts: `[{vector_pda(writable), nonce_account(writable)?}...,
 /// instructions_sysvar]`. Data:
-/// `[ADVANCE_DISCRIMINATOR, {next_key, signature}...]`.
-pub fn create_multi_advance_instruction(signers: &[(AdvanceSigner, &[u8])]) -> Instruction {
+/// `[ADVANCE_DISCRIMINATOR, valid_until, {next_key, signature}...]`.
+pub fn create_multi_advance_instruction(
+    valid_until: u64,
+    signers: &[(AdvanceSigner, &[u8])],
+) -> Instruction {
     let mut accounts = Vec::with_capacity(signers.len() + 1);
     let mut data = vec![ADVANCE_DISCRIMINATOR];
+    data.extend_from_slice(&valid_until.to_le_bytes());
     for (signer, signature) in signers {
         assert_eq!(
             signer.next_key.len(),
             signer.scheme.next_key_len,
             "next key length mismatch"
+        );
+        assert_eq!(
+            signature.len(),
+            signer.scheme.signature_len,
+            "signature length mismatch"
         );
         let (vector, _) = find_vector_pda(signer.scheme, signer.identity);
         accounts.push(AccountMeta::new(vector, false));

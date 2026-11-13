@@ -8,6 +8,29 @@ use solana_nostd_sha256::hashv;
 
 use crate::state::VectorAccount;
 
+/// What every signature starts with. A key signs `vector:` and then the
+/// digest, never the digest alone, so a signature made for some other
+/// purpose over 32 bytes (a login challenge, say) is not an authorization.
+pub const SIGNED_PREFIX: &[u8; 7] = b"vector:";
+
+/// Length of [`signed`]: the prefix, then the digest.
+pub const SIGNED_LEN: usize = SIGNED_PREFIX.len() + 32;
+
+/// What a key signs for `digest`: `"vector:" || digest`. A scheme that signs a
+/// fixed 32 bytes signs its SHA-256.
+pub fn signed(digest: &[u8; 32]) -> [u8; SIGNED_LEN] {
+    let mut signed = [0; SIGNED_LEN];
+    signed[..SIGNED_PREFIX.len()].copy_from_slice(SIGNED_PREFIX);
+    signed[SIGNED_PREFIX.len()..].copy_from_slice(digest);
+    signed
+}
+
+/// Length of the expiry that starts `Advance` data: a slot (u64 LE).
+pub const VALID_UNTIL_LEN: usize = 8;
+
+/// A `valid_until` that never expires.
+pub const NEVER_EXPIRES: u64 = u64::MAX;
+
 /// One signing scheme, implemented by the identity it stores in an account:
 /// a struct holding the signer's key in whatever form the scheme verifies
 /// against. Implementations live in [`crate::schemes`], one file each.
@@ -45,11 +68,11 @@ pub unsafe trait SigningScheme: Sized {
         Err(ProgramError::InvalidInstructionData)
     }
 
-    /// `Advance`: verify `signature` over `digest`, then take `next_key`,
-    /// which the digest covers.
+    /// `Advance`: verify `signature` over `signed`, which is `"vector:" ||
+    /// digest`, then take `next_key`, which the digest covers.
     fn advance(
         &mut self,
-        digest: &[u8; 32],
+        signed: &[u8; SIGNED_LEN],
         signature: &Self::Signature,
         next_key: &Self::NextKey,
     ) -> Result<(), ProgramError>;
@@ -57,8 +80,10 @@ pub unsafe trait SigningScheme: Sized {
 
 /// One account's part of `Advance`, for its scheme: take its next key and
 /// signature off the front of `data`, verify the signature over
-/// `SHA256(message || nonce || address || next_key)`, and move `nonce` to that
-/// digest.
+/// `"vector:" || digest` with
+/// `digest = SHA256(message || nonce || address || next_key)`, and move
+/// `nonce` to that digest. The message covers the expiry, which `Advance`
+/// checks once.
 pub type Advance = fn(
     identity: &mut [u8],
     nonce: &mut [u8; 32],
@@ -129,7 +154,7 @@ fn advance<T: SigningScheme>(
 
     let digest = hashv(&[message, nonce, address, next_key]);
     identity.advance(
-        &digest,
+        &signed(&digest),
         unsafe { cast(signature) }.ok_or(ProgramError::InvalidInstructionData)?,
         unsafe { cast(next_key) }.ok_or(ProgramError::InvalidInstructionData)?,
     )?;

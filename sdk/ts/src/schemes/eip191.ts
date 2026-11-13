@@ -2,7 +2,7 @@
  * secp256k1 + EIP-191. The identity is the 20-byte Ethereum address, and what
  * is signed is the digest in a personal-sign envelope.
  */
-import { Address, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 
@@ -11,7 +11,7 @@ import {
   createInitializeInstruction,
   createAdvanceInstruction,
 } from "../instructions.js";
-import { advanceVectorDigest } from "../digest.js";
+import { advanceVectorDigest, signedMessage } from "../digest.js";
 
 /** secp256k1 ECDSA + EIP-191 envelope — identity is the 20-byte ETH address. */
 // Checked against the program by `fixtures/program.json`.
@@ -30,26 +30,29 @@ export function eip191Identity(privateKey: Uint8Array): Uint8Array {
   return hash.slice(12, 32); // last 20 bytes
 }
 
-/** Initialize an EIP-191 vector account. `ethAddress` is the 20-byte address. */
+/** Initialize an EIP-191 vector account. `ethPublicKey` is the 20-byte address. */
 export function createInitializeEip191(
-  payer: Address,
-  ethAddress: Uint8Array
+  payer: PublicKey,
+  ethPublicKey: Uint8Array
 ): TransactionInstruction {
-  return createInitializeInstruction(payer, EIP191, ethAddress);
+  return createInitializeInstruction(payer, EIP191, ethPublicKey);
 }
 
 const EIP191_PREFIX = new TextEncoder().encode(
-  "\x19Ethereum Signed Message:\n32"
+  "\x19Ethereum Signed Message:\n39"
 );
 
 /**
- * `keccak256("\x19Ethereum Signed Message:\n32" || digest)`: what an EIP-191
- * signer actually signs. Exported for signers that take a prehash.
+ * `keccak256("\x19Ethereum Signed Message:\n39" || "vector:" || digest)`: what
+ * an EIP-191 signer actually signs. A wallet's `personal_sign` over the 39
+ * bytes `"vector:" || digest` ({@link signedMessage}) signs exactly this.
+ * Exported for signers that take a prehash.
  */
 export function eip191EnvelopeHash(digest: Uint8Array): Uint8Array {
-  const buf = new Uint8Array(EIP191_PREFIX.length + digest.length);
+  const message = signedMessage(digest);
+  const buf = new Uint8Array(EIP191_PREFIX.length + message.length);
   buf.set(EIP191_PREFIX);
-  buf.set(digest, EIP191_PREFIX.length);
+  buf.set(message, EIP191_PREFIX.length);
   return keccak_256(buf);
 }
 
@@ -63,7 +66,8 @@ export function signAdvanceInstructionEip191(
   nonce: Uint8Array,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: Address
+  feePayer?: PublicKey,
+  validUntil?: bigint | number
 ): TransactionInstruction {
   const identity = eip191Identity(privateKey);
   const digest = advanceVectorDigest(
@@ -72,16 +76,17 @@ export function signAdvanceInstructionEip191(
     identity,
     preInstructions,
     postInstructions,
-    feePayer
+    feePayer,
+    validUntil
   );
 
   const ethDigest = eip191EnvelopeHash(digest);
   const sig = secp256k1.sign(ethDigest, privateKey);
   const sigBytes = new Uint8Array(65);
   sigBytes.set(sig.toCompactRawBytes(), 0); // r || s (64 bytes)
-  sigBytes[64] = sig.recovery; // v (1 byte)
+  sigBytes[64] = sig.recovery; // v (1 byte): 0 or 1; the program takes 27 or 28 too
 
-  return createAdvanceInstruction(EIP191, identity, sigBytes);
+  return createAdvanceInstruction(EIP191, identity, sigBytes, validUntil);
 }
 
 /**

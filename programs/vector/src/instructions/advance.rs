@@ -1,10 +1,14 @@
 use pinocchio::{
-    error::ProgramError, sysvars::instructions::Instructions, AccountView, ProgramResult,
+    error::ProgramError,
+    sysvars::{clock::Clock, instructions::Instructions, Sysvar},
+    AccountView, ProgramResult,
 };
 use solana_nostd_sha256::hashv;
 
 use crate::{
+    error::VectorError,
     instructions::top_level_only,
+    scheme::VALID_UNTIL_LEN,
     state::{NonceAccount, VectorAccount},
 };
 
@@ -14,12 +18,15 @@ use crate::{
 /// account to its next nonce. It runs no CPI: pair it with `Passthrough`.
 ///
 /// Every signer signs the same message, the whole transaction with this
-/// instruction's data left out. Each signer's digest then covers its own
-/// next key, so the signatures are the only bytes nobody signs.
+/// instruction's next keys and signatures left out: its `valid_until` stays
+/// in, so every signature covers the one expiry. Each signer's digest then
+/// covers its own next key, so the signatures are the only bytes nobody
+/// signs.
 ///
-/// > Hash the transaction without this instruction's data into the message
-/// > For each account, verify its signature over
-/// >   `SHA256(message || nonce || address || next_key)`
+/// > Check the slot is not past `valid_until`
+/// > Hash the transaction without the next keys and signatures into the message
+/// > For each account, verify its signature over `"vector:" || digest`, where
+/// >   `digest = SHA256(message || nonce || address || next_key)`
 /// > Store that digest as the account's next nonce, and its next key
 ///
 /// A signer signs over its account's own nonce, or over a nonce account of
@@ -38,7 +45,12 @@ use crate::{
 ///                                   followed by its nonce account [mut]
 /// n+1.  instructions_sysvar
 ///
-/// Parameters, for each account in order:
+/// Parameters:
+///
+/// - valid_until: u64 LE, the last slot the transaction may land in, for
+///   every signer; `u64::MAX` for none. The message covers it
+///
+/// then, for each account in order:
 ///
 /// - next_key: as long as its scheme says (none for a scheme whose key never
 ///   changes)
@@ -82,8 +94,17 @@ impl<'a> Advance<'a> {
     pub const DISCRIMINATOR: &'a u8 = &0;
 
     pub fn process(&mut self) -> ProgramResult {
-        let message = message(self.instructions_sysvar, self.data.len())?;
-        let mut data = self.data;
+        let (valid_until, mut data) = self
+            .data
+            .split_first_chunk::<VALID_UNTIL_LEN>()
+            .ok_or(ProgramError::InvalidInstructionData)?;
+        // The slot is checked before anything is hashed: an expired one is
+        // cheap.
+        let slot = Clock::get()?.slot;
+        if slot > u64::from_le_bytes(*valid_until) {
+            return Err(VectorError::Expired.into());
+        }
+        let message = message(self.instructions_sysvar, data.len())?;
         let mut accounts = &mut *self.vectors;
 
         while let [vector, rest @ ..] = core::mem::take(&mut accounts) {
@@ -95,7 +116,7 @@ impl<'a> Advance<'a> {
             let address = vector.address().to_bytes();
             let mut external = nonce
                 .first_mut()
-                .map(|nonce| NonceAccount::borrow(nonce, &address))
+                .map(|nonce| NonceAccount::borrow(nonce, &address, slot))
                 .transpose()?;
             let mut account = VectorAccount::borrow(vector)?;
             let scheme = VectorAccount::scheme(&account)?;
@@ -121,7 +142,7 @@ impl<'a> Advance<'a> {
 }
 
 /// The SHA-256 of the transaction with the executing `Advance`'s last
-/// `cut` bytes cut out.
+/// `cut` bytes (its next keys and signatures) cut out.
 fn message(instructions_sysvar: &AccountView, cut: usize) -> Result<[u8; 32], ProgramError> {
     let instructions = Instructions::try_from(instructions_sysvar)?;
     let data = instructions_sysvar.try_borrow()?;

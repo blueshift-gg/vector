@@ -155,9 +155,9 @@ impl<'a> Passthrough<'a> {
         fill(
             buffer,
             self.signers.iter().map(|signer| {
-                if !signer.owned_by(&crate::ID) {
-                    return Err(ProgramError::InvalidAccountOwner);
-                }
+                // A complete vector account of the program: not a nonce
+                // account, which has no scheme to sign as.
+                VectorAccount::load(signer)?;
                 let listed = (0..advance.num_account_metas()).any(|index| {
                     advance
                         .get_instruction_account_at(index)

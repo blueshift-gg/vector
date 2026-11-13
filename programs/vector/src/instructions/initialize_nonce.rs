@@ -53,12 +53,9 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for InitializeNonce<'a> {
         if !NonceAccount::is(nonce) {
             return Err(ProgramError::InvalidAccountData);
         }
-        if !vector.owned_by(&crate::ID) {
-            return Err(ProgramError::InvalidAccountOwner);
-        }
         // The vector's address is derived from its scheme, so this holds for
         // as long as the address does.
-        if VectorAccount::scheme(&vector.try_borrow()?)?.next_key_len != 0 {
+        if VectorAccount::load(vector)?.0.next_key_len != 0 {
             return Err(VectorError::KeyRotates.into());
         }
 

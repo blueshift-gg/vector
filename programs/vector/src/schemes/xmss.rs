@@ -4,9 +4,11 @@ use solana_winternitz::{
     VerifyingKey,
 };
 
+use solana_nostd_sha256::hash;
+
 use crate::{
     error::VectorError,
-    scheme::{write, SigningScheme},
+    scheme::{write, SigningScheme, SIGNED_LEN},
 };
 
 /// DKKW25 XMSS. A key signs once per leaf of its tree, so `Advance` may
@@ -33,7 +35,7 @@ unsafe impl SigningScheme for Xmss {
     /// The same key as `next_key` keeps it, and its used leaves stay used.
     fn advance(
         &mut self,
-        digest: &[u8; 32],
+        signed: &[u8; SIGNED_LEN],
         signature: &Signature,
         next_key: &VerifyingKey,
     ) -> Result<(), ProgramError> {
@@ -41,7 +43,7 @@ unsafe impl SigningScheme for Xmss {
             return Err(VectorError::LeafUsed.into());
         }
         self.public_key
-            .verify(digest, signature)
+            .verify(&hash(signed), signature)
             .map_err(|_| ProgramError::MissingRequiredSignature)?;
 
         if *next_key != self.public_key {

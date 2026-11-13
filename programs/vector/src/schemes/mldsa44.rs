@@ -4,7 +4,7 @@ use pinocchio::error::ProgramError;
 use solana_ml_dsa::ml_dsa_44::{PreparedVerifyingKey, Signature, VerifyingKey};
 
 use crate::{
-    scheme::{write, SigningScheme},
+    scheme::{write, SigningScheme, SIGNED_LEN},
     state::VectorAccount,
 };
 
@@ -46,13 +46,13 @@ unsafe impl SigningScheme for MlDsa44 {
 
     fn advance(
         &mut self,
-        digest: &[u8; 32],
+        signed: &[u8; SIGNED_LEN],
         signature: &Signature,
         _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
         PreparedKey::ref_from_bytes(&self.prepared)
             .map_err(|_| ProgramError::InvalidAccountData)?
-            .verify(digest, signature)
+            .verify(signed, signature)
             .map_err(|_| ProgramError::MissingRequiredSignature)
     }
 }

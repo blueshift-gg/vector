@@ -2,12 +2,13 @@
 //! pubkey, verified via standard ECDSA (no envelope, no recovery byte).
 
 use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey as Secp256k1SigningKey};
+use sha2::{Digest, Sha256};
 use solana_address::Address;
 use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
-use crate::scheme::Scheme;
+use crate::scheme::{signed, Scheme};
 
 /// Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey.
 pub const SECP256K1: Scheme = Scheme::of::<vector::schemes::secp256k1::Secp256k1>();
@@ -48,7 +49,7 @@ pub fn sign_advance_instruction_secp256k1_ecdsa(
         fee_payer,
     );
     let (sig, _recid) = signing_key
-        .sign_prehash(&digest)
+        .sign_prehash(&Sha256::digest(signed(&digest)))
         .expect("secp256k1 signing failed");
     let sig_bytes: [u8; 64] = sig.to_bytes().into();
     create_advance_instruction(&SECP256K1, &identity, &sig_bytes)

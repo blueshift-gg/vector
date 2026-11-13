@@ -24,13 +24,18 @@ pub const VECTOR_SEED: &[u8] = b"vector";
 /// with alignment 1, no padding and no invalid bit patterns.
 ///
 /// ```text
-/// nonce:  [u8; 32]  // offset  0 — what the next signature must be made over
-/// seed:   [u8; 32]  // offset 32 — sha256 of the key it was created with
-/// scheme:  u8       // offset 64 — the scheme of the identity that follows
-/// bump:    u8       // offset 65 — PDA bump seed
-/// system_bump: u8   // offset 66 — bump of the account's system PDA
-/// _pad:    u8       // offset 67
+/// nonce:   [u8; 32]  // offset  0 — what the next signature must be made over
+/// seed:    [u8; 32]  // offset 32 — sha256 of the key it was created with
+/// created: u64       // offset 64 — the slot it was created in
+/// scheme:  u8        // offset 72 — the scheme of the identity that follows
+/// bump:    u8        // offset 73 — PDA bump seed
+/// system_bump: u8    // offset 74 — bump of the account's system PDA
+/// _pad:    u8        // offset 75
 /// ```
+///
+/// `Close` refuses the account in its creation slot, so an account closed
+/// and created again starts from a slot hash it never had: its first nonce
+/// is never one it held before.
 ///
 /// The system PDA, `[vector address, system_bump]`, belongs to the System
 /// program: `Passthrough` can sign as it, for what only a system account can
@@ -43,6 +48,7 @@ pub const VECTOR_SEED: &[u8] = b"vector";
 pub struct VectorAccount {
     pub nonce: [u8; 32],
     pub seed: [u8; 32],
+    created: [u8; 8],
     pub scheme: u8,
     pub bump: u8,
     pub system_bump: u8,
@@ -61,11 +67,44 @@ impl VectorAccount {
         account.try_borrow_mut()
     }
 
-    /// The scheme of an account, from its header. The program takes the
-    /// scheme from here and never from the caller, so the identity is always
-    /// read as the scheme that wrote it.
-    pub fn scheme(data: &[u8]) -> Result<&'static Scheme, ProgramError> {
+    /// The slot the account was created in.
+    pub fn created(&self) -> u64 {
+        u64::from_le_bytes(self.created)
+    }
+
+    /// Record the slot the account is created in.
+    pub fn set_created(&mut self, slot: u64) {
+        self.created = slot.to_le_bytes();
+    }
+
+    /// The scheme of an account that may still be growing, from its header.
+    /// The program takes the scheme from here and never from the caller, so
+    /// the identity is always read as the scheme that wrote it.
+    pub fn growing_scheme(data: &[u8]) -> Result<&'static Scheme, ProgramError> {
         schemes::scheme(Self::header(data)?.scheme).map_err(|_| ProgramError::InvalidAccountData)
+    }
+
+    /// The scheme of a complete vector account: the header names a scheme
+    /// and the data is exactly as long as the scheme says. Nothing else is a
+    /// vector account, a nonce account or any other account of the program
+    /// included.
+    pub fn scheme(data: &[u8]) -> Result<&'static Scheme, ProgramError> {
+        let scheme = Self::growing_scheme(data)?;
+        if data.len() != scheme.account_len {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(scheme)
+    }
+
+    /// Check that `account` is a complete vector account the program owns,
+    /// and return its scheme and a copy of its header. Every instruction
+    /// that acts for a vector account loads it this way.
+    pub fn load(account: &AccountView) -> Result<(&'static Scheme, Self), ProgramError> {
+        if !account.owned_by(&crate::ID) {
+            return Err(ProgramError::InvalidAccountOwner);
+        }
+        let data = account.try_borrow()?;
+        Ok((Self::scheme(&data)?, *Self::header(&data)?))
     }
 
     /// The header at the start of account data.
@@ -164,12 +203,13 @@ impl NonceAccount {
     pub fn borrow<'a>(
         account: &'a mut AccountView,
         vector: &[u8; 32],
+        slot: u64,
     ) -> Result<RefMut<'a, Self>, ProgramError> {
         let nonce = Self::load(account)?;
         if &nonce.vector != vector {
             return Err(VectorError::ForeignNonce.into());
         }
-        if u64::from_le_bytes(nonce.created) >= Clock::get()?.slot {
+        if u64::from_le_bytes(nonce.created) >= slot {
             return Err(VectorError::FreshNonce.into());
         }
         Ok(nonce)

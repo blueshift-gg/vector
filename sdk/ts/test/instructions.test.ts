@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { Address, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { readFileSync } from "fs";
 import {
   createInitializeNonceInstruction,
@@ -37,9 +37,9 @@ test("the SDK's numbers are the program's", () => {
 test("passthrough preserves external signers", () => {
   const identity = new Uint8Array(32).fill(7);
   const [pda] = findVectorPda(ED25519, identity);
-  const cosigner = new Address(new Uint8Array(32).fill(8));
+  const cosigner = new PublicKey(new Uint8Array(32).fill(8));
   const nested = new TransactionInstruction({
-    programId: new Address(new Uint8Array(32).fill(9)),
+    programId: new PublicKey(new Uint8Array(32).fill(9)),
     keys: [
       { pubkey: pda, isSigner: true, isWritable: false },
       { pubkey: cosigner, isSigner: true, isWritable: true },
@@ -60,7 +60,7 @@ test("nonce accounts match the program", () => {
     Buffer.from(signedNonce(new Uint8Array(32).fill(0x11), new Uint8Array(32).fill(0xff))).toString("hex")
   ).toBe("95984e1ad523403222d2c8b9c201264f2c144f6fad168d4c29c13073ac603df9");
   expect(NONCE_ACCOUNT_LEN).toBe(72);
-  const nonce = new Address(new Uint8Array(32).fill(7));
+  const nonce = new PublicKey(new Uint8Array(32).fill(7));
   const init = createInitializeNonceInstruction(nonce, PROGRAM_ID);
   expect(Array.from(init.data)).toEqual([5]);
   expect(init.keys[0]).toMatchObject({ isSigner: true, isWritable: true });

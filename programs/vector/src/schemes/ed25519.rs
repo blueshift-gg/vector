@@ -2,9 +2,60 @@ use brine_ed25519::{hasher::FastSha512, verify};
 use pinocchio::error::ProgramError;
 use solana_address::{bytes_are_curve_point, Address};
 
-use crate::scheme::{write, SigningScheme};
+use crate::scheme::{write, SigningScheme, SIGNED_LEN};
 
-/// Ed25519. A signature is the 64-byte `(R, s)`.
+/// The eight points of order dividing 8, in their canonical encodings. A key
+/// that is one of them cannot sign (its signatures never verify, or, for the
+/// non-canonical encodings of them, anyone can forge one), so it would hold
+/// the account for good or for anyone.
+const SMALL_ORDER: [[u8; 32]; 8] = [
+    // Order 1: (0, 1).
+    [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ],
+    // Order 2: (0, -1).
+    [
+        0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0x7f,
+    ],
+    // Order 4: (+-sqrt(-1), 0).
+    [0; 32],
+    [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0x80,
+    ],
+    // Order 8.
+    [
+        0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b, 0x76, 0x0d, 0x10, 0x67,
+        0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39, 0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac,
+        0x03, 0x7a,
+    ],
+    [
+        0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b, 0x76, 0x0d, 0x10, 0x67,
+        0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39, 0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac,
+        0x03, 0xfa,
+    ],
+    [
+        0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4, 0x89, 0xf2, 0xef, 0x98,
+        0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6, 0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53,
+        0xfc, 0x05,
+    ],
+    [
+        0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4, 0x89, 0xf2, 0xef, 0x98,
+        0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6, 0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53,
+        0xfc, 0x85,
+    ],
+];
+
+/// Whether the encoding's y coordinate (the low 255 bits) is at least
+/// p = 2^255 - 19: a second encoding of a point with a small y.
+fn y_not_reduced(key: &[u8; 32]) -> bool {
+    key[31] & 0x7f == 0x7f && key[1..31].iter().all(|&b| b == 0xff) && key[0] >= 0xed
+}
+
+/// Ed25519. A signature is the 64-byte `(R, s)`, over `"vector:" || digest`.
 #[repr(C)]
 pub struct Ed25519 {
     public_key: Address,
@@ -17,7 +68,11 @@ unsafe impl SigningScheme for Ed25519 {
     type NextKey = [u8; 0];
 
     fn initialize(key: &Address, identity: &mut [u8]) -> Result<(), ProgramError> {
-        if !bytes_are_curve_point(key) {
+        // A point, in its one canonical encoding, of large order.
+        if !bytes_are_curve_point(key)
+            || y_not_reduced(key.as_array())
+            || SMALL_ORDER.contains(key.as_array())
+        {
             return Err(ProgramError::InvalidInstructionData);
         }
         write(identity, key.as_array())
@@ -25,11 +80,11 @@ unsafe impl SigningScheme for Ed25519 {
 
     fn advance(
         &mut self,
-        digest: &[u8; 32],
+        signed: &[u8; SIGNED_LEN],
         signature: &[u8; 64],
         _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
-        verify::<FastSha512>(&self.public_key, signature, &[digest])
+        verify::<FastSha512>(&self.public_key, signature, &[signed])
             .map_err(|_| ProgramError::MissingRequiredSignature)
     }
 }

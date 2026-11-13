@@ -1,11 +1,12 @@
 use pinocchio::error::ProgramError;
 use solana_nostd_keccak::{hash, hashv};
 
-use crate::scheme::{write, SigningScheme};
+use crate::scheme::{write, SigningScheme, SIGNED_LEN};
 
 /// secp256k1 ECDSA in an EIP-191 "Ethereum Signed Message" envelope, so any
-/// Ethereum wallet's `personal_sign` produces a signature. A signature is
-/// the 65-byte `(r, s, v)`; `v` is the recovery id, 0 or 1.
+/// Ethereum wallet's `personal_sign` produces a signature. What it signs is
+/// `"vector:" || digest`, 39 bytes. A signature is the 65-byte `(r, s, v)`;
+/// `v` is the recovery id, 0 or 1, or as wallets return it, 27 or 28.
 #[repr(C)]
 pub struct Eip191 {
     /// The Ethereum address: the last 20 bytes of the public key's keccak.
@@ -27,14 +28,15 @@ unsafe impl SigningScheme for Eip191 {
 
     fn advance(
         &mut self,
-        digest: &[u8; 32],
+        signed: &[u8; SIGNED_LEN],
         signature: &[u8; 65],
         _next_key: &[u8; 0],
     ) -> Result<(), ProgramError> {
         let [rs @ .., v] = signature;
-        let signed = hashv(&[b"\x19Ethereum Signed Message:\n32", digest]);
-        let public_key =
-            secp256k1_recover(&signed, *v, rs).ok_or(ProgramError::MissingRequiredSignature)?;
+        let envelope = hashv(&[b"\x19Ethereum Signed Message:\n39", signed]);
+        // Wallets return `v` as 27 or 28; the recovery id is 0 or 1.
+        let public_key = secp256k1_recover(&envelope, *v % 27, rs)
+            .ok_or(ProgramError::MissingRequiredSignature)?;
         if hash(&public_key)[12..] == self.address {
             Ok(())
         } else {

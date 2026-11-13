@@ -1,5 +1,5 @@
 {
-  "headerLen": 68,
+  "headerLen": 76,
   "schemes": [
     { "id": 1, "signatureLen": 64, "identityLen": 32, "storedIdentityLen": 32, "nextKeyLen": 0 },
     { "id": 2, "signatureLen": 65, "identityLen": 20, "storedIdentityLen": 20, "nextKeyLen": 0 },
@@ -17,6 +17,8 @@
     "TreeExhausted": 4,
     "ForeignNonce": 5,
     "KeyRotates": 6,
-    "FreshNonce": 7
+    "FreshNonce": 7,
+    "FreshVector": 8,
+    "Expired": 9
   }
 }

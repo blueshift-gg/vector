@@ -1,78 +1,20 @@
 {
-  "name": "vector-sdk",
-  "version": "0.1.0",
-  "description": "TypeScript SDK for the Vector Solana program",
+  "name": "vector-workspace",
+  "private": true,
   "type": "module",
-  "main": "sdk/ts/dist/index.js",
-  "types": "sdk/ts/dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./sdk/ts/dist/index.js",
-      "types": "./sdk/ts/dist/index.d.ts"
-    },
-    "./scheme": {
-      "import": "./sdk/ts/dist/scheme.js",
-      "types": "./sdk/ts/dist/scheme.d.ts"
-    },
-    "./instructions": {
-      "import": "./sdk/ts/dist/instructions.js",
-      "types": "./sdk/ts/dist/instructions.d.ts"
-    },
-    "./digest": {
-      "import": "./sdk/ts/dist/digest.js",
-      "types": "./sdk/ts/dist/digest.d.ts"
-    },
-    "./verify": {
-      "import": "./sdk/ts/dist/verify.js",
-      "types": "./sdk/ts/dist/verify.d.ts"
-    },
-    "./ed25519": {
-      "import": "./sdk/ts/dist/schemes/ed25519.js",
-      "types": "./sdk/ts/dist/schemes/ed25519.d.ts"
-    },
-    "./eip191": {
-      "import": "./sdk/ts/dist/schemes/eip191.js",
-      "types": "./sdk/ts/dist/schemes/eip191.d.ts"
-    },
-    "./secp256k1": {
-      "import": "./sdk/ts/dist/schemes/secp256k1.js",
-      "types": "./sdk/ts/dist/schemes/secp256k1.d.ts"
-    },
-    "./falcon512": {
-      "import": "./sdk/ts/dist/schemes/falcon512.js",
-      "types": "./sdk/ts/dist/schemes/falcon512.d.ts"
-    },
-    "./mldsa44": {
-      "import": "./sdk/ts/dist/schemes/mldsa44.js",
-      "types": "./sdk/ts/dist/schemes/mldsa44.d.ts"
-    },
-    "./winternitz": {
-      "import": "./sdk/ts/dist/schemes/winternitz.js",
-      "types": "./sdk/ts/dist/schemes/winternitz.d.ts"
-    },
-    "./xmss": {
-      "import": "./sdk/ts/dist/schemes/xmss.js",
-      "types": "./sdk/ts/dist/schemes/xmss.d.ts"
-    }
-  },
+  "workspaces": ["sdk/ts"],
   "scripts": {
-    "build": "tsc",
+    "build": "bun run --cwd sdk/ts build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "validator": "solana-test-validator --clone-feature-set --url mainnet-beta --bpf-program vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV ./target/deploy/vector.so --account SysvarRent111111111111111111111111111111111 ./fixtures/rent.json --mint EvFUfisEScFuZSqDXagC17m3bpP32B74dseMHtzQ5TNb --reset",
-    "test": "bun vitest run"
-  },
-  "dependencies": {
-    "@noble/curves": "^1.8.0",
-    "@noble/hashes": "^1.7.0",
-    "@noble/post-quantum": "^0.6.1",
-    "@solana/web3.js": "3.0.0-rc.0"
+    "test": "vitest run --project offline",
+    "test:e2e": "vitest run --project e2e"
   },
   "devDependencies": {
     "@solana/spl-token": "^0.4.0",
+    "@solana/web3.js": "^3.2.1",
+    "@types/node": "^22.0.0",
     "typescript": "^5.4.0",
     "vitest": "^3.1.0"
-  },
-  "files": [
-    "sdk/ts/dist",
-    "sdk/ts/src"
-  ]
+  }
 }

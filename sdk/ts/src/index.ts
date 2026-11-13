@@ -10,8 +10,8 @@
  * which pulls in only that scheme's crypto:
  *
  * ```ts
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk";
- * import { ED25519, signAdvanceInstructionEd25519 } from "vector-sdk/ed25519";
+ * import { ED25519, signAdvanceInstructionEd25519 } from "@blueshift-gg/vector";
+ * import { ED25519, signAdvanceInstructionEd25519 } from "@blueshift-gg/vector/ed25519";
  * ```
  */
 

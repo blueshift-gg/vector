@@ -5,7 +5,7 @@
  * with `crates/core/tests/verify.rs`.
  */
 import { describe, test, expect } from "vitest";
-import { Address, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { bytesToHex } from "@noble/hashes/utils";
 
@@ -39,14 +39,13 @@ import {
   IdentityMismatchError,
   MalformedSignatureError,
   SignatureVerificationError,
-  normalizeEip191RecoveryByte,
   verifyAdvanceSignature,
 } from "../src/verify.js";
 
 const NONCE = new Uint8Array(32).fill(0x01);
-const SYSTEM_PROGRAM = new Address("11111111111111111111111111111111");
+const SYSTEM_PROGRAM = new PublicKey("11111111111111111111111111111111");
 
-const addr = (b: number) => new Address(new Uint8Array(32).fill(b));
+const addr = (b: number) => new PublicKey(new Uint8Array(32).fill(b));
 const meta = (b: number, isSigner: boolean, isWritable: boolean) => ({
   pubkey: addr(b),
   isSigner,
@@ -72,10 +71,13 @@ function fixedIxLists() {
   return { pre: [pre], post: [post] };
 }
 
-/** Wire signature carried in an `advance` ix: data after the discriminator. */
+/**
+ * Wire signature carried in a one-signer `advance` ix: the data after the
+ * discriminator and the 8-byte `validUntil`.
+ */
 function sigOf(advanceIx: TransactionInstruction): Uint8Array {
   expect(advanceIx.data[0]).toBe(ADVANCE_DISCRIMINATOR);
-  return new Uint8Array(advanceIx.data.subarray(1));
+  return new Uint8Array(advanceIx.data.subarray(1 + 8));
 }
 
 /** Negate `s` — the high-S malleated twin of a (noble-produced) low-S sig. */
@@ -198,7 +200,7 @@ describe("sign → verify round trips", () => {
       MLDSA44, new Uint8Array(32).fill(255), publicKey, [], [passthrough]
     );
     expect(Buffer.from(pinned).toString("hex")).toBe(
-      "da5f342afda099bf54e78072cfb1c5a6490171bafe756ec6c94e700321e16440"
+      "f15dbead82e22b65227273d9a513ddb6ef718b79d5d37746e34dac35a422d35a"
     );
   });
 });
@@ -249,28 +251,20 @@ describe("eip191 recovery byte", () => {
   const { pre, post } = fixedIxLists();
   const signature = sigOf(signAdvanceInstructionEip191(key, NONCE, pre, post));
 
-  test("legacy 27/28 form is rejected with subtract-27 guidance", () => {
+  test("wallet 27/28 form is accepted, as on chain (v % 27)", () => {
     const legacy = new Uint8Array(signature);
     legacy[64] = signature[64] + 27; // what Ethereum tooling emits
     expect(() =>
       verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, legacy)
-    ).toThrow(MalformedSignatureError);
-    expect(() =>
-      verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, legacy)
-    ).toThrow(/27\/28.*subtract 27/s);
+    ).not.toThrow();
   });
 
-  test("normalizeEip191RecoveryByte converts at assembly time", () => {
-    expect(normalizeEip191RecoveryByte(27)).toBe(0);
-    expect(normalizeEip191RecoveryByte(28)).toBe(1);
-    expect(normalizeEip191RecoveryByte(signature[64])).toBe(signature[64]);
-    expect(() => normalizeEip191RecoveryByte(29)).toThrow(MalformedSignatureError);
-
-    const normalized = new Uint8Array(signature);
-    normalized[64] = normalizeEip191RecoveryByte(signature[64] + 27);
+  test("a recovery byte outside 0..=3 and 27..=30 is malformed", () => {
+    const bad = new Uint8Array(signature);
+    bad[64] = 4;
     expect(() =>
-      verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, normalized)
-    ).not.toThrow();
+      verifyAdvanceSignature({ scheme: EIP191, identity: ethAddress }, NONCE, pre, post, bad)
+    ).toThrow(MalformedSignatureError);
   });
 
   test("signature from a different key reports an identity mismatch", () => {
@@ -291,7 +285,7 @@ describe("eip191 recovery byte", () => {
  * index footer), its half of the pin breaks.
  */
 const PINNED_DIGEST_HEX =
-  "60e745d8e318a4862ebdf99be084f1e0d07f3431c88887620d9b89fb0201cc0d";
+  "c7a416250641b0799af333015a2b87923131f8cab638b3daafc277e808e74280";
 
 describe("cross-language digest pin", () => {
   test("digest matches the constant pinned by the Rust suite", () => {
@@ -318,7 +312,7 @@ describe("cross-language digest pin", () => {
  * implementation drifts, its half of the pin breaks.
  */
 const PINNED_REVOCATION_DIGEST_HEX =
-  "be718a414d49cddd497fb38c1e4b5ba19cfb3c5062cf00136293915f1675dd54";
+  "40ad59cf6f9853f02d2668e092573e6b7b8131cc0c335dd29a03747759b450cf";
 
 describe("revocation (inert advance)", () => {
   test("round trip + cross-language pin", () => {

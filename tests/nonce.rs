@@ -12,7 +12,7 @@ use vector_core::{
     advance_message, create_close_nonce_subinstruction, create_initialize_nonce_instruction,
     create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, signed_nonce, signer_digest,
-    AdvanceSigner, NonceAccount, VectorError, ED25519, PROGRAM_ID, WINTERNITZ,
+    AdvanceSigner, NonceAccount, VectorError, ED25519, NEVER_EXPIRES, PROGRAM_ID, WINTERNITZ,
 };
 
 use crate::common::{build_vector_account, mollusk, process_transaction, NONCE};
@@ -114,16 +114,17 @@ impl World {
                 ..AdvanceSigner::new(&ED25519, &self.identity)
             })
             .collect();
-        let message = advance_message(&signers, &[], post, None);
+        let message = advance_message(NEVER_EXPIRES, &signers, &[], post, None);
         let digests: Vec<_> = entries
             .iter()
             .map(|(_, nonce)| signer_digest(&message, nonce, &self.vector, &[]))
             .collect();
         let signatures: Vec<_> = digests
             .iter()
-            .map(|digest| self.key.sign(digest).to_bytes())
+            .map(|digest| self.key.sign(&vector_core::signed(digest)).to_bytes())
             .collect();
         let advance = create_multi_advance_instruction(
+            NEVER_EXPIRES,
             &signers
                 .iter()
                 .zip(&signatures)

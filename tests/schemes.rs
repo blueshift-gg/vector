@@ -140,6 +140,8 @@ fn the_program_fixture_is_the_programs() {
         VectorError::ForeignNonce,
         VectorError::KeyRotates,
         VectorError::FreshNonce,
+        VectorError::FreshVector,
+        VectorError::Expired,
     ]
     .map(|error| format!(r#"    "{error:?}": {}"#, error as u32))
     .join(",\n");

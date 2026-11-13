@@ -29,6 +29,12 @@ pub enum VectorError {
     /// signs and closes from the next, so it is never created again at a
     /// nonce it held.
     FreshNonce,
+    /// `Close`: the vector account was created in this slot. It closes from
+    /// the next, so an account closed and created again never starts from a
+    /// nonce it held before.
+    FreshVector,
+    /// `Advance`: the transaction's `valid_until` slot has passed.
+    Expired,
 }
 
 impl From<VectorError> for ProgramError {

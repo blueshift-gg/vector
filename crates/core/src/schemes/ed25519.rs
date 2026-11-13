@@ -1,5 +1,5 @@
 //! Ed25519 scheme: identity is the 32-byte public key, verified directly
-//! over the advance digest.
+//! over `"vector:" || digest`.
 
 use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
 use solana_address::Address;
@@ -7,7 +7,7 @@ use solana_instruction::Instruction;
 
 use crate::digest::advance_vector_digest;
 use crate::instructions::{create_advance_instruction, create_initialize_instruction};
-use crate::scheme::Scheme;
+use crate::scheme::{signed, Scheme};
 
 /// Ed25519 — identity is the 32-byte public key.
 pub const ED25519: Scheme = Scheme::of::<vector::schemes::ed25519::Ed25519>();
@@ -44,7 +44,7 @@ pub fn sign_advance_instruction_ed25519(
         post_instructions,
         fee_payer,
     );
-    let signature: [u8; 64] = signing_key.sign(&digest).to_bytes();
+    let signature: [u8; 64] = signing_key.sign(&signed(&digest)).to_bytes();
     create_advance_instruction(&ED25519, &identity, &signature)
 }
 

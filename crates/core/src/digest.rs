@@ -9,7 +9,7 @@ use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction, Instruction};
 use solana_instructions_sysvar::construct_instructions_data;
 
 use crate::instructions::{create_multi_advance_instruction, AdvanceSigner};
-use crate::scheme::{find_vector_pda, Scheme};
+use crate::scheme::{find_vector_pda, Scheme, NEVER_EXPIRES, VALID_UNTIL_LEN};
 
 /// Set each account's flags to what the runtime writes in the instructions
 /// sysvar: signer or writable if any instruction says so, and the fee payer
@@ -36,7 +36,8 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
 }
 
 /// The message every signer of one advance approves: the SHA-256 of the
-/// instructions sysvar without the advance's data.
+/// instructions sysvar without the advance's next keys and signatures. Its
+/// `valid_until` stays in, so every signature covers the one expiry.
 ///
 /// `signers` are the advance's, in order. The advance goes after
 /// `pre_instructions`. A passthrough is one of the pre or post instructions,
@@ -44,12 +45,13 @@ fn promote_to_message_flags(instructions: &mut [Instruction], fee_payer: Option<
 ///
 /// `fee_payer` is as in [`advance_vector_digest`].
 pub fn advance_message(
+    valid_until: u64,
     signers: &[AdvanceSigner],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
     fee_payer: Option<&Address>,
 ) -> [u8; 32] {
-    // Only the length of the advance's data shows: it moves what follows.
+    // Only the length of the signatures shows: it moves what follows.
     let placeholders: Vec<Vec<u8>> = signers
         .iter()
         .map(|signer| vec![0; signer.scheme.signature_len])
@@ -62,7 +64,7 @@ pub fn advance_message(
 
     let mut all: Vec<Instruction> = pre_instructions.to_vec();
     let advance_index = all.len();
-    all.push(create_multi_advance_instruction(&signed));
+    all.push(create_multi_advance_instruction(valid_until, &signed));
     all.extend_from_slice(post_instructions);
     promote_to_message_flags(&mut all, fee_payer);
 
@@ -91,12 +93,13 @@ pub fn advance_message(
 
     // Header: num_instructions (u16) + one offset u16 per instruction.
     // Region: num_accounts (u16) + 33 * N metas + 32-byte program id +
-    // u16 data_len + data. Everything after the discriminator is cut.
+    // u16 data_len + data. Everything after the discriminator and
+    // `valid_until` is cut.
     let offset_pos = 2 + 2 * advance_index;
     let offset = u16::from_le_bytes([buffer[offset_pos], buffer[offset_pos + 1]]) as usize;
     let advance = &all[advance_index];
     let data_end = offset + 2 + 33 * advance.accounts.len() + 32 + 2 + advance.data.len();
-    let cut = advance.data.len() - 1;
+    let cut = advance.data.len() - 1 - VALID_UNTIL_LEN;
 
     let mut hasher = Sha256::new();
     hasher.update(&buffer[..data_end - cut]);
@@ -104,11 +107,13 @@ pub fn advance_message(
     hasher.finalize().into()
 }
 
-/// What one signer signs, and the account's next nonce: `SHA256(message ||
-/// nonce || vector || next_key)`, with `nonce` the vector's own or, over a
-/// nonce account, [`signed_nonce`](crate::signed_nonce), `message` from [`advance_message`],
-/// `vector` the signer's account address and `next_key` its
-/// [`AdvanceSigner::next_key`].
+/// What one signer's signature is over, and the account's next nonce:
+/// `SHA256(message || nonce || vector || next_key)`, with
+/// `nonce` the vector's own or, over a nonce account,
+/// [`signed_nonce`](crate::signed_nonce), `message` from [`advance_message`],
+/// `vector` the signer's account address, and `next_key` its
+/// [`AdvanceSigner`]'s. The key signs [`signed`](crate::signed) of it:
+/// `"vector:" || digest`.
 pub fn signer_digest(
     message: &[u8; 32],
     nonce: &[u8; 32],
@@ -124,7 +129,8 @@ pub fn signer_digest(
 }
 
 /// [`signer_digest`] for an advance with one signer, whose key never
-/// changes.
+/// changes and whose signature never expires (for any other, build the
+/// [`AdvanceSigner`]s and use [`advance_message`] and [`signer_digest`]).
 ///
 /// Pass `fee_payer` when it is also an account of one of the instructions:
 /// the runtime then marks it a writable signer there, and the digest covers
@@ -165,7 +171,13 @@ pub fn rotating_advance_vector_digest(
         next_key,
         ..AdvanceSigner::new(scheme, identity)
     };
-    let message = advance_message(&[signer], pre_instructions, post_instructions, fee_payer);
+    let message = advance_message(
+        NEVER_EXPIRES,
+        &[signer],
+        pre_instructions,
+        post_instructions,
+        fee_payer,
+    );
     signer_digest(
         &message,
         nonce,

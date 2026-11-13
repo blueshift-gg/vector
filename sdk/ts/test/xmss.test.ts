@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { Address } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import {
   XMSS,
   createAdvanceInstruction,
@@ -16,11 +16,11 @@ test("XMSS account and rotation digest match Rust", () => {
   // Shared with tests/xmss.rs; pins the 41-byte key and 1037-byte signature.
   const publicKey = Uint8Array.from({ length: 41 }, (_, i) => i);
   const identity = publicKey;
-  const receiver = new Address(new Uint8Array(32).fill(9));
+  const receiver = new PublicKey(new Uint8Array(32).fill(9));
   const [pda, bump] = findVectorPda(XMSS, identity);
   expect(pda.toString()).toBe("4kd7ArVtukusWaCpQgEZsqabWcnQbB4KjjwYnHVExk7c");
   expect(bump).toBe(255);
-  expect(vectorAccountLen(XMSS)).toBe(113);
+  expect(vectorAccountLen(XMSS)).toBe(121);
 
   const initialize = createInitializeXmss(receiver, publicKey);
   expect(initialize.keys[1].pubkey.toString()).toBe(pda.toString());
@@ -33,11 +33,15 @@ test("XMSS account and rotation digest match Rust", () => {
   const passthrough = createPassthroughInstruction(XMSS, identity, [
     createWithdrawSubinstruction(XMSS, identity, receiver, 1234n),
   ]);
-  // The next key follows the discriminator; the signature follows it.
+  // After the discriminator: validUntil (u64 LE, here never), the next key,
+  // then the signature.
   const signature = new Uint8Array(XMSS.signatureLen);
   const advance = createRotatingAdvanceInstruction(XMSS, identity, nextKey, signature);
-  expect(Array.from(advance.data.subarray(0, 42))).toEqual([0, ...nextKey]);
-  expect(advance.data.length).toBe(1 + 41 + XMSS.signatureLen);
+  expect(Array.from(advance.data.subarray(0, 50))).toEqual([0, ...new Array(8).fill(255), ...nextKey]);
+  expect(advance.data.length).toBe(1 + 8 + 41 + XMSS.signatureLen);
+  expect(createRotatingAdvanceInstruction(XMSS, identity, nextKey, signature, 77n).data.subarray(1, 9)).toEqual(
+    Uint8Array.of(77, 0, 0, 0, 0, 0, 0, 0)
+  );
   expect(() => createAdvanceInstruction(XMSS, identity, signature)).toThrow();
   for (const length of [40, 42]) {
     expect(() =>
@@ -48,6 +52,6 @@ test("XMSS account and rotation digest match Rust", () => {
     XMSS, new Uint8Array(32).fill(255), identity, nextKey, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "d54005f3221fc23ac21a287515389610614e38e916bcc337b66e3ad9c8a4da3a"
+    "1d69cda6a40727c8acb398e7318dc67bae02be16b796d4c8031acbbbe22e99a8"
   );
 });

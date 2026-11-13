@@ -1,9 +1,11 @@
 use pinocchio::error::ProgramError;
 use solana_winternitz::{winternitz::Signature, VerifyingKey};
 
+use solana_nostd_sha256::hash;
+
 use crate::{
     error::VectorError,
-    scheme::{write, SigningScheme},
+    scheme::{write, SigningScheme, SIGNED_LEN},
 };
 
 /// DKKW25 Winternitz. A key signs once, so every `Advance` replaces it.
@@ -26,12 +28,12 @@ unsafe impl SigningScheme for Winternitz {
     /// The same key again would sign a second time.
     fn advance(
         &mut self,
-        digest: &[u8; 32],
+        signed: &[u8; SIGNED_LEN],
         signature: &Signature,
         next_key: &VerifyingKey,
     ) -> Result<(), ProgramError> {
         self.public_key
-            .verify(digest, signature)
+            .verify(&hash(signed), signature)
             .map_err(|_| ProgramError::MissingRequiredSignature)?;
         if *next_key == self.public_key {
             return Err(VectorError::KeyReused.into());

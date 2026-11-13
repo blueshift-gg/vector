@@ -1,5 +1,5 @@
 /** Plain secp256k1 ECDSA. The identity is the 33-byte compressed public key. */
-import { Address, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
 import { Scheme } from "../scheme.js";
@@ -7,7 +7,8 @@ import {
   createInitializeInstruction,
   createAdvanceInstruction,
 } from "../instructions.js";
-import { advanceVectorDigest } from "../digest.js";
+import { sha256 } from "../bytes.js";
+import { advanceVectorDigest, signedMessage } from "../digest.js";
 
 /** Plain secp256k1 ECDSA — identity is the 33-byte compressed pubkey. */
 // Checked against the program by `fixtures/program.json`.
@@ -29,22 +30,23 @@ export function secp256k1Identity(privateKey: Uint8Array): Uint8Array {
  * 33-byte sec1-compressed pubkey.
  */
 export function createInitializeSecp256k1(
-  payer: Address,
+  payer: PublicKey,
   compressedPubkey: Uint8Array
 ): TransactionInstruction {
   return createInitializeInstruction(payer, SECP256K1, compressedPubkey);
 }
 
 /**
- * Sign an advance with a plain secp256k1 key. The signature is the 64-byte
- * `(r, s)`.
+ * Sign an advance with a plain secp256k1 key, over the SHA-256 of `"vector:" ||
+ * digest`. The signature is the 64-byte `(r, s)`.
  */
 export function signAdvanceInstructionSecp256k1(
   privateKey: Uint8Array,
   nonce: Uint8Array,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: Address
+  feePayer?: PublicKey,
+  validUntil?: bigint | number
 ): TransactionInstruction {
   const identity = secp256k1Identity(privateKey);
   const digest = advanceVectorDigest(
@@ -53,13 +55,14 @@ export function signAdvanceInstructionSecp256k1(
     identity,
     preInstructions,
     postInstructions,
-    feePayer
+    feePayer,
+    validUntil
   );
 
-  const sig = secp256k1.sign(digest, privateKey);
+  const sig = secp256k1.sign(sha256(signedMessage(digest)), privateKey);
   const sigBytes = sig.toBytes("compact"); // r || s (64 bytes)
 
-  return createAdvanceInstruction(SECP256K1, identity, sigBytes);
+  return createAdvanceInstruction(SECP256K1, identity, sigBytes, validUntil);
 }
 
 /**

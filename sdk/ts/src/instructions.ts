@@ -3,19 +3,18 @@
  * `createInitializeEd25519`, are in `./schemes/*`.
  */
 import {
-  Address,
+  PublicKey,
   SystemProgram,
   SYSVAR_INSTRUCTIONS_PUBKEY,
   TransactionInstruction,
 } from "@solana/web3.js";
 
+import { concatBytes, validUntilBytes, writeU16LE, writeU64LE } from "./bytes.js";
 import {
   Scheme,
   findSystemPda,
   findVectorPda,
   vectorAccountLen,
-  writeU16LE,
-  writeU64LE,
   PROGRAM_ID,
   MAX_PERMITTED_DATA_INCREASE,
   INITIALIZE_DISCRIMINATOR,
@@ -36,7 +35,7 @@ import {
  * Data: `[INITIALIZE_DISCRIMINATOR, scheme, ...identity]`.
  */
 export function createInitializeInstruction(
-  payer: Address,
+  payer: PublicKey,
   scheme: Scheme,
   identity: Uint8Array
 ): TransactionInstruction {
@@ -54,7 +53,7 @@ export function createInitializeInstruction(
       { pubkey: vectorPda, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
-    data: Buffer.from(data),
+    data,
   });
 }
 
@@ -65,7 +64,7 @@ export function createInitializeInstruction(
  * scheme but ML-DSA-44, which takes three. They fit one transaction.
  */
 export function createInitializeInstructions(
-  payer: Address,
+  payer: PublicKey,
   scheme: Scheme,
   identity: Uint8Array
 ): TransactionInstruction[] {
@@ -75,7 +74,7 @@ export function createInitializeInstructions(
     new TransactionInstruction({
       programId: PROGRAM_ID,
       keys: first.keys,
-      data: Buffer.from([INITIALIZE_DISCRIMINATOR]),
+      data: Uint8Array.of(INITIALIZE_DISCRIMINATOR),
     });
   return [first, ...Array.from({ length: calls - 1 }, grow)];
 }
@@ -90,11 +89,13 @@ export function createInitializeInstructions(
 export function createAdvanceInstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  advanceVectorSignature: Uint8Array
+  advanceVectorSignature: Uint8Array,
+  validUntil?: bigint | number
 ): TransactionInstruction {
-  return createMultiAdvanceInstruction([
-    { scheme, identity, signature: advanceVectorSignature },
-  ]);
+  return createMultiAdvanceInstruction(
+    [{ scheme, identity, signature: advanceVectorSignature }],
+    validUntil
+  );
 }
 
 /**
@@ -107,11 +108,13 @@ export function createRotatingAdvanceInstruction(
   scheme: Scheme,
   identity: Uint8Array,
   nextKey: Uint8Array,
-  advanceVectorSignature: Uint8Array
+  advanceVectorSignature: Uint8Array,
+  validUntil?: bigint | number
 ): TransactionInstruction {
-  return createMultiAdvanceInstruction([
-    { scheme, identity, nextKey, signature: advanceVectorSignature },
-  ]);
+  return createMultiAdvanceInstruction(
+    [{ scheme, identity, nextKey, signature: advanceVectorSignature }],
+    validUntil
+  );
 }
 
 /**
@@ -120,22 +123,31 @@ export function createRotatingAdvanceInstruction(
  *
  * Accounts: `[{vector_pda(writable), nonceAccount(writable)?}..., instructions_sysvar]`.
  * A signer with a `nonceAccount` signs over that account's nonce.
- * Data: `[ADVANCE_DISCRIMINATOR, {nextKey, signature}...]`.
+ * Data: `[ADVANCE_DISCRIMINATOR, validUntil(u64 LE), {nextKey, signature}...]`.
+ * `validUntil` is the last slot the transaction may land in, for every
+ * signer: the message covers it, so no one can extend it alone. The default
+ * never expires.
  */
 export function createMultiAdvanceInstruction(
   signers: {
     scheme: Scheme;
     identity: Uint8Array;
-    nonceAccount?: Address;
+    nonceAccount?: PublicKey;
     nextKey?: Uint8Array;
     signature: Uint8Array;
-  }[]
+  }[],
+  validUntil?: bigint | number
 ): TransactionInstruction {
-  const nextKeys = signers.map(({ scheme, nextKey = new Uint8Array() }) => {
+  if (signers.length === 0) throw new Error("An advance needs at least one signer");
+  const entries = signers.map(({ scheme, nextKey = new Uint8Array(), signature }) => {
     if (nextKey.length !== scheme.nextKeyLen) {
       throw new Error(`Next key must be ${scheme.nextKeyLen} bytes`);
     }
-    return nextKey;
+    // No lengths are in the data, so a wrong one shifts every later signer.
+    if (signature.length !== scheme.signatureLen) {
+      throw new Error(`Signature must be ${scheme.signatureLen} bytes, got ${signature.length}`);
+    }
+    return concatBytes(nextKey, signature);
   });
   return new TransactionInstruction({
     programId: PROGRAM_ID,
@@ -147,14 +159,14 @@ export function createMultiAdvanceInstruction(
       ),
       { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
     ],
-    data: Buffer.concat([
-      Uint8Array.of(ADVANCE_DISCRIMINATOR),
-      ...signers.flatMap((s, i) => [nextKeys[i], s.signature]),
-    ]),
+    data: concatBytes(Uint8Array.of(ADVANCE_DISCRIMINATOR), validUntilBytes(validUntil), ...entries),
   });
 }
 
 // ── Passthrough ──────────────────────────────────────────────────────
+
+/** Most signers one `passthrough` takes: the runtime's limit on signers of one call. */
+export const MAX_PASSTHROUGH_SIGNERS = 16;
 
 /**
  * Who a passthrough signs as: a vector account, or with `system` its system
@@ -205,8 +217,10 @@ export function createMultiPassthroughInstruction(
   signers: PassthroughSigner[],
   subInstructions: TransactionInstruction[]
 ): TransactionInstruction {
-  if (signers.length > 255) {
-    throw new Error(`Too many signers: ${signers.length} (max 255)`);
+  if (signers.length === 0 || signers.length > MAX_PASSTHROUGH_SIGNERS) {
+    throw new Error(
+      `A passthrough takes 1 to ${MAX_PASSTHROUGH_SIGNERS} signers, got ${signers.length}`
+    );
   }
   if (subInstructions.length > 255) {
     throw new Error(
@@ -217,7 +231,7 @@ export function createMultiPassthroughInstruction(
   const keys = [
     { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
   ];
-  const addresses: Address[] = [];
+  const addresses: PublicKey[] = [];
   for (const { scheme, identity, system = false } of signers) {
     const [vectorPda] = findVectorPda(scheme, identity);
     keys.push({ pubkey: vectorPda, isSigner: false, isWritable: false });
@@ -272,7 +286,7 @@ export function createMultiPassthroughInstruction(
   return new TransactionInstruction({
     programId: PROGRAM_ID,
     keys,
-    data: Buffer.from(data),
+    data,
   });
 }
 
@@ -288,8 +302,8 @@ export function createMultiPassthroughInstruction(
  * Data: `[INITIALIZE_NONCE_DISCRIMINATOR]`.
  */
 export function createInitializeNonceInstruction(
-  nonceAccount: Address,
-  vector: Address
+  nonceAccount: PublicKey,
+  vector: PublicKey
 ): TransactionInstruction {
   return new TransactionInstruction({
     programId: PROGRAM_ID,
@@ -297,7 +311,7 @@ export function createInitializeNonceInstruction(
       { pubkey: nonceAccount, isSigner: true, isWritable: true },
       { pubkey: vector, isSigner: false, isWritable: false },
     ],
-    data: Buffer.from([INITIALIZE_NONCE_DISCRIMINATOR]),
+    data: Uint8Array.of(INITIALIZE_NONCE_DISCRIMINATOR),
   });
 }
 
@@ -311,8 +325,8 @@ export function createInitializeNonceInstruction(
 export function createCloseSubinstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  closeTo: Address,
-  nonceAccount?: Address
+  closeTo: PublicKey,
+  nonceAccount?: PublicKey
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
   return new TransactionInstruction({
@@ -322,7 +336,7 @@ export function createCloseSubinstruction(
       { pubkey: closeTo, isSigner: false, isWritable: true },
       ...(nonceAccount ? [{ pubkey: nonceAccount, isSigner: false, isWritable: true }] : []),
     ],
-    data: Buffer.from([CLOSE_DISCRIMINATOR]),
+    data: Uint8Array.of(CLOSE_DISCRIMINATOR),
   });
 }
 
@@ -333,7 +347,7 @@ export function createCloseSubinstruction(
 export function createWithdrawSubinstruction(
   scheme: Scheme,
   identity: Uint8Array,
-  receiver: Address,
+  receiver: PublicKey,
   lamports: bigint
 ): TransactionInstruction {
   const [vectorPda] = findVectorPda(scheme, identity);
@@ -346,7 +360,7 @@ export function createWithdrawSubinstruction(
       { pubkey: vectorPda, isSigner: false, isWritable: true },
       { pubkey: receiver, isSigner: false, isWritable: true },
     ],
-    data: Buffer.from(data),
+    data,
   });
 }
 

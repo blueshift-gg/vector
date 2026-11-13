@@ -1,10 +1,10 @@
 /**
- * Falcon-512 (post-quantum) integration tests. See `helpers.ts` for shared
+ * secp256k1 (plain ECDSA) integration tests. See `helpers.ts` for shared
  * scaffolding.
  */
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import {
-  Address,
+  PublicKey,
   Connection,
   Keypair,
   SystemProgram,
@@ -12,15 +12,15 @@ import {
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
-  FALCON512,
-  falcon512Keygen,
+  SECP256K1,
+  secp256k1Identity,
   findVectorPda,
   fetchVectorAccount,
-  createInitializeFalcon512,
+  createInitializeSecp256k1,
   createCloseSubinstruction,
   createPassthroughInstruction,
   createWithdrawSubinstruction,
-  signAdvanceInstructionFalcon512,
+  signAdvanceInstructionSecp256k1,
   advanceVectorDigest,
 } from "../src/index.js";
 import {
@@ -31,17 +31,14 @@ import {
   splMintAuthorityRoundTrip,
 } from "./helpers.js";
 
-// Falcon-512 deterministic test keypair (48-byte noble keygen seed) so the
-// PDA is stable across the block and across runs against a fresh validator.
-const FALCON_SEED = new Uint8Array(48);
-FALCON_SEED[47] = 0x01;
-const FALCON_KP = falcon512Keygen(FALCON_SEED);
-const FALCON_IDENTITY = FALCON_KP.publicKey;
+const SECP_KEY = new Uint8Array(32);
+SECP_KEY[31] = 0x01;
+const SECP256K1_IDENTITY = secp256k1Identity(SECP_KEY);
 
-describe("vector-falcon512", () => {
+describe("vector-secp256k1", () => {
   let connection: Connection;
   let feePayer: Keypair;
-  let vectorPda: Address;
+  let vectorPda: PublicKey;
   let vectorBump: number;
   let currentNonce: Uint8Array;
 
@@ -52,58 +49,53 @@ describe("vector-falcon512", () => {
     });
     feePayer = await Keypair.fromSeed(FEE_PAYER_SEED);
 
-    [vectorPda, vectorBump] = findVectorPda(FALCON512, FALCON_IDENTITY);
+    [vectorPda, vectorBump] = findVectorPda(SECP256K1, SECP256K1_IDENTITY);
   });
 
   afterAll(() => {
     (connection as any)._rpcWebSocket?.close();
   });
 
-  // Falcon-512 is single-step: its 1092-byte account fits one CPI
-  // CreateAccount, so `initialize` registers it in a single call (the
-  // wire pubkey is hashed + prepared on-chain at init).
-  test("initialize falcon512 vector account", async () => {
-    const ix = createInitializeFalcon512(feePayer.address, FALCON_KP.publicKey);
+  test("initialize secp256k1 vector account", async () => {
+    const ix = createInitializeSecp256k1(feePayer.publicKey, SECP256K1_IDENTITY);
     const tx = new Transaction().add(ix);
     await sendTx(connection, tx, [feePayer]);
 
     const account = await fetchVectorAccount(
       connection,
-      FALCON512,
-      FALCON_IDENTITY
+      SECP256K1,
+      SECP256K1_IDENTITY
     );
     expect(account.bump).toBe(vectorBump);
 
     currentNonce = new Uint8Array(account.nonce);
   });
 
-  // Falcon advance verifies via the prepared pubkey (~184k CU, within the
-  // 200k default per-instruction budget).
   test("advance with empty payload", async () => {
-    const advanceIx = signAdvanceInstructionFalcon512(
-      FALCON_KP,
+    const advanceIx = signAdvanceInstructionSecp256k1(
+      SECP_KEY,
       currentNonce,
       [],
       [],
-      feePayer.address
+      feePayer.publicKey
     );
 
     const tx = new Transaction().add(advanceIx);
     await sendTx(connection, tx, [feePayer]);
 
     currentNonce = advanceVectorDigest(
-      FALCON512,
+      SECP256K1,
       currentNonce,
-      FALCON_IDENTITY,
+      SECP256K1_IDENTITY,
       [],
       [],
-      feePayer.address
+      feePayer.publicKey
     );
 
     const account = await fetchVectorAccount(
       connection,
-      FALCON512,
-      FALCON_IDENTITY
+      SECP256K1,
+      SECP256K1_IDENTITY
     );
     expect(account.nonce).toEqual(currentNonce);
   });
@@ -112,17 +104,17 @@ describe("vector-falcon512", () => {
     currentNonce = await splMintAuthorityRoundTrip(
       connection,
       feePayer,
-      FALCON512,
-      FALCON_IDENTITY,
+      SECP256K1,
+      SECP256K1_IDENTITY,
       vectorPda,
       currentNonce,
       (nonce, pre, post) =>
-        signAdvanceInstructionFalcon512(
-          FALCON_KP,
+        signAdvanceInstructionSecp256k1(
+          SECP_KEY,
           nonce,
           pre,
           post,
-          feePayer.address
+          feePayer.publicKey
         )
     );
   });
@@ -133,7 +125,7 @@ describe("vector-falcon512", () => {
     // up first so there are withdrawable lamports above rent-exemption.
     const topUp = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: feePayer.address,
+        fromPubkey: feePayer.publicKey,
         toPubkey: vectorPda,
         lamports: 5_000_000,
       })
@@ -146,33 +138,33 @@ describe("vector-falcon512", () => {
     const withdrawAmount = 1_000n;
 
     const withdrawSub = createWithdrawSubinstruction(
-      FALCON512,
-      FALCON_IDENTITY,
-      feePayer.address,
+      SECP256K1,
+      SECP256K1_IDENTITY,
+      feePayer.publicKey,
       withdrawAmount
     );
     const passthroughIx = createPassthroughInstruction(
-      FALCON512,
-      FALCON_IDENTITY,
+      SECP256K1,
+      SECP256K1_IDENTITY,
       [withdrawSub]
     );
-    const advanceIx = signAdvanceInstructionFalcon512(
-      FALCON_KP,
+    const advanceIx = signAdvanceInstructionSecp256k1(
+      SECP_KEY,
       currentNonce,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
     const tx = new Transaction().add(advanceIx, passthroughIx);
     await sendTx(connection, tx, [feePayer]);
 
     currentNonce = advanceVectorDigest(
-      FALCON512,
+      SECP256K1,
       currentNonce,
-      FALCON_IDENTITY,
+      SECP256K1_IDENTITY,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
 
     const after = await connection.getAccountInfo(vectorPda);
@@ -182,23 +174,23 @@ describe("vector-falcon512", () => {
     );
   });
 
-  test("close falcon512 vector account via advance", async () => {
+  test("close secp256k1 vector account via advance", async () => {
     const closeSub = createCloseSubinstruction(
-      FALCON512,
-      FALCON_IDENTITY,
-      feePayer.address
+      SECP256K1,
+      SECP256K1_IDENTITY,
+      feePayer.publicKey
     );
     const passthroughIx = createPassthroughInstruction(
-      FALCON512,
-      FALCON_IDENTITY,
+      SECP256K1,
+      SECP256K1_IDENTITY,
       [closeSub]
     );
-    const advanceIx = signAdvanceInstructionFalcon512(
-      FALCON_KP,
+    const advanceIx = signAdvanceInstructionSecp256k1(
+      SECP_KEY,
       currentNonce,
       [],
       [passthroughIx],
-      feePayer.address
+      feePayer.publicKey
     );
     const tx = new Transaction().add(advanceIx, passthroughIx);
     await sendTx(connection, tx, [feePayer]);

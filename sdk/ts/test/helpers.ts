@@ -1,14 +1,15 @@
 /**
  * Shared scaffolding for the integration test files, one per scheme.
  *
- * Importing this module also applies the `Address` shims that
- * `@solana/spl-token@0.4` (v1-API) expects but `@solana/web3.js@3` no longer
- * provides: `toBuffer()` and a sync `findProgramAddressSync(...)`. The shims
- * install on first import; subsequent imports are no-ops.
+ * Importing this module also applies the `PublicKey` shims that
+ * `@solana/spl-token@0.4` (v1-API) expects and `@solana/web3.js@3` may not
+ * provide: `toBuffer()` and a sync `findProgramAddressSync(...)`. They
+ * install only if missing; subsequent imports are no-ops. Needs a validator:
+ * `bun run validator`.
  */
 import { expect } from "vitest";
 import {
-  Address,
+  PublicKey,
   Connection,
   Keypair,
   SystemProgram,
@@ -36,14 +37,14 @@ import {
   createPassthroughInstruction,
 } from "../src/index.js";
 
-// ── Address shims (spl-token@0.4 expects v1 API) ─────────────────────
+// ── PublicKey shims (spl-token@0.4 expects v1 API) ─────────────────────
 
-if (!(Address.prototype as any).toBuffer) {
-  (Address.prototype as any).toBuffer = function () {
+if (!(PublicKey.prototype as any).toBuffer) {
+  (PublicKey.prototype as any).toBuffer = function () {
     return Buffer.from(this.toBytes());
   };
 }
-if (!(Address as any).findProgramAddressSync) {
+if (!(PublicKey as any).findProgramAddressSync) {
   const { createHash } = await import("crypto");
   const { ed25519 } = await import("@noble/curves/ed25519.js");
   const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
@@ -57,10 +58,10 @@ if (!(Address as any).findProgramAddressSync) {
       return false;
     }
   };
-  (Address as any).findProgramAddressSync = (
+  (PublicKey as any).findProgramAddressSync = (
     seeds: Uint8Array[],
-    programId: Address
-  ): [Address, number] => {
+    programId: PublicKey
+  ): [PublicKey, number] => {
     const programBytes = programId.toBytes();
     const totalLen =
       seeds.reduce((n, s) => n + s.length, 0) + 1 + programBytes.length + PDA_MARKER.length;
@@ -78,7 +79,7 @@ if (!(Address as any).findProgramAddressSync) {
       buf[bumpOff] = bump;
       const hash = sha256(buf);
       if (!isOnCurve(hash)) {
-        return [new Address(hash), bump];
+        return [new PublicKey(hash), bump];
       }
     }
     throw new Error("Unable to find a viable PDA bump seed");
@@ -128,7 +129,7 @@ export async function splMintAuthorityRoundTrip(
   feePayer: Keypair,
   scheme: Scheme,
   identity: Uint8Array,
-  vectorPda: Address,
+  vectorPda: PublicKey,
   currentNonce: Uint8Array,
   signAdvance: (
     nonce: Uint8Array,
@@ -147,29 +148,29 @@ export async function splMintAuthorityRoundTrip(
   );
   const createMintTx = new Transaction().add(
     SystemProgram.createAccount({
-      fromPubkey: feePayer.address,
-      newAccountPubkey: mint.address,
+      fromPubkey: feePayer.publicKey,
+      newAccountPubkey: mint.publicKey,
       space: MINT_SIZE,
       lamports: rentExempt,
       programId: TOKEN_PROGRAM_ID,
     }),
-    createInitializeMint2Instruction(mint.address, 6, vectorPda, null)
+    createInitializeMint2Instruction(mint.publicKey, 6, vectorPda, null)
   );
   await sendAndConfirmTransaction(connection, createMintTx, [feePayer, mint]);
 
   // 2. Create an associated token account for the fee payer.
   const destination = getAssociatedTokenAddressSync(
-    mint.address,
-    feePayer.address
+    mint.publicKey,
+    feePayer.publicKey
   );
   await sendAndConfirmTransaction(
     connection,
     new Transaction().add(
       createAssociatedTokenAccountInstruction(
-        feePayer.address,
+        feePayer.publicKey,
         destination,
-        feePayer.address,
-        mint.address
+        feePayer.publicKey,
+        mint.publicKey
       )
     ),
     [feePayer]
@@ -178,20 +179,20 @@ export async function splMintAuthorityRoundTrip(
   // 3. Tx layout: [advance, passthrough(set_authority PDA→EOA), mint_to,
   //    set_authority EOA→PDA]
   const pdaToEoa = createSetAuthorityInstruction(
-    mint.address,
+    mint.publicKey,
     vectorPda,
     AuthorityType.MintTokens,
-    feePayer.address
+    feePayer.publicKey
   );
   const mintToIx = createMintToInstruction(
-    mint.address,
+    mint.publicKey,
     destination,
-    feePayer.address,
+    feePayer.publicKey,
     10_000
   );
   const eoaToPda = createSetAuthorityInstruction(
-    mint.address,
-    feePayer.address,
+    mint.publicKey,
+    feePayer.publicKey,
     AuthorityType.MintTokens,
     vectorPda
   );
@@ -218,7 +219,7 @@ export async function splMintAuthorityRoundTrip(
     identity,
     extraPreInstructions,
     postIxs,
-    feePayer.address
+    feePayer.publicKey
   );
 
   const account = await fetchVectorAccount(connection, scheme, identity);
@@ -227,9 +228,9 @@ export async function splMintAuthorityRoundTrip(
   const tokenInfo = await getAccount(connection, destination);
   expect(tokenInfo.amount).toBe(BigInt(10_000));
 
-  const mintInfo = await getMint(connection, mint.address);
+  const mintInfo = await getMint(connection, mint.publicKey);
   // `getMint` returns `mintAuthority` as a v1-compat `PublicKey` whose
-  // `.equals` reaches into `_bn`; the v3 `Address` has no `_bn`, so compare
+  // `.equals` reaches into `_bn`; the v3 `PublicKey` has no `_bn`, so compare
   // base58 strings instead.
   expect(mintInfo.mintAuthority!.toBase58()).toBe(vectorPda.toBase58());
 

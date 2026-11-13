@@ -1,5 +1,5 @@
 /** ML-DSA-44 with an empty FIPS 204 context. Mirrors the Rust scheme. */
-import { Address, TransactionInstruction } from "@solana/web3.js";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
 
 import { Scheme } from "../scheme.js";
@@ -7,7 +7,7 @@ import {
   createInitializeInstructions,
   createAdvanceInstruction,
 } from "../instructions.js";
-import { advanceVectorDigest } from "../digest.js";
+import { advanceVectorDigest, signedMessage } from "../digest.js";
 
 /** ML-DSA-44 secret key length (FIPS 204 Table 2). */
 export const MLDSA44_SECRET_KEY_LEN = 2560;
@@ -50,7 +50,7 @@ export function mldsa44PublicKey(secretKey: Uint8Array): Uint8Array {
  * instruction data) with a 1.4M compute budget.
  */
 export function createInitializeMlDsa44(
-  payer: Address,
+  payer: PublicKey,
   publicKey: Uint8Array
 ): TransactionInstruction[] {
   return createInitializeInstructions(payer, MLDSA44, publicKey);
@@ -66,7 +66,8 @@ export function signAdvanceInstructionMlDsa44(
   nonce: Uint8Array,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
-  feePayer?: Address
+  feePayer?: PublicKey,
+  validUntil?: bigint | number
 ): TransactionInstruction {
   const identity = keypair.publicKey;
   const digest = advanceVectorDigest(
@@ -75,8 +76,9 @@ export function signAdvanceInstructionMlDsa44(
     identity,
     preInstructions,
     postInstructions,
-    feePayer
+    feePayer,
+    validUntil
   );
-  const signature = Uint8Array.from(ml_dsa44.sign(digest, keypair.secretKey));
-  return createAdvanceInstruction(MLDSA44, identity, signature);
+  const signature = Uint8Array.from(ml_dsa44.sign(signedMessage(digest), keypair.secretKey));
+  return createAdvanceInstruction(MLDSA44, identity, signature, validUntil);
 }

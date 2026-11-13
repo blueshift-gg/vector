@@ -1,6 +1,11 @@
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
-use crate::state::NonceAccount;
+use pinocchio::sysvars::{clock::Clock, Sysvar};
+
+use crate::{
+    error::VectorError,
+    state::{NonceAccount, VectorAccount},
+};
 
 /// # Close
 ///
@@ -20,7 +25,8 @@ use crate::state::NonceAccount;
 /// Parameters: None
 ///
 /// Account Checks:
-/// - Vector: signer
+/// - Vector: signer, and a complete vector account of the program. Closing
+///   the vector itself needs a slot after the one it was created in
 /// - Nonce: a nonce account of the vector, past the slot it was created in
 pub struct Close<'a> {
     account: &'a mut AccountView,
@@ -48,13 +54,21 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Close<'a> {
             return Err(ProgramError::InvalidInstructionData);
         }
 
+        // Only a vector account closes as a vector: a nonce account's own
+        // keypair can sign here too, and it is not one.
+        let (_, header) = VectorAccount::load(vector)?;
+        let slot = Clock::get()?.slot;
+
         let account = match nonce {
             // The runtime refuses to debit an account the program does not
             // own, so only the vector's own nonce accounts close.
             Some(nonce) => {
-                NonceAccount::borrow(nonce, &vector.address().to_bytes())?;
+                NonceAccount::borrow(nonce, &vector.address().to_bytes(), slot)?;
                 nonce
             }
+            // An account closed and created again in the slot it was created
+            // in would start from a nonce it held before.
+            None if header.created() >= slot => return Err(VectorError::FreshVector.into()),
             None => vector,
         };
         Ok(Self { account, receiver })

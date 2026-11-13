@@ -1,5 +1,7 @@
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
+use crate::state::VectorAccount;
+
 /// # Withdraw
 ///
 /// Send lamports from the account to the receiver. The runtime refuses to
@@ -18,7 +20,7 @@ use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 /// - lamports: u64
 ///
 /// Account Checks:
-/// - Vector: signer
+/// - Vector: signer, and a complete vector account of the program
 pub struct Withdraw<'a> {
     vector: &'a mut AccountView,
     receiver: &'a mut AccountView,
@@ -39,6 +41,10 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Withdraw<'a> {
         if !vector.is_signer() {
             return Err(ProgramError::MissingRequiredSignature);
         }
+
+        // Only a vector account is the vector's to spend. A nonce account is
+        // the program's too, and its keypair can sign: it is not a vector.
+        VectorAccount::load(vector)?;
 
         let lamports = u64::from_le_bytes(
             data.try_into()

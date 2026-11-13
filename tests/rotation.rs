@@ -11,8 +11,8 @@ use solana_winternitz::{
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
-    rotating_advance_vector_digest, signer_digest, AdvanceSigner, Scheme, VectorError, WINTERNITZ,
-    XMSS,
+    rotating_advance_vector_digest, signer_digest, AdvanceSigner, Scheme, VectorError,
+    NEVER_EXPIRES, WINTERNITZ, XMSS,
 };
 
 use crate::common::{
@@ -69,7 +69,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         std::slice::from_ref(&passthrough),
         None,
     );
-    let signature = wire(first.sign(&digest).unwrap());
+    let signature = wire(first.sign(&crate::common::signed_hash(&digest)).unwrap());
     let advance = create_rotating_advance_instruction(scheme, &identity, &next_key, &signature);
 
     // Without an `Advance`, nothing rotates and nothing moves.
@@ -146,7 +146,11 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         std::slice::from_ref(&passthrough),
         None,
     );
-    let next_signature = wire(second.sign(&next_digest).unwrap());
+    let next_signature = wire(
+        second
+            .sign(&crate::common::signed_hash(&next_digest))
+            .unwrap(),
+    );
     let next_transaction = [
         create_rotating_advance_instruction(scheme, &identity, &next_key, &next_signature),
         passthrough,
@@ -199,7 +203,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .find(|(key, _)| *key == vector)
         .unwrap()
         .1
-        .data[68..68 + identity.len()]
+        .data[76..76 + identity.len()]
         .copy_from_slice(first.verifying_key().as_bytes());
     let rejected = process_transaction(
         &mollusk,
@@ -214,7 +218,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
 }
 
 /// Fills with a fixed stream: these keys are for tests only.
-fn fill(
+pub(crate) fn fill(
     state: &mut u64,
 ) -> impl FnMut(&mut [u8]) -> Result<(), solana_winternitz::SigningError> + '_ {
     move |bytes| {
@@ -252,7 +256,9 @@ fn winternitz_key_signs_once() {
             &[],
             None,
         );
-        let signature = key.sign_at(0, &digest, fill(&mut state)).unwrap();
+        let signature = key
+            .sign_at(0, &crate::common::signed_hash(&digest), fill(&mut state))
+            .unwrap();
         let advance = create_rotating_advance_instruction(
             &WINTERNITZ,
             &identity,
@@ -286,15 +292,19 @@ fn winternitz_key_signs_once() {
         next_key: &next_key,
         ..AdvanceSigner::new(&WINTERNITZ, &identity)
     };
-    let message = advance_message(&[signer, signer], &[], &[], None);
+    let message = advance_message(NEVER_EXPIRES, &[signer, signer], &[], &[], None);
     let first = signer_digest(&message, &NONCE, &vector, &next_key);
     let second = signer_digest(&message, &first, &vector, &next_key);
-    let first = key.sign_at(0, &first, fill(&mut state)).unwrap();
-    let second = key.sign_at(0, &second, fill(&mut state)).unwrap();
-    let twice = create_multi_advance_instruction(&[
-        (signer, first.as_bytes()),
-        (signer, second.as_bytes()),
-    ]);
+    let first = key
+        .sign_at(0, &crate::common::signed_hash(&first), fill(&mut state))
+        .unwrap();
+    let second = key
+        .sign_at(0, &crate::common::signed_hash(&second), fill(&mut state))
+        .unwrap();
+    let twice = create_multi_advance_instruction(
+        NEVER_EXPIRES,
+        &[(signer, first.as_bytes()), (signer, second.as_bytes())],
+    );
     let result = process_transaction(&mollusk, &[&twice], &accounts, &[]);
     assert_eq!(
         result.program_result,
@@ -322,7 +332,9 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
     let mut send = |next_leaf, leaf, next_key: &[u8]| {
         let digest =
             rotating_advance_vector_digest(&XMSS, &NONCE, &identity, next_key, &[], &[], None);
-        let signature = key.sign_at(leaf, &digest, fill(&mut state)).unwrap();
+        let signature = key
+            .sign_at(leaf, &crate::common::signed_hash(&digest), fill(&mut state))
+            .unwrap();
         let advance =
             create_rotating_advance_instruction(&XMSS, &identity, next_key, signature.as_bytes());
         let result = process_transaction(&mollusk, &[&advance], &account(next_leaf), &[]);
@@ -361,5 +373,49 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
     assert_eq!(
         data,
         expected_advanced_data(digest, &XMSS, &identity, &xmss_stored(&next_key, 0))
+    );
+}
+
+/// Offline, a rotated account is checked against the key it holds now, not
+/// the one that named it.
+#[test]
+fn a_rotated_key_verifies_against_the_key_the_account_holds_now() {
+    use vector_core::{verify_advance, AdvanceEntry, SignerNonce, VerifyError};
+
+    let directory = tempfile::tempdir().unwrap();
+    let first = SigningKey::<hazmat::winternitz::SecretKey>::create(directory.path().join("1.key"))
+        .unwrap();
+    let mut second =
+        SigningKey::<hazmat::winternitz::SecretKey>::create(directory.path().join("2.key"))
+            .unwrap();
+    let third = SigningKey::<hazmat::winternitz::SecretKey>::create(directory.path().join("3.key"))
+        .unwrap();
+    let identity = first.verifying_key().as_bytes().to_vec();
+    let current = second.verifying_key().as_bytes().to_vec();
+    let next_key = third.verifying_key().as_bytes().to_vec();
+    let (vector, _) = find_vector_pda(&WINTERNITZ, &identity);
+
+    // The account was rotated to `second`; `second` signs, naming `third`.
+    let signer = AdvanceSigner {
+        next_key: &next_key,
+        ..AdvanceSigner::new(&WINTERNITZ, &identity)
+    };
+    let message = advance_message(NEVER_EXPIRES, &[signer], &[], &[], None);
+    let digest = signer_digest(&message, &NONCE, &vector, &next_key);
+    let signature = second
+        .sign(&crate::common::signed_hash(&digest))
+        .unwrap()
+        .as_bytes()
+        .to_vec();
+
+    let mut entry = AdvanceEntry::new(signer, SignerNonce::Vector(NONCE), &signature);
+    assert_eq!(
+        verify_advance(NEVER_EXPIRES, &[entry], &[], &[], None, None),
+        Err(VerifyError::SignatureInvalid)
+    );
+    entry.current_key = Some(&current);
+    assert_eq!(
+        verify_advance(NEVER_EXPIRES, &[entry], &[], &[], None, None).unwrap(),
+        [digest]
     );
 }
