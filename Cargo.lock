@@ -2412,9 +2412,9 @@ dependencies = [
 
 [[package]]
 name = "solana-falcon512"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34dc33dfcb355af16bd2318a4669c490848349d74d42d27f1adcc32c734772fa"
+checksum = "7c8a411bd641429947da4a343f4e4eea7b1942c85f027b4a9ada93198f937c46"
 dependencies = [
  "solana-program-error",
  "solana-shake",
@@ -2654,7 +2654,8 @@ dependencies = [
 [[package]]
 name = "solana-ml-dsa"
 version = "0.1.0"
-source = "git+https://github.com/blueshift-gg/solana-ml-dsa?rev=0c65195325805953f0d25c07f6a07c3df373abf6#0c65195325805953f0d25c07f6a07c3df373abf6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3b2840a15081fc4be37b89d0bb5f38e37816db317eda08a9304ecc6143d736f"
 dependencies = [
  "solana-shake",
 ]
