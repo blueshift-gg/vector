@@ -1,5 +1,5 @@
 [package]
-name = "blueshift-vector"
+name = "vector-signer-sdk"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

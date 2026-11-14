@@ -1,16 +1,16 @@
 //! Exercise the linked XMSS verifier through Vector's SBF authorization flow.
 
-use blueshift_vector::{
-    create_initialize_xmss, create_passthrough_instruction, create_rotating_advance_instruction,
-    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, VectorError,
-    PROGRAM_ID, XMSS,
-};
 use mollusk_svm::result::types::TransactionProgramResult;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
 use solana_xmss::{self as xmss, hazmat};
+use vector_signer_sdk::{
+    create_initialize_xmss, create_passthrough_instruction, create_rotating_advance_instruction,
+    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, VectorError,
+    PROGRAM_ID, XMSS,
+};
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, xmss_stored, NONCE,
@@ -72,8 +72,8 @@ fn initialize_checks_key_length_and_pda() {
         .unwrap()
         .1
         .data;
-    assert_eq!(&stored[32..64], &blueshift_vector::vector_seed(&identity));
-    let (_, system_bump) = blueshift_vector::find_system_pda(&vector);
+    assert_eq!(&stored[32..64], &vector_signer_sdk::vector_seed(&identity));
+    let (_, system_bump) = vector_signer_sdk::find_system_pda(&vector);
     assert_eq!(stored[72..76], [XMSS.id, bump, system_bump, 0]);
     assert_eq!(&stored[76..], &xmss_stored(&public_key, 0));
 
@@ -81,7 +81,7 @@ fn initialize_checks_key_length_and_pda() {
     for length in [40, 42] {
         let key = vec![0; length];
         let (address, _) = Address::find_program_address(
-            &[b"vector", &[XMSS.id], &blueshift_vector::vector_seed(&key)],
+            &[b"vector", &[XMSS.id], &vector_signer_sdk::vector_seed(&key)],
             &PROGRAM_ID,
         );
         let mut malformed = initialize.clone();

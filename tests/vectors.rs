@@ -7,14 +7,6 @@
 //! `regenerate_vectors` and then checked: every byte that follows from the
 //! keys is rebuilt and compared, and every signature is verified.
 
-use blueshift_vector::{
-    advance_message, advance_vector_digest, create_multi_advance_instruction,
-    create_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
-    eip191_envelope_hash, find_system_pda, find_vector_pda, rotating_advance_vector_digest,
-    secp256k1_compressed_pubkey, secp256k1_eip191_eth_address, signed, signed_nonce, signer_digest,
-    vector_seed, verify_advance, AdvanceEntry, AdvanceSigner, Scheme, SignerNonce, ED25519, EIP191,
-    FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
-};
 use ed25519_dalek::{Signer as _, SigningKey};
 use fips204::{
     ml_dsa_44,
@@ -27,6 +19,14 @@ use serde_json::{json, Value};
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_winternitz::hazmat;
+use vector_signer_sdk::{
+    advance_message, advance_vector_digest, create_multi_advance_instruction,
+    create_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
+    eip191_envelope_hash, find_system_pda, find_vector_pda, rotating_advance_vector_digest,
+    secp256k1_compressed_pubkey, secp256k1_eip191_eth_address, signed, signed_nonce, signer_digest,
+    vector_seed, verify_advance, AdvanceEntry, AdvanceSigner, Scheme, SignerNonce, ED25519, EIP191,
+    FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
+};
 
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/vectors.json");
 const VALID_UNTIL: u64 = 1_234_567;

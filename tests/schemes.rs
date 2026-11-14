@@ -2,15 +2,15 @@
 //! it belongs to, and the program routes on that. Winternitz and XMSS are
 //! the sharpest case: their accounts have the same length and layout.
 
-use blueshift_vector::{
-    create_initialize_instruction, create_initialize_mldsa44, create_passthrough_instruction,
-    create_rotating_advance_instruction, find_vector_pda, VectorAccount, VectorError, ED25519,
-    EIP191, FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
-};
 use mollusk_svm::{program::keyed_account_for_system_program, result::ProgramResult};
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
+use vector_signer_sdk::{
+    create_initialize_instruction, create_initialize_mldsa44, create_passthrough_instruction,
+    create_rotating_advance_instruction, find_vector_pda, VectorAccount, VectorError, ED25519,
+    EIP191, FALCON512, MLDSA44, SECP256K1, WINTERNITZ, XMSS,
+};
 
 use crate::common::{build_vector_account, mollusk, NONCE};
 
@@ -49,8 +49,8 @@ fn initialize_derives_the_address_from_the_scheme_it_is_given() {
     // A scheme that does not exist has an address too, and nothing behind it.
     for scheme in [0, 8] {
         let (address, _) = Address::find_program_address(
-            &[b"vector", &[scheme], &blueshift_vector::vector_seed(&KEY)],
-            &blueshift_vector::PROGRAM_ID,
+            &[b"vector", &[scheme], &vector_signer_sdk::vector_seed(&KEY)],
+            &vector_signer_sdk::PROGRAM_ID,
         );
         initialize.data[1] = scheme;
         initialize.accounts[1].pubkey = address;
@@ -93,7 +93,7 @@ fn an_instruction_runs_as_the_scheme_in_the_account_header() {
     let zeroed = Account::new(
         10_000_000,
         WINTERNITZ.account_len,
-        &blueshift_vector::PROGRAM_ID,
+        &vector_signer_sdk::PROGRAM_ID,
     );
     let advance = create_rotating_advance_instruction(&WINTERNITZ, &KEY, &[9; 41], &[0; 849]);
     for (instruction, error) in [

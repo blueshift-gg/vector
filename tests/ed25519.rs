@@ -1,16 +1,16 @@
 //! Ed25519 tests.
 
-use blueshift_vector::{
-    advance_vector_digest, create_close_subinstruction, create_initialize_ed25519,
-    create_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
-    find_vector_pda, revocation_digest, sign_advance_instruction_ed25519,
-    sign_revocation_instruction_ed25519, ED25519, PROGRAM_ID,
-};
 use ed25519_dalek::SigningKey;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
+use vector_signer_sdk::{
+    advance_vector_digest, create_close_subinstruction, create_initialize_ed25519,
+    create_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
+    find_vector_pda, revocation_digest, sign_advance_instruction_ed25519,
+    sign_revocation_instruction_ed25519, ED25519, PROGRAM_ID,
+};
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,

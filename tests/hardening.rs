@@ -3,13 +3,6 @@
 //! in its creation slot; a transaction expires at its `valid_until`; EIP-191
 //! takes a wallet's `v`; and a secp256k1 key must be a point.
 
-use blueshift_vector::{
-    advance_message, create_close_subinstruction, create_initialize_instruction,
-    create_initialize_nonce_instruction, create_multi_advance_instruction,
-    create_passthrough_instruction, ed25519_pubkey, find_vector_pda, secp256k1_eip191_eth_address,
-    sign_advance_instruction_secp256k1_eip191, signed, signer_digest, AdvanceSigner, NonceAccount,
-    VectorError, ED25519, EIP191, PROGRAM_ID, SECP256K1,
-};
 use ed25519_dalek::{Signer, SigningKey};
 use k256::ecdsa::SigningKey as Secp256k1SigningKey;
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check, Mollusk};
@@ -17,6 +10,13 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_program_error::ProgramError;
+use vector_signer_sdk::{
+    advance_message, create_close_subinstruction, create_initialize_instruction,
+    create_initialize_nonce_instruction, create_multi_advance_instruction,
+    create_passthrough_instruction, ed25519_pubkey, find_vector_pda, secp256k1_eip191_eth_address,
+    sign_advance_instruction_secp256k1_eip191, signed, signer_digest, AdvanceSigner, NonceAccount,
+    VectorError, ED25519, EIP191, PROGRAM_ID, SECP256K1,
+};
 
 use crate::common::{build_vector_account, mollusk, process_transaction, NONCE};
 
@@ -266,7 +266,7 @@ fn secp256k1_initialize_takes_a_point_only() {
         })
         .find(|key| k256::PublicKey::from_sec1_bytes(key).is_err())
         .expect("an x with no point");
-    let on_curve = blueshift_vector::secp256k1_compressed_pubkey(
+    let on_curve = vector_signer_sdk::secp256k1_compressed_pubkey(
         &Secp256k1SigningKey::from_bytes(&[3u8; 32].into()).unwrap(),
     );
 
@@ -336,7 +336,7 @@ fn ed25519_initialize_refuses_small_order_and_non_canonical_keys() {
         weak.push(key);
     }
 
-    let good = blueshift_vector::ed25519_pubkey(&SigningKey::from_bytes(&[5; 32]));
+    let good = vector_signer_sdk::ed25519_pubkey(&SigningKey::from_bytes(&[5; 32]));
     for (key, ok) in weak.iter().map(|key| (*key, false)).chain([(good, true)]) {
         let init = create_initialize_instruction(&payer, &ED25519, &key);
         let (vector, _) = find_vector_pda(&ED25519, &key);

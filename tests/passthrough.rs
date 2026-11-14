@@ -1,11 +1,5 @@
 //! Where a `Passthrough` finds its `Advance`, and who it signs as.
 
-use blueshift_vector::{
-    create_multi_passthrough_instruction, create_passthrough_instruction,
-    create_system_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
-    find_system_pda, find_vector_pda, sign_advance_instruction_ed25519, PassthroughSigner,
-    VectorError, ED25519,
-};
 use ed25519_dalek::SigningKey;
 use mollusk_svm::{
     program::keyed_account_for_system_program, result::types::TransactionProgramResult,
@@ -15,6 +9,12 @@ use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use solana_system_interface::instruction::transfer;
+use vector_signer_sdk::{
+    create_multi_passthrough_instruction, create_passthrough_instruction,
+    create_system_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
+    find_system_pda, find_vector_pda, sign_advance_instruction_ed25519, PassthroughSigner,
+    VectorError, ED25519,
+};
 
 use crate::common::{build_vector_account, mollusk, process_transaction, NONCE};
 

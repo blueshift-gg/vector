@@ -1,6 +1,6 @@
-use blueshift_vector::{create_passthrough_instruction, find_vector_pda, ED25519};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
+use vector_signer_sdk::{create_passthrough_instruction, find_vector_pda, ED25519};
 
 #[test]
 fn passthrough_preserves_external_signers() {

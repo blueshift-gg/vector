@@ -8,11 +8,6 @@
 //! digest` for a digest the transaction determines. So the cases below are
 //! generated with `k256`; none of them is a Wycheproof vector.
 
-use blueshift_vector::{
-    advance_vector_digest, create_advance_instruction, create_initialize_instruction,
-    eip191_envelope_hash, find_vector_pda, secp256k1_compressed_pubkey,
-    secp256k1_eip191_eth_address, signed, EIP191, SECP256K1,
-};
 use k256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey as Secp256k1SigningKey};
 use mollusk_svm::{
     program::keyed_account_for_system_program,
@@ -23,6 +18,11 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
+use vector_signer_sdk::{
+    advance_vector_digest, create_advance_instruction, create_initialize_instruction,
+    eip191_envelope_hash, find_vector_pda, secp256k1_compressed_pubkey,
+    secp256k1_eip191_eth_address, signed, EIP191, SECP256K1,
+};
 
 use crate::common::{build_vector_account, mollusk, process_transaction, NONCE};
 

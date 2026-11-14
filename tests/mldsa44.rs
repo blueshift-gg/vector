@@ -5,11 +5,6 @@
 //! (10,240 bytes: key, row 0; 20,480: rows 1, 2; 21,932: row 3, `tr`), all
 //! in one transaction.
 
-use blueshift_vector::{
-    advance_vector_digest, create_advance_instruction, create_initialize_mldsa44,
-    create_passthrough_instruction, create_withdraw_subinstruction, find_system_pda,
-    find_vector_pda, verify_advance_signature, AdvanceSigner, MLDSA44,
-};
 use fips204::ml_dsa_44;
 use fips204::traits::{SerDes, Signer};
 use mollusk_svm::{
@@ -20,6 +15,11 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_ml_dsa::ml_dsa_44::VerifyingKey;
 use solana_program_error::ProgramError;
+use vector_signer_sdk::{
+    advance_vector_digest, create_advance_instruction, create_initialize_mldsa44,
+    create_passthrough_instruction, create_withdraw_subinstruction, find_system_pda,
+    find_vector_pda, verify_advance_signature, AdvanceSigner, MLDSA44,
+};
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,
@@ -35,7 +35,8 @@ fn keypair() -> ([u8; MLDSA44.identity_len], ml_dsa_44::PrivateKey) {
 }
 
 fn sign(digest: &[u8; 32], sk: &ml_dsa_44::PrivateKey) -> [u8; MLDSA44.signature_len] {
-    sk.try_sign(&blueshift_vector::signed(digest), &[]).unwrap()
+    sk.try_sign(&vector_signer_sdk::signed(digest), &[])
+        .unwrap()
 }
 
 fn stored_identity(public_key: &[u8; MLDSA44.identity_len]) -> Vec<u8> {
@@ -201,7 +202,7 @@ fn advance_empty() {
 
     // The external signer must use the program's empty FIPS 204 context.
     let wrong_context = sk
-        .try_sign(&blueshift_vector::signed(&digest), b"another protocol")
+        .try_sign(&vector_signer_sdk::signed(&digest), b"another protocol")
         .unwrap();
     let mut tampered = signature;
     tampered[100] ^= 1;
@@ -215,7 +216,7 @@ fn advance_empty() {
                 None,
                 &invalid
             ),
-            Err(blueshift_vector::VerifyError::SignatureInvalid)
+            Err(vector_signer_sdk::VerifyError::SignatureInvalid)
         );
         let bad_ix = create_advance_instruction(&MLDSA44, &pk, &invalid);
         let result = mollusk.process_instruction(&bad_ix, &[(vector, vector_account.clone())]);

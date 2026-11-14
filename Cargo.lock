@@ -461,23 +461,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blueshift-vector"
-version = "2.0.0"
-dependencies = [
- "ed25519-dalek",
- "k256",
- "pinocchio",
- "pqcrypto-falcon",
- "pqcrypto-traits",
- "sha2 0.10.9",
- "sha3",
- "solana-address 2.9.0",
- "solana-instruction 3.5.1",
- "solana-instructions-sysvar 3.0.0",
- "vector",
-]
-
-[[package]]
 name = "borsh"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3693,11 +3676,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "vector-signer-sdk"
+version = "2.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "k256",
+ "pinocchio",
+ "pqcrypto-falcon",
+ "pqcrypto-traits",
+ "sha2 0.10.9",
+ "sha3",
+ "solana-address 2.9.0",
+ "solana-instruction 3.5.1",
+ "solana-instructions-sysvar 3.0.0",
+ "vector",
+]
+
+[[package]]
 name = "vector-tests"
 version = "2.0.0"
 dependencies = [
  "bincode",
- "blueshift-vector",
  "ed25519-dalek",
  "fips204",
  "k256",
@@ -3725,6 +3724,7 @@ dependencies = [
  "solana-xmss",
  "spl-token-interface",
  "tempfile",
+ "vector-signer-sdk",
 ]
 
 [[package]]

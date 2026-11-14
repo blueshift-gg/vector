@@ -341,9 +341,9 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 ## Client SDKs
 
-### Rust (`blueshift-vector`)
+### Rust (`vector-signer-sdk`)
 
-The `blueshift-vector` crate provides off-chain helpers for constructing Vector transactions. It depends on the program crate itself, so the program ID, the account header, the discriminators and every scheme's byte and lengths come from the program and cannot drift. It exposes `PROGRAM_ID` and the program's `Scheme` descriptor (`id`, `identity_len`, `stored_identity_len`, `signature_len`, `next_key_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
+The `vector-signer-sdk` crate provides off-chain helpers for constructing Vector transactions. It depends on the program crate itself, so the program ID, the account header, the discriminators and every scheme's byte and lengths come from the program and cannot drift. It exposes `PROGRAM_ID` and the program's `Scheme` descriptor (`id`, `identity_len`, `stored_identity_len`, `signature_len`, `next_key_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", [scheme], sha256(identity)]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; ML-DSA-44's returns its three instructions.
@@ -403,7 +403,7 @@ Everything below is native protocol behaviour — no extra programs or formats. 
 Both SDKs ship a verify function that recomputes the digest from the full instruction layout and checks the signature as the on-chain program will — no RPC. The Rust one runs the program's own `initialize` and `advance` for the scheme, with `sol_secp256k1_recover` as the runtime implements it, so it cannot disagree with the chain. The TypeScript one verifies with `@noble`, and shares its digest pins and `fixtures/program.json` with the Rust tests. A PASS means the transaction will verify on-chain against the same nonce; the returned digest is the account's next nonce.
 
 ```rust
-use blueshift_vector::{verify_advance_signature, AdvanceSigner, ED25519};
+use vector_signer_sdk::{verify_advance_signature, AdvanceSigner, ED25519};
 
 let next_nonce = verify_advance_signature(
     AdvanceSigner::new(&ED25519, &pubkey), &nonce, &pre_ixs, &post_ixs, None, signature,

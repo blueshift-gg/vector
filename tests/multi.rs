@@ -1,12 +1,6 @@
 //! Several signers in one `Advance`. Each signs the same message: the
 //! transaction with the `Advance`'s data cut out.
 
-use blueshift_vector::{
-    advance_message, create_multi_advance_instruction, create_passthrough_instruction,
-    create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
-    sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, VectorError, ED25519,
-    NEVER_EXPIRES, SECP256K1,
-};
 use ed25519_dalek::{Signer, SigningKey};
 use k256::ecdsa::{
     signature::hazmat::PrehashSigner, Signature as Secp256k1Signature,
@@ -17,6 +11,12 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
+use vector_signer_sdk::{
+    advance_message, create_multi_advance_instruction, create_passthrough_instruction,
+    create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
+    sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, VectorError, ED25519,
+    NEVER_EXPIRES, SECP256K1,
+};
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, NONCE,
@@ -95,7 +95,7 @@ impl World {
         let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0, &[]);
         let alice_signature = self
             .alice
-            .sign(&blueshift_vector::signed(&alice_digest))
+            .sign(&vector_signer_sdk::signed(&alice_digest))
             .to_bytes();
         let bob_signature: Secp256k1Signature = self
             .bob
@@ -136,8 +136,8 @@ impl World {
         for meta in transaction.iter().flat_map(|ix| &ix.accounts) {
             let known = accounts.iter().any(|(key, _)| *key == meta.pubkey);
             let builtin = [
-                blueshift_vector::INSTRUCTIONS_SYSVAR_ID,
-                blueshift_vector::PROGRAM_ID,
+                vector_signer_sdk::INSTRUCTIONS_SYSVAR_ID,
+                vector_signer_sdk::PROGRAM_ID,
             ];
             if !known && !builtin.contains(&meta.pubkey) {
                 accounts.push((meta.pubkey, Account::default()));
@@ -215,8 +215,8 @@ fn every_change_to_the_transaction_is_rejected() {
             // instruction, and the runtime ignores it for sysvars and programs.
             let key = transaction[i].accounts[account].pubkey;
             if ![
-                blueshift_vector::INSTRUCTIONS_SYSVAR_ID,
-                blueshift_vector::PROGRAM_ID,
+                vector_signer_sdk::INSTRUCTIONS_SYSVAR_ID,
+                vector_signer_sdk::PROGRAM_ID,
             ]
             .contains(&key)
             {

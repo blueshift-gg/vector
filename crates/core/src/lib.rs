@@ -27,8 +27,8 @@
 //! Everything is re-exported flat at the crate root, so either style works:
 //!
 //! ```ignore
-//! use blueshift_vector::{ED25519, sign_advance_instruction_ed25519};      // flat
-//! use blueshift_vector::schemes::ed25519;                                 // structured
+//! use vector_signer_sdk::{ED25519, sign_advance_instruction_ed25519};      // flat
+//! use vector_signer_sdk::schemes::ed25519;                                 // structured
 //! ```
 
 pub mod digest;
