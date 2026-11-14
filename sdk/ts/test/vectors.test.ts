@@ -33,8 +33,6 @@ import {
 } from "../src/index.js";
 
 const SCHEMES = [ED25519, EIP191, SECP256K1, FALCON512, MLDSA44, WINTERNITZ, XMSS];
-// Neither has an offline verifier in this SDK yet.
-const ROTATING = new Set([WINTERNITZ.id, XMSS.id]);
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../fixtures/vectors.json", import.meta.url), "utf8")
@@ -131,16 +129,15 @@ test("the SDK accepts every signature the program accepts", () => {
   expect(verified.signers.map((s) => hex(s.digest))).toEqual(
     listed.map((s: any) => s.json.digest)
   );
-  expect(verified.signers.map((s) => s.ok)).toEqual(
-    listed.map((s: any) => !ROTATING.has(s.scheme.id))
-  );
+  expect(verified.signers.map((s) => s.ok)).toEqual(listed.map(() => true));
+  expect(verified.ok).toBe(true);
 
   // A one-signer check of each, over the same message, fails: the message
   // lists every signer.
-  for (const s of listed.filter((s: any) => !ROTATING.has(s.scheme.id))) {
+  for (const s of listed) {
     expect(() =>
       verifyAdvanceSignature(
-        { scheme: s.scheme, identity: s.identity },
+        { scheme: s.scheme, identity: s.identity, nextKey: s.nextKey },
         s.nonce,
         [],
         [passthrough],

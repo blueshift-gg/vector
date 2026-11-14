@@ -16,13 +16,23 @@ import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
+import * as winternitz from "@blueshift-gg/solana-winternitz";
+import * as xmss from "@blueshift-gg/solana-xmss";
 
 import { bytesEqual, readU64LE, sha256, VALID_UNTIL_LEN } from "./bytes.js";
-import { ADVANCE_DISCRIMINATOR, PROGRAM_ID, Scheme, findVectorPda, signedNonce } from "./scheme.js";
+import {
+  ADVANCE_DISCRIMINATOR,
+  PROGRAM_ID,
+  Scheme,
+  VectorError,
+  findVectorPda,
+  signedNonce,
+} from "./scheme.js";
 import {
   AdvanceSigner,
   NEVER_EXPIRES,
   advanceMessage,
+  signedDigest,
   signedMessage,
   signerDigest,
   transactionMessage,
@@ -32,6 +42,8 @@ import { EIP191, eip191EnvelopeHash } from "./schemes/eip191.js";
 import { SECP256K1 } from "./schemes/secp256k1.js";
 import { FALCON512 } from "./schemes/falcon512.js";
 import { MLDSA44 } from "./schemes/mldsa44.js";
+import { WINTERNITZ } from "./schemes/winternitz.js";
+import { XMSS } from "./schemes/xmss.js";
 
 // ── Errors ───────────────────────────────────────────────────────────
 
@@ -63,6 +75,18 @@ export class SignatureVerificationError extends VerifyError {}
 /** The transaction's `validUntil` slot is before the slot checked against. */
 export class ExpiredError extends VerifyError {}
 
+/**
+ * The signature verifies, but the program refuses it for its scheme's own
+ * reason: a Winternitz key given as its own next key (`KeyReused`), an XMSS
+ * leaf below the account's counter (`LeafUsed`), or the last XMSS leaf
+ * keeping its key (`TreeExhausted`).
+ */
+export class RejectedError extends VerifyError {
+  constructor(readonly code: VectorError, message: string) {
+    super(message);
+  }
+}
+
 const SIGNATURE_INVALID =
   "signature does not verify over the recomputed advance digest — the " +
   "signed payload differs from this instruction layout, nonce, or identity";
@@ -93,7 +117,70 @@ function resolveNonce(nonce: SignedOver): Uint8Array {
   return resolved;
 }
 
-/** Check `signature` over `digest` with the scheme's verifier. */
+/**
+ * A Winternitz or XMSS account's key, which changes as it signs, and for
+ * XMSS the lowest leaf that may sign next.
+ */
+export type RotatingState = {
+  /** The key the account holds now; the identity until it first rotates. */
+  key: Uint8Array;
+  /** XMSS: the lowest leaf that may sign next (account data after the key). */
+  nextLeaf?: number;
+};
+
+/** The XMSS signature's leaf: its first four bytes, big-endian. */
+function xmssLeaf(signature: Uint8Array): number {
+  return new DataView(signature.buffer, signature.byteOffset, 4).getUint32(0, false);
+}
+
+/**
+ * Check a rotating signer as the program does, and return the account's state
+ * after it: the XMSS counter first, then the signature against the key it
+ * holds now, then what `nextKey` may be.
+ */
+function checkRotation(
+  scheme: Scheme,
+  state: RotatingState,
+  digest: Uint8Array,
+  nextKey: Uint8Array,
+  signature: Uint8Array
+): RotatingState {
+  if (nextKey.length !== scheme.nextKeyLen) {
+    throw new MalformedSignatureError(`next key must be ${scheme.nextKeyLen} bytes, got ${nextKey.length}`);
+  }
+  const keeps = bytesEqual(nextKey, state.key);
+  if (scheme.id === XMSS.id) {
+    if (signature.length !== scheme.signatureLen) {
+      throw new MalformedSignatureError(
+        `signature must be ${scheme.signatureLen} bytes, got ${signature.length}`
+      );
+    }
+    const leaf = xmssLeaf(signature);
+    if (leaf < (state.nextLeaf ?? 0)) {
+      throw new RejectedError(VectorError.LeafUsed, `xmss: leaf ${leaf} has signed before`);
+    }
+    checkSignature(scheme, state.key, digest, signature);
+    if (!keeps) return { key: nextKey, nextLeaf: 0 };
+    if (leaf + 1 >= XMSS_LEAVES) {
+      throw new RejectedError(VectorError.TreeExhausted, "xmss: the last leaf must rotate the key");
+    }
+    return { key: state.key, nextLeaf: leaf + 1 };
+  }
+  checkSignature(scheme, state.key, digest, signature);
+  if (keeps) {
+    throw new RejectedError(VectorError.KeyReused, "winternitz: the next key is the key that signed");
+  }
+  return { key: nextKey };
+}
+
+/** Leaves of an XMSS key (`solana-xmss`'s `LEAVES`). */
+const XMSS_LEAVES = xmss.LEAVES;
+
+/**
+ * Check `signature` over `digest` with the scheme's verifier. `identity` is
+ * the key it verifies against: for Winternitz and XMSS, the one the account
+ * holds now.
+ */
 function checkSignature(
   scheme: Scheme,
   identity: Uint8Array,
@@ -134,11 +221,13 @@ function checkSignature(
  * nonces. `validUntil` is the advance's expiry, which every signature
  * covers (default never expires). Pass `feePayer` when it is also an account of one of the instructions: the
  * runtime then marks it a writable signer there, and the digest covers that
- * flag. Winternitz and XMSS have no offline verifier. For an advance with
- * several signers use {@link verifyAdvanceTransaction}.
+ * flag. For Winternitz and XMSS, `signer.current` is the account's key and
+ * XMSS leaf counter now (default: the identity, leaf 0), and the program's
+ * rules for `nextKey` apply. For an advance with several signers use
+ * {@link verifyAdvanceTransaction}.
  */
 export function verifyAdvanceSignature(
-  signer: AdvanceSigner,
+  signer: AdvanceSigner & { current?: RotatingState },
   nonce: SignedOver,
   preInstructions: TransactionInstruction[],
   postInstructions: TransactionInstruction[],
@@ -152,7 +241,17 @@ export function verifyAdvanceSignature(
   const digest = signerDigest(message, signedOver, findVectorPda(scheme, identity)[0], {
     nextKey: signer.nextKey,
   });
-  checkSignature(scheme, identity, digest, signature);
+  if (scheme.nextKeyLen === 0) {
+    checkSignature(scheme, identity, digest, signature);
+  } else {
+    checkRotation(
+      scheme,
+      signer.current ?? { key: identity },
+      digest,
+      signer.nextKey ?? new Uint8Array(),
+      signature
+    );
+  }
   return digest;
 }
 
@@ -165,6 +264,8 @@ export type VectorState = {
   identity: Uint8Array;
   /** Its current nonce: the first 32 bytes of its account data. */
   nonce: Uint8Array;
+  /** Winternitz and XMSS: its key and XMSS leaf counter now (default: the identity, leaf 0). */
+  current?: RotatingState;
 };
 
 /** What a verifier knows of a nonce account an `advance` lists. */
@@ -248,8 +349,8 @@ function readTransaction(
  *
  * Failures of one signature are in its result; a transaction that is not a
  * well-formed `advance` throws. Pass `slot` to also refuse an expired
- * `validUntil`. Winternitz and XMSS signers have no offline verifier and
- * come back not `ok`.
+ * `validUntil`. A Winternitz or XMSS vector's `current` is its key and leaf
+ * counter now.
  */
 export function verifyAdvanceTransaction(params: {
   transaction: VersionedTransaction | Transaction | Uint8Array | TransactionInstruction[];
@@ -278,6 +379,12 @@ export function verifyAdvanceTransaction(params: {
   const current = new Map<string, Uint8Array>();
   for (const [address, vector] of vectorByAddress) current.set(address, vector.nonce);
   for (const [address, nonce] of nonceByAddress) current.set(address, nonce.nonce);
+  // And each rotating account's key and leaf counter: listed twice, its
+  // second signature verifies against what the first left.
+  const rotating = new Map<string, RotatingState>();
+  for (const [address, vector] of vectorByAddress) {
+    rotating.set(address, vector.current ?? { key: vector.identity });
+  }
 
   // Accounts: every vector, each optionally followed by its nonce account,
   // then the instructions sysvar.
@@ -343,7 +450,12 @@ export function verifyAdvanceTransaction(params: {
       if (slot !== undefined && BigInt(slot) > validUntil) {
         throw new ExpiredError(`the transaction is valid until slot ${validUntil}, past ${slot}`);
       }
-      checkSignature(scheme, identity, digest, signature);
+      if (scheme.nextKeyLen === 0) {
+        checkSignature(scheme, identity, digest, signature);
+      } else {
+        const address = vectorAddress.toBase58();
+        rotating.set(address, checkRotation(scheme, rotating.get(address)!, digest, nextKey, signature));
+      }
     } catch (error) {
       if (!(error instanceof VerifyError)) throw error;
       result.ok = false;
@@ -379,6 +491,18 @@ const VERIFIERS: Record<
   // The empty context, as on chain.
   [MLDSA44.id]: (identity, digest, signature) =>
     ml_dsa44.verify(signature, signedMessage(digest), identity),
+  // Both sign the 32-byte `signedDigest`; `verify` throws when it fails.
+  [WINTERNITZ.id]: (key, digest, signature) => {
+    winternitz.VerifyingKey.fromBytes(key).verify(
+      signedDigest(digest),
+      winternitz.Signature.fromBytes(signature)
+    );
+    return true;
+  },
+  [XMSS.id]: (key, digest, signature) => {
+    xmss.VerifyingKey.fromBytes(key).verify(signedDigest(digest), xmss.Signature.fromBytes(signature));
+    return true;
+  },
 };
 
 /**

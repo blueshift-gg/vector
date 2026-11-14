@@ -15,6 +15,8 @@
       "name": "@blueshift-gg/vector",
       "version": "2.0.0",
       "dependencies": {
+        "@blueshift-gg/solana-winternitz": "^0.3.0",
+        "@blueshift-gg/solana-xmss": "^0.1.0",
         "@noble/curves": "^1.8.0",
         "@noble/hashes": "^1.7.0",
         "@noble/post-quantum": "^0.6.1",
@@ -26,6 +28,10 @@
   },
   "packages": {
     "@babel/runtime": ["@babel/runtime@7.29.14", "", {}, "sha512-Y5tqevQaUAZhhj82BpYMNC1ssvLQTVAfwKdm8iy8qwmhvC2/CpcAu8OC+QEtjM7pMk7knx83u1Qj8gzkicyelw=="],
+
+    "@blueshift-gg/solana-winternitz": ["@blueshift-gg/solana-winternitz@0.3.0", "", { "dependencies": { "@noble/hashes": "^2.4.0" } }, "sha512-TPvdPDT6xDVVHy/ekO5dqtjDpTf3dS2wSro7+ZFI/P2L1ZRLw3gZ3kfUC0SA7p8G/7naDXbUoV47uehstiNl1g=="],
+
+    "@blueshift-gg/solana-xmss": ["@blueshift-gg/solana-xmss@0.1.0", "", { "dependencies": { "@blueshift-gg/solana-winternitz": "^0.3.0" } }, "sha512-x3tzyfjbl4QPm0r9BJZpbSmTWzlJnlB2ljGXwc25zxgpYQNoBa1kPGd6VKdjsXSiMqcqGxBDzpDTieSvm6t/uw=="],
 
     "@blueshift-gg/vector": ["@blueshift-gg/vector@workspace:sdk/ts"],
 
@@ -422,6 +428,8 @@
     "why-is-node-running": ["why-is-node-running@2.3.0", "", { "dependencies": { "siginfo": "^2.0.0", "stackback": "0.0.2" }, "bin": { "why-is-node-running": "cli.js" } }, "sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w=="],
 
     "ws": ["ws@7.5.14", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": "^5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-u9Oi2nQ8SZnTUAf6spLLKF5TyqoG3Nbbrd4ai6Sjo4P24bycDewhQqtNMIg4bFpnpH/TD4qk4IuAVhT0HIIqug=="],
+
+    "@blueshift-gg/solana-winternitz/@noble/hashes": ["@noble/hashes@2.4.0", "", {}, "sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA=="],
 
     "@noble/post-quantum/@noble/curves": ["@noble/curves@2.2.0", "", { "dependencies": { "@noble/hashes": "2.2.0" } }, "sha512-T/BoHgFXirb0ENSPBquzX0rcjXeM6Lo892a2jlYJkqk83LqZx0l1Of7DzlKJ6jkpvMrkHSnAcgb5JegL8SeIkQ=="],
 
