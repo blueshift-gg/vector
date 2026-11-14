@@ -10,7 +10,7 @@ use mollusk_svm::{result::types::TransactionProgramResult, Mollusk};
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
-use solana_winternitz::hazmat::{xmss::SecretKey, OneTime as _};
+use solana_winternitz::hazmat::xmss::SecretKey;
 use vector_core::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, signed, signed_nonce,
