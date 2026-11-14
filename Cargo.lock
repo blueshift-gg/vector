@@ -3404,12 +3404,21 @@ dependencies = [
 
 [[package]]
 name = "solana-winternitz"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddc9cca13940d74c2c168e4d4b3f742056dd2a2eb73ec40968ae1b9de30b659e"
+checksum = "b06328ca1f9c6844896da72ae26664589bcad29224105d5e5aec06f31e4e2032"
 dependencies = [
  "getrandom 0.3.4",
  "sha3",
+]
+
+[[package]]
+name = "solana-xmss"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e27ccd75788a3d244f6268a10ed5c151cd161a03253a021fdaebd4ec68a16cd5"
+dependencies = [
+ "solana-winternitz",
 ]
 
 [[package]]
@@ -3663,6 +3672,7 @@ dependencies = [
  "solana-secp256k1",
  "solana-secp256k1-ecdsa",
  "solana-winternitz",
+ "solana-xmss",
 ]
 
 [[package]]
@@ -3711,6 +3721,7 @@ dependencies = [
  "solana-system-interface",
  "solana-transaction",
  "solana-winternitz",
+ "solana-xmss",
  "spl-token-interface",
  "tempfile",
  "vector-core",

@@ -1,8 +1,5 @@
 use pinocchio::error::ProgramError;
-use solana_winternitz::{
-    xmss::{Signature, LEAVES},
-    VerifyingKey,
-};
+use solana_xmss::{Signature, VerifyingKey, LEAVES};
 
 use solana_nostd_sha256::hash;
 
