@@ -1,6 +1,9 @@
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
-use crate::{error::VectorError, state::VectorAccount};
+use crate::{
+    error::VectorError,
+    state::{VectorAccount, VectorAccountExt as _},
+};
 
 /// # Withdraw
 ///
@@ -65,7 +68,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Withdraw<'a> {
 }
 
 impl<'a> Withdraw<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &3;
+    pub const DISCRIMINATOR: &'a u8 = &vector_signer::WITHDRAW_DISCRIMINATOR;
 
     pub fn process(&mut self) -> ProgramResult {
         let remaining = self

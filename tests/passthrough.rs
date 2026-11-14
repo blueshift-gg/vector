@@ -9,7 +9,7 @@ use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use solana_system_interface::instruction::transfer;
-use vector_core::{
+use vector_signer::{
     create_multi_passthrough_instruction, create_passthrough_instruction,
     create_system_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
     find_system_pda, find_vector_pda, sign_advance_instruction_ed25519, PassthroughSigner,

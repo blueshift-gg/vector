@@ -11,7 +11,7 @@ use pinocchio::{
 use crate::{
     error::VectorError,
     instructions::{top_level_only, Advance},
-    state::{VectorAccount, VECTOR_SEED},
+    state::{VectorAccount, VectorAccountExt as _, VECTOR_SEED},
 };
 
 /// Most signers one `Passthrough` takes: the runtime's limit on signers of
@@ -96,7 +96,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Passthrough<'a> {
 }
 
 impl<'a> Passthrough<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &1;
+    pub const DISCRIMINATOR: &'a u8 = &vector_signer::PASSTHROUGH_DISCRIMINATOR;
 
     pub fn process(&self) -> ProgramResult {
         let mut headers = [const { MaybeUninit::uninit() }; MAX_SIGNERS];

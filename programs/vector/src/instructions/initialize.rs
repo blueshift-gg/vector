@@ -109,7 +109,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Initialize<'a> {
 }
 
 impl<'a> Initialize<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &2;
+    pub const DISCRIMINATOR: &'a u8 = &vector_signer::INITIALIZE_DISCRIMINATOR;
 
     pub fn process(&mut self) -> ProgramResult {
         match self {

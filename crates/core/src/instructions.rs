@@ -5,7 +5,7 @@ use pinocchio::account::MAX_PERMITTED_DATA_INCREASE;
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
 
-use crate::scheme::{
+use crate::{
     find_system_pda, find_vector_pda, Scheme, ADVANCE_DISCRIMINATOR, CLOSE_DISCRIMINATOR,
     INITIALIZE_DISCRIMINATOR, INITIALIZE_NONCE_DISCRIMINATOR, INSTRUCTIONS_SYSVAR_ID,
     NEVER_EXPIRES, PASSTHROUGH_DISCRIMINATOR, PROGRAM_ID, SYSTEM_PROGRAM_ID,

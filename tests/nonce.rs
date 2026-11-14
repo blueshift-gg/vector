@@ -8,7 +8,7 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
-use vector_core::{
+use vector_signer::{
     advance_message, create_close_nonce_subinstruction, create_initialize_nonce_instruction,
     create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, signed_nonce, signer_digest,
@@ -121,7 +121,7 @@ impl World {
             .collect();
         let signatures: Vec<_> = digests
             .iter()
-            .map(|digest| self.key.sign(&vector_core::signed(digest)).to_bytes())
+            .map(|digest| self.key.sign(&vector_signer::signed(digest)).to_bytes())
             .collect();
         let advance = create_multi_advance_instruction(
             NEVER_EXPIRES,

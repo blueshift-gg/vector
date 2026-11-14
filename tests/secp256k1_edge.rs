@@ -18,7 +18,7 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
-use vector_core::{
+use vector_signer::{
     advance_vector_digest, create_advance_instruction, create_initialize_instruction,
     eip191_envelope_hash, find_vector_pda, secp256k1_compressed_pubkey,
     secp256k1_eip191_eth_address, signed, EIP191, SECP256K1,

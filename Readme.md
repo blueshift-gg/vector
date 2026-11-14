@@ -28,7 +28,7 @@ A V1 transaction carries its limits in the message: compute units, loaded accoun
 
 ## Multi-Scheme Support
 
-Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving every signing scheme. It lives in [`programs/vector`](programs/vector/): one file per instruction in [`src/instructions`](programs/vector/src/instructions/), and one file per scheme in [`src/schemes`](programs/vector/src/schemes/). A scheme is one `SigningScheme` impl: its scheme byte, what it stores as the signer's identity, the types of its key, signature and next key, and how it verifies. Every length is the size of one of those types. The instructions are the same for every scheme and reach a scheme only through the `Scheme` table built from that trait. Adding a scheme is a new file and one line in `schemes::scheme`.
+Vector is one program, `vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV`, serving every signing scheme. It lives in [`programs/vector`](programs/vector/), one file per instruction in [`src/instructions`](programs/vector/src/instructions/). The schemes live in the [`vector-signer`](crates/core/) crate the program builds on, one file per scheme in [`src/schemes`](crates/core/src/schemes/), so clients run the same code offline. A scheme is one `SigningScheme` impl: its scheme byte, what it stores as the signer's identity, the types of its key, signature and next key, and how it verifies. Every length is the size of one of those types. The instructions are the same for every scheme and reach a scheme only through the `Scheme` table built from that trait. Adding a scheme is a new file and one line in `schemes::scheme`.
 
 | Scheme | Scheme byte | Identity | Signature | On-Chain Identity Storage | Pre-Sign Wrapper |
 |--------|------------|----------|-----------|---------------------------|------------------|
@@ -341,9 +341,9 @@ Because the signed digest commits to the entire transaction, the recipient and s
 
 ## Client SDKs
 
-### Rust (`vector-core`)
+### Rust (`vector-signer`)
 
-The `vector-core` crate provides off-chain helpers for constructing Vector transactions. It depends on the program crate itself, so the program ID, the account header, the discriminators and every scheme's byte and lengths come from the program and cannot drift. It exposes `PROGRAM_ID` and the program's `Scheme` descriptor (`id`, `identity_len`, `stored_identity_len`, `signature_len`, `next_key_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
+The `vector-signer` crate holds Vector's signing schemes, account layout and instruction format, and the off-chain helpers for building, signing and checking Vector transactions. The program builds on it (without its default `client` feature, `no_std`), so the program ID, the account header, the discriminators and every scheme's verification are one piece of code on chain and off: the offline verifier runs the program's own scheme code. It exposes `PROGRAM_ID` and the program's `Scheme` descriptor (`id`, `identity_len`, `stored_identity_len`, `signature_len`, `next_key_len`) with the constants `ED25519`, `EIP191`, `FALCON512`, `MLDSA44`, `SECP256K1`, `WINTERNITZ`, `XMSS`:
 
 - `find_vector_pda(&scheme, identity)` — derive the canonical Vector PDA (`["vector", [scheme], sha256(identity)]`).
 - `create_initialize_ed25519(payer, pubkey)` / `create_initialize_secp256k1_eip191(payer, eth_addr)` / `create_initialize_secp256k1_ecdsa(payer, compressed_pubkey)` / `create_initialize_falcon512(payer, wire_pubkey)` / `create_initialize_mldsa44(payer, public_key)` — convenience wrappers; ML-DSA-44's returns its three instructions.
@@ -403,7 +403,7 @@ Everything below is native protocol behaviour — no extra programs or formats. 
 Both SDKs ship a verify function that recomputes the digest from the full instruction layout and checks the signature as the on-chain program will — no RPC. The Rust one runs the program's own `initialize` and `advance` for the scheme, with `sol_secp256k1_recover` as the runtime implements it, so it cannot disagree with the chain. The TypeScript one verifies with `@noble`, and shares its digest pins and `fixtures/program.json` with the Rust tests. A PASS means the transaction will verify on-chain against the same nonce; the returned digest is the account's next nonce.
 
 ```rust
-use vector_core::{verify_advance_signature, AdvanceSigner, ED25519};
+use vector_signer::{verify_advance_signature, AdvanceSigner, ED25519};
 
 let next_nonce = verify_advance_signature(
     AdvanceSigner::new(&ED25519, &pubkey), &nonce, &pre_ixs, &post_ixs, None, signature,

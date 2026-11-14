@@ -9,7 +9,7 @@ use crate::{
     error::VectorError,
     instructions::top_level_only,
     scheme::VALID_UNTIL_LEN,
-    state::{NonceAccount, VectorAccount},
+    state::{NonceAccount, NonceAccountExt as _, VectorAccount, VectorAccountExt as _},
 };
 
 /// # Advance
@@ -91,7 +91,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Advance<'a> {
 }
 
 impl<'a> Advance<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &0;
+    pub const DISCRIMINATOR: &'a u8 = &vector_signer::ADVANCE_DISCRIMINATOR;
 
     pub fn process(&mut self) -> ProgramResult {
         let (valid_until, mut data) = self

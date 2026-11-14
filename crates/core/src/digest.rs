@@ -9,7 +9,7 @@ use solana_instruction::{BorrowedAccountMeta, BorrowedInstruction, Instruction};
 use solana_instructions_sysvar::construct_instructions_data;
 
 use crate::instructions::{create_multi_advance_instruction, AdvanceSigner};
-use crate::scheme::{find_vector_pda, Scheme, NEVER_EXPIRES, VALID_UNTIL_LEN};
+use crate::{find_vector_pda, Scheme, NEVER_EXPIRES, VALID_UNTIL_LEN};
 
 /// Set each account's flags to what the runtime writes in the instructions
 /// sysvar: signer or writable if any instruction says so, and the fee payer

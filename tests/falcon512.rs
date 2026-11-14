@@ -11,7 +11,7 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_falcon512::Falcon512Pubkey;
 use solana_program_error::ProgramError;
-use vector_core::{
+use vector_signer::{
     advance_vector_digest, create_advance_instruction, create_close_subinstruction,
     create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
     find_vector_pda, FALCON512, PROGRAM_ID,
@@ -25,7 +25,7 @@ use crate::common::{
 /// Sign via PQClean and zero-pad the variable-length detached signature to
 /// the wire-format 666 bytes the on-chain verifier expects.
 fn sign(digest: &[u8; 32], sk: &falcon512::SecretKey) -> [u8; FALCON512.signature_len] {
-    let sig = falcon512::detached_sign(&vector_core::signed(digest), sk);
+    let sig = falcon512::detached_sign(&vector_signer::signed(digest), sk);
     let sig_bytes = sig.as_bytes();
     assert!(sig_bytes.len() <= FALCON512.signature_len);
     let mut out = [0u8; FALCON512.signature_len];

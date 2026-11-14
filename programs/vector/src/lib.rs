@@ -6,17 +6,17 @@
 #![no_std]
 
 use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
-use solana_address::declare_id;
 
-pub mod error;
 pub mod instructions;
 pub use instructions::*;
 
-pub mod scheme;
-pub mod schemes;
 pub mod state;
 
-// The clients use this crate as a library, for its types and constants.
+// The schemes, the error codes and the program ID are `vector-signer`'s: the
+// clients run the same code offline.
+pub use vector_signer::{error, scheme, schemes, ID};
+
+// The tests use this crate as a library.
 #[cfg(not(feature = "no-entrypoint"))]
 pinocchio::program_entrypoint!(process_instruction);
 // Nothing allocates: every buffer is on the stack. An allocation panics.
@@ -24,8 +24,6 @@ pinocchio::program_entrypoint!(process_instruction);
 pinocchio::no_allocator!();
 #[cfg(not(feature = "no-entrypoint"))]
 pinocchio::nostd_panic_handler!();
-
-declare_id!("vectorcLBXJ2TuoKuUygkEi6FWqvBnbHDEDWoYamfjV");
 
 pub fn process_instruction(
     _program_id: &Address,

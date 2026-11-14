@@ -7,7 +7,7 @@ use solana_instruction::Instruction;
 
 use crate::digest::advance_message;
 use crate::instructions::AdvanceSigner;
-use crate::scheme::{find_vector_pda, signed_nonce, VectorAccount, NEVER_EXPIRES};
+use crate::{find_vector_pda, signed_nonce, VectorAccount, NEVER_EXPIRES};
 
 /// Why an offline check failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

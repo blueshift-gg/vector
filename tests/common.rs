@@ -14,7 +14,7 @@ use spl_token_interface::{
     instruction::{mint_to, set_authority, AuthorityType},
     state::{Account as TokenAccount, AccountState, Mint},
 };
-use vector_core::{
+use vector_signer::{
     advance_vector_digest, create_passthrough_instruction, find_system_pda, find_vector_pda,
     vector_seed, Scheme, PROGRAM_ID,
 };
@@ -23,7 +23,7 @@ use vector_core::{
 /// of `"vector:" || digest`.
 pub fn signed_hash(digest: &[u8; 32]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
-    Sha256::digest(vector_core::signed(digest)).into()
+    Sha256::digest(vector_signer::signed(digest)).into()
 }
 
 /// What a plain secp256k1 key signs for `digest`: the SHA-256 of

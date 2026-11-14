@@ -1,6 +1,6 @@
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
-use vector_core::{create_passthrough_instruction, find_vector_pda, ED25519};
+use vector_signer::{create_passthrough_instruction, find_vector_pda, ED25519};
 
 #[test]
 fn passthrough_preserves_external_signers() {
