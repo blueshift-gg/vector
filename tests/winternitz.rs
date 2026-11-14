@@ -10,8 +10,8 @@ use solana_program_error::ProgramError;
 use solana_winternitz::{hazmat, winternitz};
 use vector_core::{
     create_close_subinstruction, create_initialize_winternitz, create_passthrough_instruction,
-    create_rotating_advance_instruction, find_vector_pda, rotating_advance_vector_digest,
-    PROGRAM_ID, WINTERNITZ,
+    create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
+    rotating_advance_vector_digest, PROGRAM_ID, WINTERNITZ,
 };
 
 use crate::common::{
@@ -104,7 +104,7 @@ fn initialize_and_client_encoding() {
 }
 
 #[test]
-fn signature_binds_close_and_rejects_replay() {
+fn signature_binds_withdrawal_and_rejects_replay() {
     let directory = tempfile::tempdir().unwrap();
     let mut signer = winternitz::SigningKey::create(directory.path().join("signer.key")).unwrap();
     let public_key = signer.verifying_key().to_bytes();
@@ -116,8 +116,8 @@ fn signature_binds_close_and_rejects_replay() {
     let account = build_vector_account(NONCE, &WINTERNITZ, &identity, lamports, &stored);
     let receiver = Address::new_unique();
     let other = Address::new_unique();
-    let close = create_close_subinstruction(&WINTERNITZ, &identity, &receiver);
-    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[close]);
+    let withdraw = create_withdraw_subinstruction(&WINTERNITZ, &identity, &receiver, 5_000_000);
+    let passthrough = create_passthrough_instruction(&WINTERNITZ, &identity, &[withdraw]);
     let next_key = [7; 41];
     let digest = rotating_advance_vector_digest(
         &WINTERNITZ,
@@ -136,8 +136,8 @@ fn signature_binds_close_and_rejects_replay() {
         create_rotating_advance_instruction(&WINTERNITZ, &identity, &next_key, &signature);
     let expected = expected_advanced_data(digest, &WINTERNITZ, &identity, &next_key);
 
-    let other_close = create_close_subinstruction(&WINTERNITZ, &identity, &other);
-    let changed_action = create_passthrough_instruction(&WINTERNITZ, &identity, &[other_close]);
+    let other_withdraw = create_withdraw_subinstruction(&WINTERNITZ, &identity, &other, 5_000_000);
+    let changed_action = create_passthrough_instruction(&WINTERNITZ, &identity, &[other_withdraw]);
     let mut tampered = signature;
     tampered[winternitz::SIGNATURE_LEN - 1] ^= 1;
     let mut wrong_key = account.clone();
@@ -211,14 +211,14 @@ fn signature_binds_close_and_rejects_replay() {
         &[
             Check::success(),
             Check::account(&vector).data(&expected).build(),
-            Check::account(&vector).lamports(0).build(),
-            Check::account(&receiver)
-                .lamports(1_000_000 + lamports)
+            Check::account(&vector)
+                .lamports(lamports - 5_000_000)
                 .build(),
+            Check::account(&receiver).lamports(6_000_000).build(),
         ],
     );
     println!(
-        "winternitz advance + close: {} CUs",
+        "winternitz advance + withdraw: {} CUs",
         result.compute_units_consumed
     );
 }

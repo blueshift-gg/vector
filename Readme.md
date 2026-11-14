@@ -116,7 +116,7 @@ What the program cannot see is signing off chain. Never sign different authoriza
 - Prefer `NEVER_EXPIRES` (or a generous `valid_until`) for these two schemes: an expiry that lapses before the signature lands strands the account, because the only fix is to re-sign. This is the opposite of the advice for Ed25519 and the others, and it has a cost: a transaction nobody lands can be held and submitted later, so use the longest window you can accept and revoke (move the nonce) if you give up on it.
 - The program does not check that `next_key` is fresh or even well formed. Rotating back to an earlier key (A→B→A) is accepted, and for XMSS it reopens every leaf that key already used; a malformed `next_key` locks the account. Only the signer can choose `next_key`, because the digest covers it, but the signer's software must never reuse a retired key.
 - XMSS leaf 255 can only be used as a rotation, never to keep the key.
-- **Never close a Winternitz account you might use again.** Its address comes from its first key, so creating it again (which anyone can do) brings back that first key, which has already signed. Signing with it again is key reuse. Lamports sent to a closed Winternitz address can only be recovered that way, and an attacker who sees the second signature can grind a forgery, with unlimited time if that transaction fails or expires. A recreated XMSS account starts again at leaf 0 of its first key: it is safe only if the signer still has that key's leaf counter.
+- **These accounts never close.** The address comes from the first key, so an account created again would start over at that key, which has already signed: signing with it again would be key reuse, and anyone can create the account. `Close` refuses a Winternitz or XMSS account, and so does a `Withdraw` of every lamport (`KeyRotates`). `Withdraw` down to rent-exemption works as for any account; the rent stays locked.
 
 Rotation and actions are atomic. If any instruction fails, the nonce and key changes roll back. Retain the signed authorization and rebroadcast it unchanged when the cause is resolved. A permanently failing action cannot be repaired by changing the transaction and reusing a Winternitz key; this integration has no separate recovery authorization. The Vector nonce prevents replay of successful transactions, but cannot prevent off-chain leaf reuse.
 
@@ -201,7 +201,7 @@ A bad signature is `MissingRequiredSignature`, and every other standard `Program
 | `3` | `LeafUsed` | XMSS: the signature's leaf has signed before |
 | `4` | `TreeExhausted` | XMSS: the last leaf signed, and the key was not replaced |
 | `5` | `ForeignNonce` | `Advance`, `Close`: the nonce account belongs to another vector |
-| `6` | `KeyRotates` | `InitializeNonce`: the vector is Winternitz or XMSS |
+| `6` | `KeyRotates` | `InitializeNonce`, `Close`, or `Withdraw` of every lamport: the vector is Winternitz or XMSS |
 | `7` | `FreshNonce` | `Advance`, `Close`: the nonce account was created in this slot |
 | `8` | `FreshVector` | `Close`: the vector account was created in this slot |
 | `9` | `Expired` | `Advance`: the slot is past the transaction's `valid_until` |
@@ -325,7 +325,7 @@ For Ed25519, the pubkey must be a valid curve point. For EIP-191, the 20-byte ad
 The initial nonce is derived entirely onchain using the `sol_get_sysvar` syscall to read the most recent slot hash and height from the `SlotHashes` sysvar: `sha256(seed || latest_slot_entry)`. If an account is closed and the same identity is later re-initialized, the nonce differs, as the slot hash changes in every slot. The header records the slot the account was created in, and `Close` refuses the account in that slot (`FreshVector`), so an account is never closed and created again within one slot, and never starts from a nonce it held before.
 
 ## Closing and Partial Withdraw
-`Close` empties the PDA's lamports into a `close_to` account; the runtime removes an account with no lamports at the end of the transaction. `Withdraw` moves a fixed amount of lamports out; the runtime refuses to leave the account below rent-exemption unless it leaves it empty.
+`Close` empties the PDA's lamports into a `close_to` account; the runtime removes an account with no lamports at the end of the transaction. `Withdraw` moves a fixed amount of lamports out; the runtime refuses to leave the account below rent-exemption unless it leaves it empty. A Winternitz or XMSS account never closes: `Close` and a `Withdraw` that would empty it fail with `KeyRotates` (see [Key rotation](#key-rotation)).
 
 Both instructions take only `[vector_pda, receiver]` as accounts and gate on `vector.is_signer()`. They are not directly callable: the user authorises them by embedding the close/withdraw sub-instruction in a `Passthrough` instruction and signing an `Advance` whose digest commits to it. Advance verifies the offchain signature and advances the nonce; the sibling Passthrough then re-enters this program with the PDA promoted to signer — that re-entry is what trips the gate.
 

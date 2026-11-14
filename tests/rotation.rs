@@ -3,16 +3,17 @@
 use mollusk_svm::result::types::TransactionProgramResult;
 use solana_account::Account;
 use solana_address::Address;
+use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use solana_winternitz::{
     hazmat::{self, OneTime},
     xmss, SigningKey,
 };
 use vector_core::{
-    advance_message, create_multi_advance_instruction, create_passthrough_instruction,
-    create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
-    rotating_advance_vector_digest, signer_digest, AdvanceSigner, Scheme, VectorError,
-    NEVER_EXPIRES, WINTERNITZ, XMSS,
+    advance_message, create_close_subinstruction, create_multi_advance_instruction,
+    create_passthrough_instruction, create_rotating_advance_instruction,
+    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, signer_digest,
+    AdvanceSigner, Scheme, VectorError, NEVER_EXPIRES, WINTERNITZ, XMSS,
 };
 
 use crate::common::{
@@ -417,5 +418,88 @@ fn a_rotated_key_verifies_against_the_key_the_account_holds_now() {
     assert_eq!(
         verify_advance(NEVER_EXPIRES, &[entry], &[], &[], None, None).unwrap(),
         [digest]
+    );
+}
+
+#[test]
+fn winternitz_account_never_closes() {
+    never_closes::<hazmat::winternitz::SecretKey>(&WINTERNITZ, |signature| {
+        signature.as_bytes().to_vec()
+    });
+}
+
+#[test]
+fn xmss_account_never_closes() {
+    never_closes::<hazmat::xmss::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
+}
+
+/// Its address is its first key's: created again, it would start over at
+/// that key, which has signed. So neither `Close` nor a `Withdraw` of every
+/// lamport is allowed; a `Withdraw` down to rent-exemption is.
+fn never_closes<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
+    let directory = tempfile::tempdir().unwrap();
+    let mollusk = mollusk();
+    let lamports = mollusk.sysvars.rent.minimum_balance(scheme.account_len) + 5_000_000;
+    let receiver = Address::new_unique();
+    let next = SigningKey::<K>::create(directory.path().join("next.key")).unwrap();
+    let next_key = next.verifying_key().as_bytes().to_vec();
+
+    // Each attempt signs with a key of its own, over an account of its own,
+    // so no one-time key signs twice.
+    let attempt = |name: &str, action: fn(&Scheme, &[u8], &Address, u64) -> Instruction| {
+        let mut key = SigningKey::<K>::create(directory.path().join(name)).unwrap();
+        let identity = key.verifying_key().as_bytes().to_vec();
+        let (vector, _) = find_vector_pda(scheme, &identity);
+        let stored = match scheme.id == XMSS.id {
+            true => xmss_stored(&identity, 0),
+            false => identity.clone(),
+        };
+        let account = build_vector_account(NONCE, scheme, &identity, lamports, &stored);
+        let passthrough = create_passthrough_instruction(
+            scheme,
+            &identity,
+            &[action(scheme, &identity, &receiver, lamports)],
+        );
+        let digest = rotating_advance_vector_digest(
+            scheme,
+            &NONCE,
+            &identity,
+            &next_key,
+            &[],
+            std::slice::from_ref(&passthrough),
+            None,
+        );
+        let signature = wire(key.sign(&crate::common::signed_hash(&digest)).unwrap());
+        let advance = create_rotating_advance_instruction(scheme, &identity, &next_key, &signature);
+        process_transaction(
+            &mollusk,
+            &[&advance, &passthrough],
+            &[
+                (vector, account),
+                (receiver, Account::new(1_000_000, 0, &Address::default())),
+            ],
+            &[],
+        )
+        .program_result
+    };
+
+    let refused = TransactionProgramResult::Failure(1, VectorError::KeyRotates.into());
+    assert_eq!(
+        attempt("close.key", |scheme, identity, receiver, _| {
+            create_close_subinstruction(scheme, identity, receiver)
+        }),
+        refused
+    );
+    assert_eq!(
+        attempt("all.key", |scheme, identity, receiver, lamports| {
+            create_withdraw_subinstruction(scheme, identity, receiver, lamports)
+        }),
+        refused
+    );
+    assert_eq!(
+        attempt("rent.key", |scheme, identity, receiver, _| {
+            create_withdraw_subinstruction(scheme, identity, receiver, 5_000_000)
+        }),
+        TransactionProgramResult::Success
     );
 }

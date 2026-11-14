@@ -1,11 +1,13 @@
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
-use crate::state::VectorAccount;
+use crate::{error::VectorError, state::VectorAccount};
 
 /// # Withdraw
 ///
 /// Send lamports from the account to the receiver. The runtime refuses to
-/// leave it with less than rent-exemption but more than nothing.
+/// leave it with less than rent-exemption but more than nothing, and a
+/// Winternitz or XMSS account refuses nothing: it would close, which `Close`
+/// refuses it.
 ///
 /// It only runs inside a `Passthrough`, which is what makes the account a
 /// signer. The owner's signature on the `Advance` covers it.
@@ -25,6 +27,8 @@ pub struct Withdraw<'a> {
     vector: &'a mut AccountView,
     receiver: &'a mut AccountView,
     lamports: u64,
+    /// The scheme's key changes, so the account must not close.
+    rotates: bool,
 }
 
 impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Withdraw<'a> {
@@ -44,7 +48,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Withdraw<'a> {
 
         // Only a vector account is the vector's to spend. A nonce account is
         // the program's too, and its keypair can sign: it is not a vector.
-        VectorAccount::load(vector)?;
+        let (scheme, _) = VectorAccount::load(vector)?;
 
         let lamports = u64::from_le_bytes(
             data.try_into()
@@ -55,6 +59,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Withdraw<'a> {
             vector,
             receiver,
             lamports,
+            rotates: scheme.next_key_len != 0,
         })
     }
 }
@@ -68,6 +73,9 @@ impl<'a> Withdraw<'a> {
             .lamports()
             .checked_sub(self.lamports)
             .ok_or(ProgramError::InsufficientFunds)?;
+        if self.rotates && remaining == 0 {
+            return Err(VectorError::KeyRotates.into());
+        }
         let received = self
             .receiver
             .lamports()

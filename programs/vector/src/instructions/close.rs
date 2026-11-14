@@ -26,7 +26,9 @@ use crate::{
 ///
 /// Account Checks:
 /// - Vector: signer, and a complete vector account of the program. Closing
-///   the vector itself needs a slot after the one it was created in
+///   the vector itself needs a slot after the one it was created in, and a
+///   scheme whose key never changes: a Winternitz or XMSS account stays, as
+///   created again it would start over at its first key, which has signed
 /// - Nonce: a nonce account of the vector, past the slot it was created in
 pub struct Close<'a> {
     account: &'a mut AccountView,
@@ -56,7 +58,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Close<'a> {
 
         // Only a vector account closes as a vector: a nonce account's own
         // keypair can sign here too, and it is not one.
-        let (_, header) = VectorAccount::load(vector)?;
+        let (scheme, header) = VectorAccount::load(vector)?;
         let slot = Clock::get()?.slot;
 
         let account = match nonce {
@@ -69,6 +71,10 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Close<'a> {
             // An account closed and created again in the slot it was created
             // in would start from a nonce it held before.
             None if header.created() >= slot => return Err(VectorError::FreshVector.into()),
+            // Its address is its first key's, so created again it would
+            // start over at that key, which has signed: signing again would
+            // be a second signature by a one-time key.
+            None if scheme.next_key_len != 0 => return Err(VectorError::KeyRotates.into()),
             None => vector,
         };
         Ok(Self { account, receiver })
