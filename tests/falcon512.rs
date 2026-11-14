@@ -4,6 +4,11 @@
 //! 1024-byte prepared form, which the test reconstructs off-chain via
 //! `solana-falcon512`.
 
+use blueshift_vector::{
+    advance_vector_digest, create_advance_instruction, create_close_subinstruction,
+    create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
+    find_vector_pda, FALCON512, PROGRAM_ID,
+};
 use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use pqcrypto_falcon::falcon512;
 use pqcrypto_traits::sign::{DetachedSignature, PublicKey as _};
@@ -11,11 +16,6 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_falcon512::Falcon512Pubkey;
 use solana_program_error::ProgramError;
-use vector_core::{
-    advance_vector_digest, create_advance_instruction, create_close_subinstruction,
-    create_initialize_falcon512, create_passthrough_instruction, create_withdraw_subinstruction,
-    find_vector_pda, FALCON512, PROGRAM_ID,
-};
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,
@@ -25,7 +25,7 @@ use crate::common::{
 /// Sign via PQClean and zero-pad the variable-length detached signature to
 /// the wire-format 666 bytes the on-chain verifier expects.
 fn sign(digest: &[u8; 32], sk: &falcon512::SecretKey) -> [u8; FALCON512.signature_len] {
-    let sig = falcon512::detached_sign(&vector_core::signed(digest), sk);
+    let sig = falcon512::detached_sign(&blueshift_vector::signed(digest), sk);
     let sig_bytes = sig.as_bytes();
     assert!(sig_bytes.len() <= FALCON512.signature_len);
     let mut out = [0u8; FALCON512.signature_len];

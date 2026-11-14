@@ -1,5 +1,11 @@
 //! Full transaction execution: stable PDA, current-key authority and rollback.
 
+use blueshift_vector::{
+    advance_message, create_close_subinstruction, create_multi_advance_instruction,
+    create_passthrough_instruction, create_rotating_advance_instruction,
+    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, signer_digest,
+    AdvanceSigner, Scheme, VectorError, NEVER_EXPIRES, WINTERNITZ, XMSS,
+};
 use mollusk_svm::result::types::TransactionProgramResult;
 use solana_account::Account;
 use solana_address::Address;
@@ -7,12 +13,6 @@ use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use solana_winternitz::hazmat::{self, OneTime, SigningKey};
 use solana_xmss as xmss;
-use vector_core::{
-    advance_message, create_close_subinstruction, create_multi_advance_instruction,
-    create_passthrough_instruction, create_rotating_advance_instruction,
-    create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, signer_digest,
-    AdvanceSigner, Scheme, VectorError, NEVER_EXPIRES, WINTERNITZ, XMSS,
-};
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, xmss_stored, NONCE,
@@ -377,7 +377,7 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
 /// the one that named it.
 #[test]
 fn a_rotated_key_verifies_against_the_key_the_account_holds_now() {
-    use vector_core::{verify_advance, AdvanceEntry, SignerNonce, VerifyError};
+    use blueshift_vector::{verify_advance, AdvanceEntry, SignerNonce, VerifyError};
 
     let directory = tempfile::tempdir().unwrap();
     let first = SigningKey::<hazmat::SecretKey>::create(directory.path().join("1.key")).unwrap();

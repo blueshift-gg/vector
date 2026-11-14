@@ -1,5 +1,10 @@
 //! One-time authorization through Vector's existing handlers.
 
+use blueshift_vector::{
+    create_close_subinstruction, create_initialize_winternitz, create_passthrough_instruction,
+    create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
+    rotating_advance_vector_digest, PROGRAM_ID, WINTERNITZ,
+};
 use mollusk_svm::{
     program::keyed_account_for_system_program,
     result::{types::TransactionProgramResult, Check},
@@ -8,11 +13,6 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
 use solana_winternitz::{self as winternitz, hazmat};
-use vector_core::{
-    create_close_subinstruction, create_initialize_winternitz, create_passthrough_instruction,
-    create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
-    rotating_advance_vector_digest, PROGRAM_ID, WINTERNITZ,
-};
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, NONCE,
@@ -75,8 +75,8 @@ fn initialize_and_client_encoding() {
         .unwrap()
         .1
         .data;
-    assert_eq!(&stored[32..64], &vector_core::vector_seed(&identity));
-    let (_, system_bump) = vector_core::find_system_pda(&vector);
+    assert_eq!(&stored[32..64], &blueshift_vector::vector_seed(&identity));
+    let (_, system_bump) = blueshift_vector::find_system_pda(&vector);
     assert_eq!(stored[72..76], [WINTERNITZ.id, bump, system_bump, 0]);
     assert_eq!(&stored[76..], &public_key);
 
@@ -84,7 +84,11 @@ fn initialize_and_client_encoding() {
     for length in [40, 42] {
         let key = vec![0; length];
         let (address, _) = Address::find_program_address(
-            &[b"vector", &[WINTERNITZ.id], &vector_core::vector_seed(&key)],
+            &[
+                b"vector",
+                &[WINTERNITZ.id],
+                &blueshift_vector::vector_seed(&key),
+            ],
             &PROGRAM_ID,
         );
         let mut malformed = initialize.clone();

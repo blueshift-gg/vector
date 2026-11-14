@@ -1,14 +1,14 @@
 //! EIP-191 (Ethereum-style secp256k1) tests.
 
-use k256::ecdsa::SigningKey as Secp256k1SigningKey;
-use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
-use solana_account::Account;
-use solana_address::Address;
-use vector_core::{
+use blueshift_vector::{
     advance_vector_digest, create_close_subinstruction, create_initialize_secp256k1_eip191,
     create_passthrough_instruction, create_withdraw_subinstruction, find_vector_pda,
     secp256k1_eip191_eth_address, sign_advance_instruction_secp256k1_eip191, EIP191, PROGRAM_ID,
 };
+use k256::ecdsa::SigningKey as Secp256k1SigningKey;
+use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
+use solana_account::Account;
+use solana_address::Address;
 
 use crate::common::{
     build_vector_account, expected_advanced_data, mollusk, process_transaction, run_round_trip_spl,

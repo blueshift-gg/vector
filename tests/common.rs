@@ -1,5 +1,9 @@
 //! Shared constants and helpers used by every scheme's test module.
 
+use blueshift_vector::{
+    advance_vector_digest, create_passthrough_instruction, find_system_pda, find_vector_pda,
+    vector_seed, Scheme, PROGRAM_ID,
+};
 use mollusk_svm::{
     result::{types::TransactionResult, Check},
     Mollusk,
@@ -14,16 +18,12 @@ use spl_token_interface::{
     instruction::{mint_to, set_authority, AuthorityType},
     state::{Account as TokenAccount, AccountState, Mint},
 };
-use vector_core::{
-    advance_vector_digest, create_passthrough_instruction, find_system_pda, find_vector_pda,
-    vector_seed, Scheme, PROGRAM_ID,
-};
 
 /// What a hash-based key (Winternitz, XMSS) signs for `digest`: the SHA-256
 /// of `"vector:" || digest`.
 pub fn signed_hash(digest: &[u8; 32]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
-    Sha256::digest(vector_core::signed(digest)).into()
+    Sha256::digest(blueshift_vector::signed(digest)).into()
 }
 
 /// What a plain secp256k1 key signs for `digest`: the SHA-256 of

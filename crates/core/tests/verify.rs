@@ -3,19 +3,19 @@
 //! secp256k1 signatures, and the cross-language digest pin shared with
 //! `sdk/ts/test/verify.test.ts`.
 
-use ed25519_dalek::SigningKey as Ed25519SigningKey;
-use k256::ecdsa::SigningKey as Secp256k1SigningKey;
-use pqcrypto_falcon::falcon512 as pq_falcon;
-use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
-use solana_address::Address;
-use solana_instruction::{AccountMeta, Instruction};
-use vector_core::{
+use blueshift_vector::{
     advance_vector_digest, ed25519_pubkey, revocation_digest, secp256k1_compressed_pubkey,
     secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
     sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
     sign_revocation_instruction_ed25519, signed, verify_advance_signature, AdvanceSigner,
     VerifyError, ED25519, EIP191, FALCON512, SECP256K1, SYSTEM_PROGRAM_ID,
 };
+use ed25519_dalek::SigningKey as Ed25519SigningKey;
+use k256::ecdsa::SigningKey as Secp256k1SigningKey;
+use pqcrypto_falcon::falcon512 as pq_falcon;
+use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
+use solana_address::Address;
+use solana_instruction::{AccountMeta, Instruction};
 
 const NONCE: [u8; 32] = [0x01; 32];
 
@@ -319,11 +319,11 @@ fn revocation_round_trip_and_cross_language_pin() {
 
 mod multi {
     use super::*;
-    use sha2::{Digest, Sha256};
-    use vector_core::{
+    use blueshift_vector::{
         advance_message, create_multi_advance_instruction, find_vector_pda, signed_nonce,
         signer_digest, verify_advance, AdvanceEntry, SignerNonce, NEVER_EXPIRES,
     };
+    use sha2::{Digest, Sha256};
 
     const VECTOR_NONCE: [u8; 32] = [0x07; 32];
     const NONCE_ACCOUNT_NONCE: [u8; 32] = [0x08; 32];

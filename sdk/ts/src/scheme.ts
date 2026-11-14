@@ -62,7 +62,7 @@ export const VECTOR_PDA_SEED = new TextEncoder().encode("vector");
 
 /**
  * Everything a client needs to use one signing scheme. Mirrors the `Scheme` struct in the Rust
- * `vector-core` crate.
+ * `blueshift-vector` crate.
  */
 export interface Scheme {
   /**
