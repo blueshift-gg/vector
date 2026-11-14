@@ -24,11 +24,13 @@ unsafe impl SigningScheme for Winternitz {
     type Signature = Signature;
     type NextKey = VerifyingKey;
 
+    #[inline]
     fn initialize(key: &VerifyingKey, identity: &mut [u8]) -> Result<(), ProgramError> {
         write(identity, key.as_bytes())
     }
 
     /// The same key again would sign a second time.
+    #[inline]
     fn advance(
         &mut self,
         signed: &[u8; SIGNED_LEN],

@@ -27,12 +27,14 @@ unsafe impl SigningScheme for Xmss {
     type Signature = Signature;
     type NextKey = VerifyingKey;
 
+    #[inline]
     fn initialize(key: &VerifyingKey, identity: &mut [u8]) -> Result<(), ProgramError> {
         // A new account is zeroed, so its next leaf is 0.
         write(identity, key.as_bytes())
     }
 
     /// The same key as `next_key` keeps it, and its used leaves stay used.
+    #[inline]
     fn advance(
         &mut self,
         signed: &[u8; SIGNED_LEN],

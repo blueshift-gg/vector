@@ -70,6 +70,7 @@ unsafe impl SigningScheme for Ed25519 {
     type Signature = [u8; 64];
     type NextKey = [u8; 0];
 
+    #[inline]
     fn initialize(key: &Address, identity: &mut [u8]) -> Result<(), ProgramError> {
         // A point, in its one canonical encoding, of large order.
         if !bytes_are_curve_point(key)
@@ -81,6 +82,7 @@ unsafe impl SigningScheme for Ed25519 {
         write(identity, key.as_array())
     }
 
+    #[inline]
     fn advance(
         &mut self,
         signed: &[u8; SIGNED_LEN],

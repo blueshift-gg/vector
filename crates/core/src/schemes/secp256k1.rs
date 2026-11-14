@@ -21,6 +21,7 @@ unsafe impl SigningScheme for Secp256k1 {
     type Signature = [u8; 64];
     type NextKey = [u8; 0];
 
+    #[inline]
     fn initialize(key: &Self::Key, identity: &mut [u8]) -> Result<(), ProgramError> {
         // The prefix, then that the x coordinate is on the curve: a key that
         // is not could never sign, and would hold the account for good.
@@ -30,6 +31,7 @@ unsafe impl SigningScheme for Secp256k1 {
         write(identity, key)
     }
 
+    #[inline]
     fn advance(
         &mut self,
         signed: &[u8; SIGNED_LEN],

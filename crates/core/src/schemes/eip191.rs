@@ -22,6 +22,7 @@ unsafe impl SigningScheme for Eip191 {
     type Signature = [u8; 65];
     type NextKey = [u8; 0];
 
+    #[inline]
     fn initialize(key: &[u8; 20], identity: &mut [u8]) -> Result<(), ProgramError> {
         if key == &[0; 20] {
             return Err(ProgramError::InvalidInstructionData);
@@ -29,6 +30,7 @@ unsafe impl SigningScheme for Eip191 {
         write(identity, key)
     }
 
+    #[inline]
     fn advance(
         &mut self,
         signed: &[u8; SIGNED_LEN],

@@ -2,6 +2,13 @@
 //! verifies (a [`SigningScheme`](crate::scheme::SigningScheme) impl, as the
 //! program runs it), its `Scheme` constant, and with the `client` feature an
 //! `initialize` builder and a signer where this crate has one.
+//!
+//! The program is built without LTO (it is also a library, and with LTO it
+//! inlines past its 4 KiB stack frame), so nothing inlines across this crate
+//! and the program unless marked `#[inline]`. The schemes' small methods and
+//! the header readers are, as they were when they lived in the program.
+//! Falcon-512's and ML-DSA-44's verification are not: inlined here, they
+//! would instantiate a second copy of SHAKE's Keccak-p (78 KB) in this crate.
 
 use pinocchio::error::ProgramError;
 
@@ -45,6 +52,7 @@ const _: () = {
 /// byte two schemes claimed would be an unreachable pattern. Zero is not
 /// one: an account anyone assigns to the program has zeroed data, and must
 /// not read as an account of some scheme.
+#[inline]
 pub fn scheme(id: u8) -> Result<&'static Scheme, ProgramError> {
     Ok(match id {
         Ed25519::ID => &const { Scheme::of::<Ed25519>() },

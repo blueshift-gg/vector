@@ -18,6 +18,7 @@ pub const SIGNED_LEN: usize = SIGNED_PREFIX.len() + 32;
 
 /// What a key signs for `digest`: `"vector:" || digest`. A scheme that signs a
 /// fixed 32 bytes signs its SHA-256.
+#[inline]
 pub fn signed(digest: &[u8; 32]) -> [u8; SIGNED_LEN] {
     let mut signed = [0; SIGNED_LEN];
     signed[..SIGNED_PREFIX.len()].copy_from_slice(SIGNED_PREFIX);

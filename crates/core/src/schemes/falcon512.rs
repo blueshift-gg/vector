@@ -32,6 +32,7 @@ unsafe impl SigningScheme for Falcon512 {
     type Signature = Falcon512Signature;
     type NextKey = [u8; 0];
 
+    #[inline]
     fn initialize(key: &Falcon512Pubkey, identity: &mut [u8]) -> Result<(), ProgramError> {
         let prepared = key
             .try_prepare_pubkey()

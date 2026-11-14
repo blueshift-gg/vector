@@ -55,11 +55,13 @@ impl VectorAccount {
     pub const HEADER_LEN: usize = size_of::<Self>();
 
     /// The slot the account was created in.
+    #[inline]
     pub fn created(&self) -> u64 {
         u64::from_le_bytes(self.created)
     }
 
     /// Record the slot the account is created in.
+    #[inline]
     pub fn set_created(&mut self, slot: u64) {
         self.created = slot.to_le_bytes();
     }
@@ -67,6 +69,7 @@ impl VectorAccount {
     /// The scheme of an account that may still be growing, from its header.
     /// The program takes the scheme from here and never from the caller, so
     /// the identity is always read as the scheme that wrote it.
+    #[inline]
     pub fn growing_scheme(data: &[u8]) -> Result<&'static Scheme, ProgramError> {
         schemes::scheme(Self::header(data)?.scheme).map_err(|_| ProgramError::InvalidAccountData)
     }
@@ -75,6 +78,7 @@ impl VectorAccount {
     /// and the data is exactly as long as the scheme says. Nothing else is a
     /// vector account, a nonce account or any other account of the program
     /// included.
+    #[inline]
     pub fn scheme(data: &[u8]) -> Result<&'static Scheme, ProgramError> {
         let scheme = Self::growing_scheme(data)?;
         if data.len() != scheme.account_len {
@@ -84,6 +88,7 @@ impl VectorAccount {
     }
 
     /// The header at the start of account data.
+    #[inline]
     pub fn header(data: &[u8]) -> Result<&Self, ProgramError> {
         let header = data
             .get(..Self::HEADER_LEN)
@@ -93,6 +98,7 @@ impl VectorAccount {
     }
 
     /// Split account data into the header and the identity bytes after it.
+    #[inline]
     pub fn split(data: &mut [u8]) -> Result<(&mut Self, &mut [u8]), ProgramError> {
         let (header, identity) = data
             .split_at_mut_checked(Self::HEADER_LEN)
@@ -141,6 +147,7 @@ impl NonceAccount {
 
     /// A nonce account of the vector at `vector`, at `nonce`, created in
     /// `slot`.
+    #[inline]
     pub fn new(nonce: [u8; 32], vector: [u8; 32], slot: u64) -> Self {
         Self {
             nonce,
@@ -150,11 +157,13 @@ impl NonceAccount {
     }
 
     /// The slot the account was created in.
+    #[inline]
     pub fn created(&self) -> u64 {
         u64::from_le_bytes(self.created)
     }
 
     /// What the vector's key signs over: `SHA256(nonce || vector's nonce)`.
+    #[inline]
     pub fn signed(&self, vector_nonce: &[u8; 32]) -> [u8; 32] {
         hashv(&[&self.nonce, vector_nonce])
     }
