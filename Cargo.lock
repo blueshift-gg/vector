@@ -3405,7 +3405,8 @@ dependencies = [
 [[package]]
 name = "solana-winternitz"
 version = "0.3.0"
-source = "git+https://github.com/blueshift-gg/solana-winternitz?rev=5bf1b739efe35c66d127a16b0ad1b70143190a5e#5bf1b739efe35c66d127a16b0ad1b70143190a5e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b06328ca1f9c6844896da72ae26664589bcad29224105d5e5aec06f31e4e2032"
 dependencies = [
  "getrandom 0.3.4",
  "sha3",
@@ -3414,7 +3415,8 @@ dependencies = [
 [[package]]
 name = "solana-xmss"
 version = "0.1.0"
-source = "git+https://github.com/blueshift-gg/solana-winternitz?rev=5bf1b739efe35c66d127a16b0ad1b70143190a5e#5bf1b739efe35c66d127a16b0ad1b70143190a5e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e27ccd75788a3d244f6268a10ed5c151cd161a03253a021fdaebd4ec68a16cd5"
 dependencies = [
  "solana-winternitz",
 ]

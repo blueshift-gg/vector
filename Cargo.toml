@@ -32,9 +32,8 @@ pinocchio-system = "0.6.1"
 brine-ed25519 = { version = "0.7.0", features = ["fast-sha512"] }
 solana-falcon512 = "0.2.1"
 solana-ml-dsa = "0.1.0"
-# Unpublished: blueshift-gg/solana-winternitz#3. Switch to 0.3.0 / 0.1.0 once released.
-solana-winternitz = { git = "https://github.com/blueshift-gg/solana-winternitz", rev = "5bf1b739efe35c66d127a16b0ad1b70143190a5e", default-features = false }
-solana-xmss = { git = "https://github.com/blueshift-gg/solana-winternitz", rev = "5bf1b739efe35c66d127a16b0ad1b70143190a5e", default-features = false }
+solana-winternitz = { version = "0.3.0", default-features = false }
+solana-xmss = { version = "0.1.0", default-features = false }
 solana-secp256k1 = "0.2.1"
 solana-secp256k1-ecdsa = { version = "0.2.0", default-features = false, features = ["sha256"] }
 [profile.release]
