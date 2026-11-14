@@ -8,8 +8,6 @@ import {
   Connection,
   Keypair,
   SystemProgram,
-  Transaction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   ED25519,
@@ -63,7 +61,7 @@ describe("vector-ed25519", () => {
 
   test("initialize vector account", async () => {
     const ix = createInitializeEd25519(feePayer.publicKey, ED25519_IDENTITY);
-    const tx = new Transaction().add(ix);
+    const tx = [ix];
     await sendTx(connection, tx, [feePayer]);
 
     const account = await fetchVectorAccount(
@@ -94,14 +92,14 @@ describe("vector-ed25519", () => {
     // A freshly-initialized account holds exactly its rent-exempt minimum,
     // and on-chain `withdraw` refuses to drop below that floor. Top the PDA
     // up first so there are withdrawable lamports above rent-exemption.
-    const topUp = new Transaction().add(
+    const topUp = [
       SystemProgram.transfer({
         fromPubkey: feePayer.publicKey,
         toPubkey: vectorPda,
         lamports: 5_000_000,
       })
-    );
-    await sendAndConfirmTransaction(connection, topUp, [feePayer]);
+    ];
+    await sendTx(connection, topUp, [feePayer]);
 
     const before = await connection.getAccountInfo(vectorPda);
     expect(before).not.toBeNull();
@@ -126,7 +124,7 @@ describe("vector-ed25519", () => {
       [passthroughIx],
       feePayer.publicKey
     );
-    const tx = new Transaction().add(advanceIx, passthroughIx);
+    const tx = [advanceIx, passthroughIx];
     await sendTx(connection, tx, [feePayer]);
 
     currentNonce = advanceVectorDigest(
@@ -147,15 +145,15 @@ describe("vector-ed25519", () => {
 
   test("system passthrough transfers from the system PDA", async () => {
     const [systemPda] = findSystemPda(vectorPda);
-    await sendAndConfirmTransaction(
+    await sendTx(
       connection,
-      new Transaction().add(
+      [
         SystemProgram.transfer({
           fromPubkey: feePayer.publicKey,
           toPubkey: systemPda,
           lamports: 5_000_000,
         })
-      ),
+      ],
       [feePayer]
     );
     const receiver = (await Keypair.generate()).publicKey;
@@ -177,7 +175,7 @@ describe("vector-ed25519", () => {
       [passthroughIx],
       feePayer.publicKey
     );
-    await sendTx(connection, new Transaction().add(advanceIx, passthroughIx), [feePayer]);
+    await sendTx(connection, [advanceIx, passthroughIx], [feePayer]);
     currentNonce = advanceVectorDigest(
       ED25519,
       currentNonce,
@@ -205,7 +203,7 @@ describe("vector-ed25519", () => {
       slot - 1n
     );
     await expect(
-      sendTx(connection, new Transaction().add(advanceIx, passthroughIx), [feePayer])
+      sendTx(connection, [advanceIx, passthroughIx], [feePayer])
     ).rejects.toThrow(new RegExp(`custom program error: 0x${VectorError.Expired.toString(16)}`));
   });
 
@@ -227,7 +225,7 @@ describe("vector-ed25519", () => {
       [passthroughIx],
       feePayer.publicKey
     );
-    const tx = new Transaction().add(advanceIx, passthroughIx);
+    const tx = [advanceIx, passthroughIx];
     await sendTx(connection, tx, [feePayer]);
 
     const info = await connection.getAccountInfo(vectorPda);

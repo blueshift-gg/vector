@@ -13,11 +13,7 @@ import {
   Connection,
   Keypair,
   SystemProgram,
-  Transaction,
   TransactionInstruction,
-  TransactionMessage,
-  VersionedTransaction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   AuthorityType,
@@ -34,7 +30,9 @@ import {
 
 import {
   Scheme,
+  V1Limits,
   advanceVectorDigest,
+  createV1Transaction,
   fetchVectorAccount,
   createPassthroughInstruction,
 } from "../src/index.js";
@@ -103,37 +101,24 @@ export function explorerLink(signature: string): string {
   return `https://explorer.solana.com/tx/${signature}?cluster=custom&customUrl=${RPC_URL}`;
 }
 
-export async function sendTx(
-  connection: Connection,
-  tx: Transaction,
-  signers: Keypair[]
-): Promise<string> {
-  const sig = await sendAndConfirmTransaction(connection, tx, signers);
-  console.log(explorerLink(sig));
-  return sig;
-}
-
 /**
- * Send `instructions` as one V1 transaction (SIMD-0385): up to 4,096 bytes,
- * for ML-DSA-44's key and signature or several signers at once. A V1
- * transaction takes its limits from the message, not from Compute Budget
- * instructions, and has none without them.
+ * Send `instructions` as one V1 transaction, signed by `signers` (the first
+ * pays), with the SDK's default limits unless `limits` says otherwise, and
+ * wait until it is confirmed. Throws if it fails, in preflight or after.
  */
-export async function sendV1(
+export async function sendTx(
   connection: Connection,
   instructions: TransactionInstruction[],
   signers: Keypair[],
-  computeUnitLimit = 1_400_000
+  limits?: V1Limits
 ): Promise<string> {
   const { blockhash } = await connection.getLatestBlockhash();
-  const message = new TransactionMessage({
-    payerKey: signers[0].publicKey,
+  const tx = createV1Transaction({
+    feePayer: signers[0].publicKey,
     instructions,
     recentBlockhash: blockhash,
-  // A V1 transaction budgets zero for any limit it leaves out: loading the
-  // program and accounts needs this one too. 64 MiB is the runtime's most.
-  }).compileToV1Message({ computeUnitLimit, loadedAccountsDataSizeLimit: 64 * 1024 * 1024 });
-  const tx = new VersionedTransaction(message);
+    limits,
+  });
   await tx.sign(signers);
   const sig = await connection.sendTransaction(tx);
   const { value } = await connection.confirmTransaction(sig, "confirmed");
@@ -167,9 +152,9 @@ export async function splMintAuthorityRoundTrip(
     pre: TransactionInstruction[],
     post: TransactionInstruction[]
   ) => TransactionInstruction,
-  // Top-level instructions placed BEFORE `advance` (e.g. a `ComputeBudget`
-  // bump for heavy schemes). Committed to by the digest, so threaded
-  // through both the signer closure and the nextNonce recompute.
+  // Top-level instructions placed BEFORE `advance`. Committed to by the
+  // digest, so threaded through both the signer closure and the nextNonce
+  // recompute.
   extraPreInstructions: TransactionInstruction[] = []
 ): Promise<Uint8Array> {
   // 1. Create a mint with authority = vectorPda.
@@ -177,7 +162,7 @@ export async function splMintAuthorityRoundTrip(
   const rentExempt = await connection.getMinimumBalanceForRentExemption(
     MINT_SIZE
   );
-  const createMintTx = new Transaction().add(
+  const createMintTx = [
     SystemProgram.createAccount({
       fromPubkey: feePayer.publicKey,
       newAccountPubkey: mint.publicKey,
@@ -186,24 +171,24 @@ export async function splMintAuthorityRoundTrip(
       programId: TOKEN_PROGRAM_ID,
     }),
     createInitializeMint2Instruction(mint.publicKey, 6, vectorPda, null)
-  );
-  await sendAndConfirmTransaction(connection, createMintTx, [feePayer, mint]);
+  ];
+  await sendTx(connection, createMintTx, [feePayer, mint]);
 
   // 2. Create an associated token account for the fee payer.
   const destination = getAssociatedTokenAddressSync(
     mint.publicKey,
     feePayer.publicKey
   );
-  await sendAndConfirmTransaction(
+  await sendTx(
     connection,
-    new Transaction().add(
+    [
       createAssociatedTokenAccountInstruction(
         feePayer.publicKey,
         destination,
         feePayer.publicKey,
         mint.publicKey
       )
-    ),
+    ],
     [feePayer]
   );
 
@@ -239,7 +224,7 @@ export async function splMintAuthorityRoundTrip(
   const advanceIx = signAdvance(currentNonce, extraPreInstructions, postIxs);
   await sendTx(
     connection,
-    new Transaction().add(...extraPreInstructions, advanceIx, ...postIxs),
+    [...extraPreInstructions, advanceIx, ...postIxs],
     [feePayer]
   );
 

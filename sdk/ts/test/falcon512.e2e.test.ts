@@ -8,8 +8,6 @@ import {
   Connection,
   Keypair,
   SystemProgram,
-  Transaction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   FALCON512,
@@ -64,7 +62,7 @@ describe("vector-falcon512", () => {
   // wire pubkey is hashed + prepared on-chain at init).
   test("initialize falcon512 vector account", async () => {
     const ix = createInitializeFalcon512(feePayer.publicKey, FALCON_KP.publicKey);
-    const tx = new Transaction().add(ix);
+    const tx = [ix];
     await sendTx(connection, tx, [feePayer]);
 
     const account = await fetchVectorAccount(
@@ -88,7 +86,7 @@ describe("vector-falcon512", () => {
       feePayer.publicKey
     );
 
-    const tx = new Transaction().add(advanceIx);
+    const tx = [advanceIx];
     await sendTx(connection, tx, [feePayer]);
 
     currentNonce = advanceVectorDigest(
@@ -131,14 +129,14 @@ describe("vector-falcon512", () => {
     // A freshly-initialized account holds exactly its rent-exempt minimum,
     // and on-chain `withdraw` refuses to drop below that floor. Top the PDA
     // up first so there are withdrawable lamports above rent-exemption.
-    const topUp = new Transaction().add(
+    const topUp = [
       SystemProgram.transfer({
         fromPubkey: feePayer.publicKey,
         toPubkey: vectorPda,
         lamports: 5_000_000,
       })
-    );
-    await sendAndConfirmTransaction(connection, topUp, [feePayer]);
+    ];
+    await sendTx(connection, topUp, [feePayer]);
 
     const before = await connection.getAccountInfo(vectorPda);
     expect(before).not.toBeNull();
@@ -163,7 +161,7 @@ describe("vector-falcon512", () => {
       [passthroughIx],
       feePayer.publicKey
     );
-    const tx = new Transaction().add(advanceIx, passthroughIx);
+    const tx = [advanceIx, passthroughIx];
     await sendTx(connection, tx, [feePayer]);
 
     currentNonce = advanceVectorDigest(
@@ -200,7 +198,7 @@ describe("vector-falcon512", () => {
       [passthroughIx],
       feePayer.publicKey
     );
-    const tx = new Transaction().add(advanceIx, passthroughIx);
+    const tx = [advanceIx, passthroughIx];
     await sendTx(connection, tx, [feePayer]);
 
     const info = await connection.getAccountInfo(vectorPda);

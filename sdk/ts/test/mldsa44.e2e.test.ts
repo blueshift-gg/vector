@@ -8,8 +8,6 @@ import {
   Connection,
   Keypair,
   SystemProgram,
-  Transaction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   MLDSA44,
@@ -24,7 +22,7 @@ import {
   advanceVectorDigest,
   vectorAccountLen,
 } from "../src/index.js";
-import { RPC_URL, WS_URL, FEE_PAYER_SEED, sendV1 } from "./helpers.js";
+import { RPC_URL, WS_URL, FEE_PAYER_SEED, sendTx } from "./helpers.js";
 
 // Deterministic, so the PDA is stable against a fresh validator.
 const KP = mldsa44Keygen(new Uint8Array(32).fill(0x44));
@@ -49,7 +47,7 @@ describe("vector-mldsa44", () => {
   // The account (21,932 bytes) takes three `initialize`s: the first creates
   // it with the key, the others grow it and prepare the key.
   test("initialize mldsa44 vector account", async () => {
-    await sendV1(connection, createInitializeMlDsa44(feePayer.publicKey, KP.publicKey), [
+    await sendTx(connection, createInitializeMlDsa44(feePayer.publicKey, KP.publicKey), [
       feePayer,
     ]);
     const info = await connection.getAccountInfo(vectorPda);
@@ -59,7 +57,7 @@ describe("vector-mldsa44", () => {
 
   test("advance with empty payload", async () => {
     const advance = signAdvanceInstructionMlDsa44(KP, currentNonce, [], [], feePayer.publicKey);
-    await sendV1(connection, [advance], [feePayer]);
+    await sendTx(connection, [advance], [feePayer]);
     currentNonce = advanceVectorDigest(MLDSA44, currentNonce, IDENTITY, [], [], feePayer.publicKey);
     const account = await fetchVectorAccount(connection, MLDSA44, IDENTITY);
     expect(account.nonce).toEqual(currentNonce);
@@ -73,21 +71,21 @@ describe("vector-mldsa44", () => {
       [],
       feePayer.publicKey
     );
-    await expect(sendV1(connection, [stale], [feePayer])).rejects.toThrow();
+    await expect(sendTx(connection, [stale], [feePayer])).rejects.toThrow();
     const account = await fetchVectorAccount(connection, MLDSA44, IDENTITY);
     expect(account.nonce).toEqual(currentNonce);
   });
 
   test("withdraw lamports via advance", async () => {
-    await sendAndConfirmTransaction(
+    await sendTx(
       connection,
-      new Transaction().add(
+      [
         SystemProgram.transfer({
           fromPubkey: feePayer.publicKey,
           toPubkey: vectorPda,
           lamports: 5_000_000,
         })
-      ),
+      ],
       [feePayer]
     );
     const before = (await connection.getAccountInfo(vectorPda))!.lamports;
@@ -101,7 +99,7 @@ describe("vector-mldsa44", () => {
       [passthrough],
       feePayer.publicKey
     );
-    await sendV1(connection, [advance, passthrough], [feePayer]);
+    await sendTx(connection, [advance, passthrough], [feePayer]);
     currentNonce = advanceVectorDigest(
       MLDSA44,
       currentNonce,
@@ -125,7 +123,7 @@ describe("vector-mldsa44", () => {
       [passthrough],
       feePayer.publicKey
     );
-    await sendV1(connection, [advance, passthrough], [feePayer]);
+    await sendTx(connection, [advance, passthrough], [feePayer]);
     expect(await connection.getAccountInfo(vectorPda)).toBeNull();
   });
 });

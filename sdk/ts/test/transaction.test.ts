@@ -15,6 +15,7 @@ import {
   SECP256K1,
   advanceMessage,
   advanceVectorDigest,
+  createV1Transaction,
   createMultiAdvanceInstruction,
   createMultiPassthroughInstruction,
   createWithdrawSubinstruction,
@@ -254,6 +255,7 @@ describe("validUntil", () => {
 
 describe("an assembled Transaction", () => {
   test("verifies from its wire bytes, fee payer and all", async () => {
+    // V1 by default: the same advance, any limits, as an object and as bytes.
     const feePayer = await Keypair.generate();
     const listed: AdvanceSigner[] = [{ scheme: ED25519, identity: ED_IDENTITY }];
     // The fee payer is also an account of an instruction: its flags are in the digest.
@@ -267,6 +269,21 @@ describe("an assembled Transaction", () => {
     const digest = signerDigest(message, ED_NONCE, ED_VECTOR);
     const advance = createMultiAdvanceInstruction([{ ...listed[0], signature: signers.ed25519(digest) }]);
 
+    const blockhash = new PublicKey(new Uint8Array(32).fill(5)).toBase58();
+    for (const limits of [undefined, { computeUnitLimit: 300_000, priorityFeeLamports: 10_000n }]) {
+      const v1 = createV1Transaction({
+        feePayer: feePayer.publicKey,
+        instructions: [advance, ...instructions],
+        recentBlockhash: blockhash,
+        limits,
+      });
+      expect(v1.version).toBe(1);
+      // The limits are not instructions: no signer signed them.
+      expect(verifyAdvanceTransaction({ transaction: v1, vectors }).ok).toBe(true);
+      expect(verifyAdvanceTransaction({ transaction: v1.serialize(), vectors }).ok).toBe(true);
+    }
+
+    // A legacy transaction too.
     const tx = new Transaction({ feePayer: feePayer.publicKey }).add(advance, ...instructions);
     tx.recentBlockhash = new PublicKey(new Uint8Array(32).fill(5)).toBase58() as never;
     const bytes = await tx.serialize({ requireAllSignatures: false, verifySignatures: false });

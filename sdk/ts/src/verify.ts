@@ -4,7 +4,13 @@
  * transaction ({@link verifyAdvanceTransaction}), vector accounts and nonce
  * accounts alike.
  */
-import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import {
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
@@ -202,14 +208,39 @@ export type VerifiedAdvance = {
   ok: boolean;
 };
 
+/** The instructions of a transaction in any of the forms it may come in, and its fee payer. */
+function readTransaction(
+  transaction: VersionedTransaction | Transaction | Uint8Array | TransactionInstruction[]
+): { instructions: TransactionInstruction[]; feePayer?: PublicKey } {
+  if (Array.isArray(transaction)) return { instructions: transaction };
+  if (transaction instanceof Transaction) {
+    return { instructions: transaction.instructions, feePayer: transaction.feePayer ?? undefined };
+  }
+  const versioned =
+    transaction instanceof Uint8Array ? VersionedTransaction.deserialize(transaction) : transaction;
+  let decompiled: TransactionMessage;
+  try {
+    decompiled = TransactionMessage.decompile(versioned.message);
+  } catch (error) {
+    throw new MalformedSignatureError(
+      `the transaction cannot be read offline (${(error as Error).message}): ` +
+        "pass its instructions and fee payer"
+    );
+  }
+  return { instructions: decompiled.instructions, feePayer: decompiled.payerKey };
+}
+
 /**
  * Verify every signature of an assembled transaction's first `advance`, as
  * the program would: it recomputes the message from the transaction as it
  * stands, then each signer's digest from the nonce its account holds. This is
  * what a relayer checks before it pays the fee.
  *
- * `transaction` is a `Transaction`, its serialized bytes, or its instructions;
- * `feePayer` is read from a transaction, and otherwise given. `vectors` and
+ * `transaction` is a V1 (or legacy) `VersionedTransaction`, a legacy
+ * `Transaction`, the serialized bytes of either, or its instructions;
+ * `feePayer` is read from a transaction, and otherwise given. A v0
+ * transaction with address lookup tables cannot be read offline: pass its
+ * instructions and fee payer. `vectors` and
  * `nonceAccounts` are what the `advance` lists, with their nonces as the
  * chain holds them (an account the `advance` lists that is in neither is an
  * error). A nonce account is read as belonging to the vector listed just
@@ -221,19 +252,16 @@ export type VerifiedAdvance = {
  * come back not `ok`.
  */
 export function verifyAdvanceTransaction(params: {
-  transaction: Transaction | Uint8Array | TransactionInstruction[];
+  transaction: VersionedTransaction | Transaction | Uint8Array | TransactionInstruction[];
   vectors: VectorState[];
   nonceAccounts?: NonceAccountState[];
   feePayer?: PublicKey;
   slot?: bigint | number;
 }): VerifiedAdvance {
   const { vectors, nonceAccounts = [], slot } = params;
-  const parsed =
-    params.transaction instanceof Uint8Array
-      ? Transaction.from(params.transaction)
-      : params.transaction;
-  const instructions = Array.isArray(parsed) ? parsed : parsed.instructions;
-  const feePayer = params.feePayer ?? (Array.isArray(parsed) ? undefined : parsed.feePayer);
+  const read = readTransaction(params.transaction);
+  const instructions = read.instructions;
+  const feePayer = params.feePayer ?? read.feePayer;
 
   const advanceIndex = instructions.findIndex(
     (ix) => ix.programId.equals(PROGRAM_ID) && ix.data[0] === ADVANCE_DISCRIMINATOR

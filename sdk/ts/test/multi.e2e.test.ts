@@ -11,10 +11,7 @@ import {
   Connection,
   Keypair,
   SystemProgram,
-  Transaction,
   TransactionInstruction,
-  ComputeBudgetProgram,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   ED25519,
@@ -81,21 +78,21 @@ describe("vector-multi", () => {
   test("initialize three vectors and a nonce account", async () => {
     await sendTx(
       connection,
-      new Transaction().add(
+      [
         createInitializeEd25519(feePayer.publicKey, ALICE),
         createInitializeSecp256k1(feePayer.publicKey, BOB),
         createInitializeEip191(feePayer.publicKey, CAROL),
         ...[alicePda, bobPda].map((toPubkey) =>
           SystemProgram.transfer({ fromPubkey: feePayer.publicKey, toPubkey, lamports: 5_000_000 })
         )
-      ),
+      ],
       [feePayer]
     );
 
     const rent = await connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_LEN);
     await sendTx(
       connection,
-      new Transaction().add(
+      [
         SystemProgram.createAccount({
           fromPubkey: feePayer.publicKey,
           newAccountPubkey: nonceAccount.publicKey,
@@ -104,7 +101,7 @@ describe("vector-multi", () => {
           programId: PROGRAM_ID,
         }),
         createInitializeNonceInstruction(nonceAccount.publicKey, alicePda)
-      ),
+      ],
       [feePayer, nonceAccount]
     );
     const nonce = await fetchNonceAccount(connection, nonceAccount.publicKey);
@@ -173,7 +170,7 @@ describe("vector-multi", () => {
     const balance = async (address: PublicKey) =>
       Number((await connection.getAccountInfo(address))!.lamports);
     const [aliceBefore, bobBefore] = [await balance(alicePda), await balance(bobPda)];
-    await sendTx(connection, new Transaction().add(...transaction), [feePayer]);
+    await sendTx(connection, [...transaction], [feePayer]);
 
     // Alice's signature moved her nonce account, not her vector.
     expect((await fetchNonceAccount(connection, nonceAccount.publicKey)).nonce).toEqual(
@@ -187,7 +184,7 @@ describe("vector-multi", () => {
 
     // Sent again, every signature is over a nonce that moved.
     await expect(
-      sendAndConfirmTransaction(connection, new Transaction().add(...transaction), [feePayer])
+      sendTx(connection, [...transaction], [feePayer])
     ).rejects.toThrow();
     const stale = verifyAdvanceTransaction({
       transaction,
@@ -202,65 +199,51 @@ describe("vector-multi", () => {
     expect(stale.signers.map((s) => s.ok)).toEqual([false, false, false]);
   });
 
-  // Falcon-512 verifies in about 170K CU and plain secp256k1 is plain-Rust
-  // curve math, so with both the `advance` can pass the 200K a legacy
-  // transaction gives an instruction by default. A `SetComputeUnitLimit`
-  // before it raises that, and the message covers it like any instruction.
-  test("Falcon-512 with other signers and the compute budget", async () => {
-    await sendTx(
-      connection,
-      new Transaction().add(createInitializeFalcon512(feePayer.publicKey, DAVE)),
-      [feePayer]
-    );
+  // A V1 transaction's compute limit is in its message, not an instruction:
+  // no signer signs it, so the same signatures land under any limit that
+  // covers them. Ed25519, secp256k1 and Falcon-512 take about 257K.
+  test("Falcon-512 with other signers: the compute limit is not signed", async () => {
+    await sendTx(connection, [createInitializeFalcon512(feePayer.publicKey, DAVE)], [feePayer]);
     const [davePda] = findVectorPda(FALCON512, DAVE);
-    const sign = async (pre: TransactionInstruction[]) => {
-      const [alice, bob, dave] = await Promise.all([
-        fetchVectorAccount(connection, ED25519, ALICE),
-        fetchVectorAccount(connection, SECP256K1, BOB),
-        fetchVectorAccount(connection, FALCON512, DAVE),
-      ]);
-      const signers: AdvanceSigner[] = [
-        { scheme: ED25519, identity: ALICE },
-        { scheme: SECP256K1, identity: BOB },
-        { scheme: FALCON512, identity: DAVE },
-      ];
-      const message = advanceMessage(signers, pre, [], feePayer.publicKey);
-      const digests = [
-        signerDigest(message, alice.nonce, alicePda),
-        signerDigest(message, bob.nonce, bobPda),
-        signerDigest(message, dave.nonce, davePda),
-      ];
-      const advance = createMultiAdvanceInstruction([
-        { ...signers[0], signature: signDigestEd25519(ALICE_KEY, digests[0]) },
-        { ...signers[1], signature: signDigestSecp256k1(BOB_KEY, digests[1]) },
-        { ...signers[2], signature: signDigestFalcon512(DAVE_KP, digests[2]) },
-      ]);
-      return { transaction: new Transaction().add(...pre, advance), daveDigest: digests[2] };
-    };
+    const [alice, bob, dave] = await Promise.all([
+      fetchVectorAccount(connection, ED25519, ALICE),
+      fetchVectorAccount(connection, SECP256K1, BOB),
+      fetchVectorAccount(connection, FALCON512, DAVE),
+    ]);
+    const signers: AdvanceSigner[] = [
+      { scheme: ED25519, identity: ALICE },
+      { scheme: SECP256K1, identity: BOB },
+      { scheme: FALCON512, identity: DAVE },
+    ];
+    const message = advanceMessage(signers, [], [], feePayer.publicKey);
+    const digests = [
+      signerDigest(message, alice.nonce, alicePda),
+      signerDigest(message, bob.nonce, bobPda),
+      signerDigest(message, dave.nonce, davePda),
+    ];
+    const advance = createMultiAdvanceInstruction([
+      { ...signers[0], signature: signDigestEd25519(ALICE_KEY, digests[0]) },
+      { ...signers[1], signature: signDigestSecp256k1(BOB_KEY, digests[1]) },
+      { ...signers[2], signature: signDigestFalcon512(DAVE_KP, digests[2]) },
+    ]);
 
-    const budgeted = await sign([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })]);
-    const signature = await sendTx(connection, budgeted.transaction, [feePayer]);
-    expect((await fetchVectorAccount(connection, FALCON512, DAVE)).nonce).toEqual(
-      budgeted.daveDigest
-    );
+    // Too little: it fails, and nothing moves.
+    await expect(
+      sendTx(connection, [advance], [feePayer], { computeUnitLimit: 200_000 })
+    ).rejects.toThrow();
+    expect((await fetchVectorAccount(connection, FALCON512, DAVE)).nonce).toEqual(dave.nonce);
+
+    // The same advance, with room: it lands.
+    const signature = await sendTx(connection, [advance], [feePayer], {
+      computeUnitLimit: 400_000,
+    });
+    expect((await fetchVectorAccount(connection, FALCON512, DAVE)).nonce).toEqual(digests[2]);
     const landed = await connection.getTransaction(signature, {
       commitment: "confirmed",
       maxSupportedTransactionVersion: 1,
     });
     const units = Number(landed!.meta!.computeUnitsConsumed);
-    console.log(`Ed25519 + secp256k1 + Falcon-512 advance: ${units} CU`);
-
-    // Without the budget, the same signers fail exactly when they need more
-    // than the default, and nothing moves.
-    const unbudgeted = await sign([]);
-    const sent = sendAndConfirmTransaction(connection, unbudgeted.transaction, [feePayer]);
-    if (units > 200_000) {
-      await expect(sent).rejects.toThrow();
-      expect((await fetchVectorAccount(connection, FALCON512, DAVE)).nonce).toEqual(
-        budgeted.daveDigest
-      );
-    } else {
-      await sent;
-    }
+    expect(units).toBeGreaterThan(200_000);
+    expect(units).toBeLessThan(400_000);
   });
 });

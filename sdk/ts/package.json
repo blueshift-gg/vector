@@ -13,6 +13,7 @@
     "./instructions": { "types": "./dist/instructions.d.ts", "import": "./dist/instructions.js" },
     "./digest": { "types": "./dist/digest.d.ts", "import": "./dist/digest.js" },
     "./verify": { "types": "./dist/verify.d.ts", "import": "./dist/verify.js" },
+    "./transaction": { "types": "./dist/transaction.d.ts", "import": "./dist/transaction.js" },
     "./ed25519": { "types": "./dist/schemes/ed25519.d.ts", "import": "./dist/schemes/ed25519.js" },
     "./eip191": { "types": "./dist/schemes/eip191.d.ts", "import": "./dist/schemes/eip191.js" },
     "./secp256k1": { "types": "./dist/schemes/secp256k1.d.ts", "import": "./dist/schemes/secp256k1.js" },
