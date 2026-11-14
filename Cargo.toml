@@ -32,7 +32,7 @@ pinocchio-system = "0.6.1"
 brine-ed25519 = { version = "0.7.0", features = ["fast-sha512"] }
 solana-falcon512 = "0.2.1"
 solana-ml-dsa = "0.1.0"
-solana-winternitz = { git = "https://github.com/blueshift-gg/solana-winternitz", rev = "d6c381a46929d2f8973619f38b66d79058c39b5a", default-features = false }
+solana-winternitz = { version = "0.2.0", default-features = false }
 solana-secp256k1 = "0.2.1"
 solana-secp256k1-ecdsa = { version = "0.2.0", default-features = false, features = ["sha256"] }
 [profile.release]
