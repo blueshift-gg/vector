@@ -7,7 +7,7 @@ use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
 use solana_winternitz::hazmat::{self, OneTime, SigningKey};
 use solana_xmss as xmss;
-use vector_signer_sdk::{
+use vector_signer::{
     advance_message, create_close_subinstruction, create_multi_advance_instruction,
     create_passthrough_instruction, create_rotating_advance_instruction,
     create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, signer_digest,
@@ -377,7 +377,7 @@ fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
 /// the one that named it.
 #[test]
 fn a_rotated_key_verifies_against_the_key_the_account_holds_now() {
-    use vector_signer_sdk::{verify_advance, AdvanceEntry, SignerNonce, VerifyError};
+    use vector_signer::{verify_advance, AdvanceEntry, SignerNonce, VerifyError};
 
     let directory = tempfile::tempdir().unwrap();
     let first = SigningKey::<hazmat::SecretKey>::create(directory.path().join("1.key")).unwrap();

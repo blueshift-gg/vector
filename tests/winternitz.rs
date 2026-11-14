@@ -8,7 +8,7 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
 use solana_winternitz::{self as winternitz, hazmat};
-use vector_signer_sdk::{
+use vector_signer::{
     create_close_subinstruction, create_initialize_winternitz, create_passthrough_instruction,
     create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
     rotating_advance_vector_digest, PROGRAM_ID, WINTERNITZ,
@@ -75,8 +75,8 @@ fn initialize_and_client_encoding() {
         .unwrap()
         .1
         .data;
-    assert_eq!(&stored[32..64], &vector_signer_sdk::vector_seed(&identity));
-    let (_, system_bump) = vector_signer_sdk::find_system_pda(&vector);
+    assert_eq!(&stored[32..64], &vector_signer::vector_seed(&identity));
+    let (_, system_bump) = vector_signer::find_system_pda(&vector);
     assert_eq!(stored[72..76], [WINTERNITZ.id, bump, system_bump, 0]);
     assert_eq!(&stored[76..], &public_key);
 
@@ -87,7 +87,7 @@ fn initialize_and_client_encoding() {
             &[
                 b"vector",
                 &[WINTERNITZ.id],
-                &vector_signer_sdk::vector_seed(&key),
+                &vector_signer::vector_seed(&key),
             ],
             &PROGRAM_ID,
         );

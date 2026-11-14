@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_winternitz::hazmat;
-use vector_signer_sdk::{
+use vector_signer::{
     advance_message, advance_vector_digest, create_multi_advance_instruction,
     create_passthrough_instruction, create_withdraw_subinstruction, ed25519_pubkey,
     eip191_envelope_hash, find_system_pda, find_vector_pda, rotating_advance_vector_digest,

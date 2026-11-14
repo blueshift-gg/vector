@@ -11,7 +11,7 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_xmss::hazmat::SecretKey;
-use vector_signer_sdk::{
+use vector_signer::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, signed, signed_nonce,
     signer_digest, AdvanceSigner, ED25519, NEVER_EXPIRES, PROGRAM_ID, XMSS,

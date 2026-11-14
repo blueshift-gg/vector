@@ -4,7 +4,7 @@ use pinocchio::sysvars::{clock::Clock, Sysvar};
 
 use crate::{
     error::VectorError,
-    state::{NonceAccount, VectorAccount},
+    state::{NonceAccount, NonceAccountExt as _, VectorAccount, VectorAccountExt as _},
 };
 
 /// # Close
@@ -82,7 +82,7 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for Close<'a> {
 }
 
 impl<'a> Close<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &4;
+    pub const DISCRIMINATOR: &'a u8 = &vector_signer::CLOSE_DISCRIMINATOR;
 
     pub fn process(&mut self) -> ProgramResult {
         let lamports = self

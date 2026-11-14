@@ -9,7 +9,7 @@ use pqcrypto_falcon::falcon512 as pq_falcon;
 use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
 use solana_address::Address;
 use solana_instruction::{AccountMeta, Instruction};
-use vector_signer_sdk::{
+use vector_signer::{
     advance_vector_digest, ed25519_pubkey, revocation_digest, secp256k1_compressed_pubkey,
     secp256k1_eip191_eth_address, sign_advance_instruction_ed25519,
     sign_advance_instruction_secp256k1_ecdsa, sign_advance_instruction_secp256k1_eip191,
@@ -320,7 +320,7 @@ fn revocation_round_trip_and_cross_language_pin() {
 mod multi {
     use super::*;
     use sha2::{Digest, Sha256};
-    use vector_signer_sdk::{
+    use vector_signer::{
         advance_message, create_multi_advance_instruction, find_vector_pda, signed_nonce,
         signer_digest, verify_advance, AdvanceEntry, SignerNonce, NEVER_EXPIRES,
     };

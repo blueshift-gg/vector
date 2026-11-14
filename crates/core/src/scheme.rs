@@ -1,70 +1,205 @@
-//! The scheme/program/account primitives shared by every scheme: the
-//! [`Scheme`] descriptor, the program's [`VectorAccount`] header, and
-//! canonical PDA derivation. Per-scheme details (identity derivation,
-//! signing, init builders) live in [`crate::schemes`].
+//! The contract a signing scheme satisfies. Everything else in the program
+//! is the same for every scheme and only reaches a scheme through this.
 
-use sha2::{Digest as Sha2Digest, Sha256};
-use solana_address::{address, Address};
+use core::mem::{align_of, size_of};
 
-/// The program's own errors, as `ProgramError::Custom`.
-pub use vector::error::VectorError;
-/// What a key signs, and how an `Advance` expires: `"vector:" || digest`.
-pub use vector::scheme::{signed, NEVER_EXPIRES, SIGNED_LEN, SIGNED_PREFIX, VALID_UNTIL_LEN};
-/// A nonce account, as the program defines it.
-pub use vector::state::NonceAccount;
-/// The account header, as the program defines it.
-pub use vector::state::VectorAccount;
-/// The Vector program: one program for every signing scheme.
-pub use vector::ID as PROGRAM_ID;
-pub const SYSTEM_PROGRAM_ID: Address = address!("11111111111111111111111111111111");
-pub const INSTRUCTIONS_SYSVAR_ID: Address = address!("Sysvar1nstructions1111111111111111111111111");
+use pinocchio::{error::ProgramError, ProgramResult};
+use solana_nostd_sha256::hashv;
 
-pub const INITIALIZE_DISCRIMINATOR: u8 = *vector::Initialize::DISCRIMINATOR;
-pub const ADVANCE_DISCRIMINATOR: u8 = *vector::Advance::DISCRIMINATOR;
-pub const CLOSE_DISCRIMINATOR: u8 = *vector::Close::DISCRIMINATOR;
-pub const WITHDRAW_DISCRIMINATOR: u8 = *vector::Withdraw::DISCRIMINATOR;
-pub const PASSTHROUGH_DISCRIMINATOR: u8 = *vector::Passthrough::DISCRIMINATOR;
-pub const INITIALIZE_NONCE_DISCRIMINATOR: u8 = *vector::InitializeNonce::DISCRIMINATOR;
+use crate::state::VectorAccount;
 
-pub use vector::state::{NONCE_TAG, VECTOR_SEED as VECTOR_PDA_SEED};
+/// What every signature starts with. A key signs `vector:` and then the
+/// digest, never the digest alone, so a signature made for some other
+/// purpose over 32 bytes (a login challenge, say) is not an authorization.
+pub const SIGNED_PREFIX: &[u8; 7] = b"vector:";
 
-/// Everything a client needs to use one signing scheme: its scheme byte and
-/// lengths, as the program defines them. The concrete instances live in
-/// [`crate::schemes`].
-pub use vector::scheme::Scheme;
+/// Length of [`signed`]: the prefix, then the digest.
+pub const SIGNED_LEN: usize = SIGNED_PREFIX.len() + 32;
 
-/// The PDA seed for an identity: its SHA-256, for every scheme.
-pub fn vector_seed(identity: &[u8]) -> [u8; 32] {
-    Sha256::digest(identity).into()
+/// What a key signs for `digest`: `"vector:" || digest`. A scheme that signs a
+/// fixed 32 bytes signs its SHA-256.
+pub fn signed(digest: &[u8; 32]) -> [u8; SIGNED_LEN] {
+    let mut signed = [0; SIGNED_LEN];
+    signed[..SIGNED_PREFIX.len()].copy_from_slice(SIGNED_PREFIX);
+    signed[SIGNED_PREFIX.len()..].copy_from_slice(digest);
+    signed
 }
 
-/// Derive the canonical `(vector_pda, bump)` for a scheme + identity.
-/// Seeds: `["vector", [scheme], sha256(identity)]`.
-pub fn find_vector_pda(scheme: &Scheme, identity: &[u8]) -> (Address, u8) {
-    assert_eq!(
-        identity.len(),
-        scheme.identity_len,
-        "identity length mismatch"
-    );
-    Address::find_program_address(
-        &[VECTOR_PDA_SEED, &[scheme.id], &vector_seed(identity)],
-        &PROGRAM_ID,
-    )
+/// Length of the expiry that starts `Advance` data: a slot (u64 LE).
+pub const VALID_UNTIL_LEN: usize = 8;
+
+/// A `valid_until` that never expires.
+pub const NEVER_EXPIRES: u64 = u64::MAX;
+
+/// One signing scheme, implemented by the identity it stores in an account:
+/// a struct holding the signer's key in whatever form the scheme verifies
+/// against. Implementations live in [`crate::schemes`], one file each.
+///
+/// Every length is the size of a type, so it is a constant everywhere.
+///
+/// # Safety
+///
+/// `Self`, `Key`, `Signature` and `NextKey` are read in place from bytes.
+/// Each must have alignment 1, no padding and no invalid bit patterns: a
+/// byte array, or a `repr(C)` or `repr(transparent)` struct of them.
+pub unsafe trait SigningScheme: Sized {
+    /// The scheme byte: in the account header, and a seed of its address.
+    const ID: u8;
+
+    /// The key `Initialize` takes, which names the account for good.
+    type Key;
+
+    /// A signature in `Advance` data.
+    type Signature;
+
+    /// The key `Advance` carries for the account to sign with next: `[u8; 0]`
+    /// for a scheme whose key never changes.
+    type NextKey;
+
+    /// `Initialize`: validate `key` and write the identity. The buffer is
+    /// shorter than `Self` when the account could not be created at full
+    /// size; [`grow`](Self::grow) then finishes the job.
+    fn initialize(key: &Self::Key, identity: &mut [u8]) -> Result<(), ProgramError>;
+
+    /// A later `Initialize`: the account grew, and `identity` was `from`
+    /// bytes long before. Fill in what fits now. Default: the scheme's
+    /// account is created whole, so it never grows.
+    fn grow(_identity: &mut [u8], _from: usize) -> Result<(), ProgramError> {
+        Err(ProgramError::InvalidInstructionData)
+    }
+
+    /// `Advance`: verify `signature` over `signed`, which is `"vector:" ||
+    /// digest`, then take `next_key`, which the digest covers.
+    fn advance(
+        &mut self,
+        signed: &[u8; SIGNED_LEN],
+        signature: &Self::Signature,
+        next_key: &Self::NextKey,
+    ) -> Result<(), ProgramError>;
 }
 
-/// What a signature over a nonce account is over, in place of a nonce:
-/// `SHA256(nonce account's nonce || vector's own nonce)`. Moving the vector's
-/// own nonce changes it for every nonce account of the vector.
-pub fn signed_nonce(nonce_account_nonce: &[u8; 32], vector_nonce: &[u8; 32]) -> [u8; 32] {
-    Sha256::new()
-        .chain_update(nonce_account_nonce)
-        .chain_update(vector_nonce)
-        .finalize()
-        .into()
+/// One account's part of `Advance`, for its scheme: take its next key and
+/// signature off the front of `data`, verify the signature over
+/// `"vector:" || digest` with
+/// `digest = SHA256(message || nonce || address || next_key)`, and move
+/// `nonce` to that digest. The message covers the expiry, which `Advance`
+/// checks once.
+pub type Advance = fn(
+    identity: &mut [u8],
+    nonce: &mut [u8; 32],
+    message: &[u8; 32],
+    address: &[u8; 32],
+    data: &mut &[u8],
+) -> ProgramResult;
+
+/// A [`SigningScheme`] as the program picks it, by the byte in an account's
+/// header: its lengths, and its operations on bytes.
+#[derive(Clone, Copy, Debug)]
+pub struct Scheme {
+    /// [`SigningScheme::ID`].
+    pub id: u8,
+    /// Length of [`SigningScheme::Key`]: the identity a client names the
+    /// account by.
+    pub identity_len: usize,
+    /// Bytes the account stores after its header: the size of the scheme.
+    pub stored_identity_len: usize,
+    /// The account's whole length: the header, then the stored identity.
+    pub account_len: usize,
+    /// Length of [`SigningScheme::Signature`].
+    pub signature_len: usize,
+    /// Length of [`SigningScheme::NextKey`].
+    pub next_key_len: usize,
+    /// [`SigningScheme::initialize`], on the key's bytes.
+    pub initialize: fn(&[u8], &mut [u8]) -> ProgramResult,
+    /// [`SigningScheme::grow`].
+    pub grow: fn(&mut [u8], usize) -> ProgramResult,
+    /// [`SigningScheme::advance`], with the digest it verifies.
+    pub advance: Advance,
 }
 
-/// Derive the vector account's system PDA, `[vector]`, and its bump. It
-/// belongs to the System program; a passthrough can sign as it.
-pub fn find_system_pda(vector: &Address) -> (Address, u8) {
-    Address::find_program_address(&[vector.as_ref()], &PROGRAM_ID)
+impl Scheme {
+    pub const fn of<T: SigningScheme>() -> Self {
+        Self {
+            id: T::ID,
+            identity_len: size_of::<T::Key>(),
+            stored_identity_len: size_of::<T>(),
+            account_len: VectorAccount::HEADER_LEN + size_of::<T>(),
+            signature_len: size_of::<T::Signature>(),
+            next_key_len: size_of::<T::NextKey>(),
+            initialize: initialize::<T>,
+            grow: T::grow,
+            advance: advance::<T>,
+        }
+    }
+}
+
+fn initialize<T: SigningScheme>(key: &[u8], identity: &mut [u8]) -> ProgramResult {
+    // SAFETY: `SigningScheme` promises `Key` is plain bytes.
+    let key = unsafe { cast(key) }.ok_or(ProgramError::InvalidInstructionData)?;
+    T::initialize(key, identity)
+}
+
+fn advance<T: SigningScheme>(
+    identity: &mut [u8],
+    nonce: &mut [u8; 32],
+    message: &[u8; 32],
+    address: &[u8; 32],
+    data: &mut &[u8],
+) -> ProgramResult {
+    // SAFETY, each cast: `SigningScheme` promises these types are plain
+    // bytes.
+    let identity = unsafe { cast_mut::<T>(identity) }.ok_or(ProgramError::AccountDataTooSmall)?;
+    let next_key = take(data, size_of::<T::NextKey>())?;
+    let signature = take(data, size_of::<T::Signature>())?;
+
+    let digest = hashv(&[message, nonce, address, next_key]);
+    identity.advance(
+        &signed(&digest),
+        unsafe { cast(signature) }.ok_or(ProgramError::InvalidInstructionData)?,
+        unsafe { cast(next_key) }.ok_or(ProgramError::InvalidInstructionData)?,
+    )?;
+    *nonce = digest;
+    Ok(())
+}
+
+/// Take the next `len` bytes off the front of `data`.
+fn take<'a>(data: &mut &'a [u8], len: usize) -> Result<&'a [u8], ProgramError> {
+    let (bytes, rest) = data
+        .split_at_checked(len)
+        .ok_or(ProgramError::InvalidInstructionData)?;
+    *data = rest;
+    Ok(bytes)
+}
+
+/// Write `bytes` to the front of `identity`, for `initialize`.
+pub fn write<const N: usize>(identity: &mut [u8], bytes: &[u8; N]) -> ProgramResult {
+    *identity
+        .first_chunk_mut()
+        .ok_or(ProgramError::AccountDataTooSmall)? = *bytes;
+    Ok(())
+}
+
+/// `bytes` as a `U`, if they are exactly as long.
+///
+/// # Safety
+///
+/// Every bit pattern of `U`'s size must be a `U`.
+#[doc(hidden)]
+pub unsafe fn cast<U>(bytes: &[u8]) -> Option<&U> {
+    const { assert!(align_of::<U>() == 1) };
+    // SAFETY: the length is `U`'s, its alignment is 1, and the caller
+    // promises the bits are a `U`.
+    (bytes.len() == size_of::<U>()).then(|| unsafe { &*bytes.as_ptr().cast::<U>() })
+}
+
+/// [`cast`], mutably.
+///
+/// # Safety
+///
+/// As [`cast`].
+#[doc(hidden)]
+pub unsafe fn cast_mut<U>(bytes: &mut [u8]) -> Option<&mut U> {
+    const { assert!(align_of::<U>() == 1) };
+    // SAFETY: as in `cast`.
+    (bytes.len() == size_of::<U>()).then(|| unsafe { &mut *bytes.as_mut_ptr().cast::<U>() })
 }

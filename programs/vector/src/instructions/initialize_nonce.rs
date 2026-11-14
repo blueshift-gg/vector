@@ -2,7 +2,7 @@ use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 
 use crate::{
     error::VectorError,
-    state::{NonceAccount, VectorAccount},
+    state::{NonceAccount, NonceAccountExt as _, VectorAccount, VectorAccountExt as _},
 };
 
 /// # InitializeNonce
@@ -67,10 +67,10 @@ impl<'a> TryFrom<(&'a [u8], &'a mut [AccountView])> for InitializeNonce<'a> {
 }
 
 impl<'a> InitializeNonce<'a> {
-    pub const DISCRIMINATOR: &'a u8 = &5;
+    pub const DISCRIMINATOR: &'a u8 = &vector_signer::INITIALIZE_NONCE_DISCRIMINATOR;
 
     pub fn process(&mut self) -> ProgramResult {
-        let new = NonceAccount::new(&self.nonce.address().to_bytes(), self.vector)?;
+        let new = NonceAccount::create(&self.nonce.address().to_bytes(), self.vector)?;
         let mut account = NonceAccount::load(self.nonce)?;
         // A vector address is never zero, so a zero one is a new account.
         if account.vector != [0; 32] {

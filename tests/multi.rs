@@ -11,7 +11,7 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
-use vector_signer_sdk::{
+use vector_signer::{
     advance_message, create_multi_advance_instruction, create_passthrough_instruction,
     create_withdraw_subinstruction, ed25519_pubkey, find_vector_pda, secp256k1_compressed_pubkey,
     sign_advance_instruction_ed25519, signer_digest, AdvanceSigner, Scheme, VectorError, ED25519,
@@ -95,7 +95,7 @@ impl World {
         let bob_digest = signer_digest(&message, &NONCE, &find_vector_pda(&SECP256K1, &bob).0, &[]);
         let alice_signature = self
             .alice
-            .sign(&vector_signer_sdk::signed(&alice_digest))
+            .sign(&vector_signer::signed(&alice_digest))
             .to_bytes();
         let bob_signature: Secp256k1Signature = self
             .bob
@@ -136,8 +136,8 @@ impl World {
         for meta in transaction.iter().flat_map(|ix| &ix.accounts) {
             let known = accounts.iter().any(|(key, _)| *key == meta.pubkey);
             let builtin = [
-                vector_signer_sdk::INSTRUCTIONS_SYSVAR_ID,
-                vector_signer_sdk::PROGRAM_ID,
+                vector_signer::INSTRUCTIONS_SYSVAR_ID,
+                vector_signer::PROGRAM_ID,
             ];
             if !known && !builtin.contains(&meta.pubkey) {
                 accounts.push((meta.pubkey, Account::default()));
@@ -215,8 +215,8 @@ fn every_change_to_the_transaction_is_rejected() {
             // instruction, and the runtime ignores it for sysvars and programs.
             let key = transaction[i].accounts[account].pubkey;
             if ![
-                vector_signer_sdk::INSTRUCTIONS_SYSVAR_ID,
-                vector_signer_sdk::PROGRAM_ID,
+                vector_signer::INSTRUCTIONS_SYSVAR_ID,
+                vector_signer::PROGRAM_ID,
             ]
             .contains(&key)
             {

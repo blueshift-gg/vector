@@ -1,25 +1,56 @@
 [package]
-name = "vector-signer-sdk"
+name = "vector-signer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Client-side helpers for building Vector program instructions"
+repository = "https://github.com/blueshift-gg/vector"
+description = "Vector's signing schemes, account layout and instruction format, and client helpers to build and sign its instructions"
+
+[features]
+default = ["client"]
+# Host-side helpers: instruction builders, signers, digests and the offline
+# verifier. The program builds this crate without it, `no_std`.
+client = [
+    "dep:solana-instruction",
+    "dep:solana-instructions-sysvar",
+    "dep:ed25519-dalek",
+    "dep:sha2",
+    "dep:k256",
+    "dep:sha3",
+]
 
 [dependencies]
-# The program itself, as a library: its ID, header, discriminators and each
-# scheme's stored identity.
-vector = { path = "../../programs/vector", features = ["no-entrypoint"] }
+# The schemes, as the program runs them.
 pinocchio = { workspace = true }
 solana-address = { workspace = true, features = ["curve25519", "decode"] }
-solana-instruction = { workspace = true }
-solana-instructions-sysvar = "3.0.0"
-ed25519-dalek = "=2.1.1"
-sha2 = "0.10"
-k256 = { version = "0.13", features = ["ecdsa"] }
-sha3 = "0.10"
+brine-ed25519 = { workspace = true }
+solana-falcon512 = { workspace = true }
+solana-ml-dsa = { workspace = true }
+solana-nostd-keccak = { workspace = true }
+solana-nostd-sha256 = { workspace = true }
+solana-secp256k1 = { workspace = true }
+solana-secp256k1-ecdsa = { workspace = true }
+solana-winternitz = { workspace = true }
+solana-xmss = { workspace = true }
+
+# Client.
+solana-instruction = { workspace = true, optional = true }
+solana-instructions-sysvar = { version = "3.0.0", optional = true }
+ed25519-dalek = { version = "=2.1.1", optional = true }
+sha2 = { version = "0.10", optional = true }
+k256 = { version = "0.13", features = ["ecdsa"], optional = true }
+sha3 = { version = "0.10", optional = true }
+
+# Off chain, `sol_secp256k1_recover` as the runtime runs it, so the offline
+# check is the program's own.
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+libsecp256k1 = { version = "0.7.2", default-features = false, features = ["static-context"] }
 
 [dev-dependencies]
-# Falcon signer for the verify round-trip tests (already in the workspace
-# tree via `vector-tests`; the program's Falcon-512 is verify-only).
+# Falcon signer for the verify round-trip tests (Falcon-512 here is
+# verify-only).
 pqcrypto-falcon = "0.4"
 pqcrypto-traits = "0.3"
+
+[lints]
+workspace = true
