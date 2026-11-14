@@ -1,0 +1,39 @@
+{
+  "name": "@blueshift-gg/vector",
+  "version": "2.0.0",
+  "description": "TypeScript SDK for Vector: Solana accounts controlled by Ed25519, secp256k1, EIP-191, Falcon-512, ML-DSA-44, Winternitz or XMSS keys",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./scheme": { "types": "./dist/scheme.d.ts", "import": "./dist/scheme.js" },
+    "./instructions": { "types": "./dist/instructions.d.ts", "import": "./dist/instructions.js" },
+    "./digest": { "types": "./dist/digest.d.ts", "import": "./dist/digest.js" },
+    "./verify": { "types": "./dist/verify.d.ts", "import": "./dist/verify.js" },
+    "./transaction": { "types": "./dist/transaction.d.ts", "import": "./dist/transaction.js" },
+    "./ed25519": { "types": "./dist/schemes/ed25519.d.ts", "import": "./dist/schemes/ed25519.js" },
+    "./eip191": { "types": "./dist/schemes/eip191.d.ts", "import": "./dist/schemes/eip191.js" },
+    "./secp256k1": { "types": "./dist/schemes/secp256k1.d.ts", "import": "./dist/schemes/secp256k1.js" },
+    "./falcon512": { "types": "./dist/schemes/falcon512.d.ts", "import": "./dist/schemes/falcon512.js" },
+    "./mldsa44": { "types": "./dist/schemes/mldsa44.d.ts", "import": "./dist/schemes/mldsa44.js" },
+    "./winternitz": { "types": "./dist/schemes/winternitz.d.ts", "import": "./dist/schemes/winternitz.js" },
+    "./xmss": { "types": "./dist/schemes/xmss.d.ts", "import": "./dist/schemes/xmss.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.0",
+    "@noble/hashes": "^1.7.0",
+    "@noble/post-quantum": "^0.6.1"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": "^3.2.1"
+  }
+}

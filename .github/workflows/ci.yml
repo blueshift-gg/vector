@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # What `bun run validator` and the build need: SIMD-0385 (V1 transactions,
+  # for ML-DSA-44) needs Agave 4.2.2 or later.
+  AGAVE_VERSION: v4.4.1
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+  sdk:
+    name: TypeScript SDK (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.23
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+
+  program:
+    name: program, Rust tests, e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Agave
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/$AGAVE_VERSION/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      # A frame over 4 KiB is only a build warning, and Mollusk runs without
+      # the stack gaps that turn it into an access violation on a validator,
+      # so fail on the warning. v0: some dependencies call syscalls the
+      # dynamic way, which a v3 build does not link.
+      - name: build-sbf (v0, no frame overflow)
+        run: |
+          set -o pipefail
+          cargo build-sbf --arch v0 --manifest-path programs/vector/Cargo.toml 2>&1 | tee build.log
+          ! grep -q 'overflows the maximum allowed frame space' build.log
+      - run: cargo test --locked --workspace
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.23
+      - run: bun install --frozen-lockfile
+      - name: e2e against a local validator
+        run: |
+          bun run validator > validator.log 2>&1 &
+          for _ in $(seq 1 90); do
+            solana -u localhost cluster-version > /dev/null 2>&1 && break
+            sleep 2
+          done
+          solana -u localhost cluster-version
+          bun run test:e2e
+      - if: failure()
+        run: tail -n 100 validator.log || true

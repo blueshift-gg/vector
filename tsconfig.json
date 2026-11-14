@@ -3,13 +3,12 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "declaration": true,
-    "outDir": "sdk/ts/dist",
-    "rootDir": "sdk/ts/src",
+    "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
   },
-  "include": ["sdk/ts/src"]
+  "include": ["sdk/ts/src", "sdk/ts/test", "vitest.config.ts"]
 }

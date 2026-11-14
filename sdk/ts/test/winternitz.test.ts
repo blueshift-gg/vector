@@ -1,49 +1,57 @@
 import { expect, test } from "vitest";
-import { Address } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import {
   WINTERNITZ,
-  advanceVectorDigest,
+  createAdvanceInstruction,
+  createRotatingAdvanceInstruction,
+  rotatingAdvanceVectorDigest,
   createInitializeWinternitz,
   createPassthroughInstruction,
-  createRotateSubinstruction,
   createCloseSubinstruction,
   findVectorPda,
-  winternitzIdentity,
   vectorAccountLen,
 } from "../src/index.js";
 
 test("Winternitz account and rotation digest match Rust", () => {
-  // Shared with tests/winternitz.rs; pins the 849-byte signature carve-out.
+  // Shared with tests/winternitz.rs; pins the 849-byte signature.
   const publicKey = Uint8Array.from({ length: 41 }, (_, i) => i);
-  const identity = winternitzIdentity(publicKey);
-  const receiver = new Address(new Uint8Array(32).fill(9));
+  const identity = publicKey;
+  const receiver = new PublicKey(new Uint8Array(32).fill(9));
   const [pda, bump] = findVectorPda(WINTERNITZ, identity);
-  expect(pda.toString()).toBe("8DgkUyaVWAvj24nWMEdFec11GfzhZ5CpoAFwdojVmt9R");
+  expect(pda.toString()).toBe("Er2fQZXAf3ZoVHiDQAgJGReN5qUz2oh6t8qfU3GGSb9Y");
   expect(bump).toBe(255);
-  expect(vectorAccountLen(WINTERNITZ)).toBe(106);
+  expect(vectorAccountLen(WINTERNITZ)).toBe(117);
 
   const initialize = createInitializeWinternitz(receiver, publicKey);
   expect(initialize.keys[1].pubkey.toString()).toBe(pda.toString());
-  expect(Array.from(initialize.data)).toEqual([0, ...publicKey]);
+  expect(Array.from(initialize.data)).toEqual([2, WINTERNITZ.id, ...publicKey]);
   for (const length of [40, 42]) {
     expect(() => createInitializeWinternitz(receiver, new Uint8Array(length))).toThrow();
   }
 
-  expect(() => findVectorPda(WINTERNITZ, publicKey)).toThrow();
-  const rotate = createRotateSubinstruction(WINTERNITZ, identity, new Uint8Array(41).fill(7));
-  expect(Array.from(rotate.data)).toEqual([5, ...new Uint8Array(41).fill(7)]);
-  expect(rotate.keys).toEqual([{ pubkey: pda, isSigner: false, isWritable: true }]);
-  for (const length of [40, 42]) {
-    expect(() => createRotateSubinstruction(WINTERNITZ, identity, new Uint8Array(length))).toThrow();
-  }
+  const nextKey = new Uint8Array(41).fill(7);
   const passthrough = createPassthroughInstruction(WINTERNITZ, identity, [
-    rotate,
     createCloseSubinstruction(WINTERNITZ, identity, receiver),
   ]);
-  const digest = advanceVectorDigest(
-    WINTERNITZ, new Uint8Array(32).fill(255), identity, [], [passthrough]
+  // After the discriminator: validUntil (u64 LE, here never), the next key,
+  // then the signature.
+  const signature = new Uint8Array(WINTERNITZ.signatureLen);
+  const advance = createRotatingAdvanceInstruction(WINTERNITZ, identity, nextKey, signature);
+  expect(Array.from(advance.data.subarray(0, 50))).toEqual([0, ...new Array(8).fill(255), ...nextKey]);
+  expect(advance.data.length).toBe(1 + 8 + 41 + WINTERNITZ.signatureLen);
+  expect(createRotatingAdvanceInstruction(WINTERNITZ, identity, nextKey, signature, 77n).data.subarray(1, 9)).toEqual(
+    Uint8Array.of(77, 0, 0, 0, 0, 0, 0, 0)
+  );
+  expect(() => createAdvanceInstruction(WINTERNITZ, identity, signature)).toThrow();
+  for (const length of [40, 42]) {
+    expect(() =>
+      createRotatingAdvanceInstruction(WINTERNITZ, identity, new Uint8Array(length), signature)
+    ).toThrow();
+  }
+  const digest = rotatingAdvanceVectorDigest(
+    WINTERNITZ, new Uint8Array(32).fill(255), identity, nextKey, [], [passthrough]
   );
   expect(Buffer.from(digest).toString("hex")).toBe(
-    "4167456091e49e9a6f6b2b29a485c1b3e138de90002e16df6330812a8884c541"
+    "c9cbb58a103bb4ddd2626e8d942d1abc4b722413f6a9b47db8f562d33c7b5116"
   );
 });

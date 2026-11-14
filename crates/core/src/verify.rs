@@ -1,289 +1,226 @@
-//! Offline verification of `advance` signatures. Each function recomputes
-//! the canonical digest via
-//! [`advance_vector_digest_with_fee_payer`](crate::digest::advance_vector_digest_with_fee_payer)
-//! and checks the signature the way the on-chain program will, so a PASS
-//! here means the transaction will verify on-chain against the same nonce.
-//! On success each function returns the digest — which **is** the account's
-//! next nonce, so chains of dependent transactions can be pre-signed by
-//! feeding each digest into the next signing call.
-//!
-//! One caveat: ed25519 is checked with `ed25519-dalek` offline while the
-//! on-chain program uses `brine-ed25519`, so adversarially malformed
-//! signatures (non-canonical scalars, small-order points) may be judged
-//! differently by the two implementations. Honestly-generated signatures
-//! verify identically.
-//!
-//! `fee_payer` participates in **message-level flag promotion only**: the
-//! live sysvar the on-chain program hashes carries message-level account
-//! flags, and the fee payer is always a writable signer at the message
-//! level. The digest is therefore independent of the fee payer **unless**
-//! its key appears among the committed instructions' accounts, in which
-//! case promotion folds it in and the signature is bound to that fee payer.
+//! Check `advance` signatures offline with the program's own code: each
+//! account is initialized and advanced as on chain, so the check cannot
+//! disagree with the program.
 
-use ed25519_dalek::Verifier as _;
-use k256::ecdsa::signature::hazmat::PrehashVerifier as _;
-use k256::ecdsa::{
-    RecoveryId, Signature as Secp256k1Signature, VerifyingKey as Secp256k1VerifyingKey,
-};
-use sha3::{Digest as Sha3Digest, Keccak256};
 use solana_address::Address;
-use solana_falcon512::{Falcon512Pubkey, Falcon512Signature};
 use solana_instruction::Instruction;
 
-use crate::digest::advance_vector_digest_with_fee_payer;
-use crate::schemes::eip191::{eip191_envelope_hash, EIP191, EIP191_ETH_ADDRESS_LEN};
-use crate::schemes::falcon512::{falcon512_identity, FALCON512, FALCON512_WIRE_PUBKEY_LEN};
-use crate::schemes::mldsa44::{MLDSA44, MLDSA44_PUBKEY_LEN, MLDSA44_SIGNATURE_LEN};
-use crate::schemes::{
-    ed25519::{ED25519, ED25519_PUBKEY_LEN},
-    secp256k1::{SECP256K1, SECP256K1_COMPRESSED_PUBKEY_LEN},
-};
+use crate::digest::advance_message;
+use crate::instructions::AdvanceSigner;
+use crate::scheme::{find_vector_pda, signed_nonce, VectorAccount, NEVER_EXPIRES};
 
-/// Why an offline `advance` verification failed. The crate otherwise
-/// carries no error types, so this stays deliberately small; the two
-/// parse-stage variants carry a static reason so the `Display` output is
-/// self-explaining at call sites.
+/// Why an offline check failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerifyError {
-    /// The signature bytes are unusable before any curve math runs (wrong
-    /// length, out-of-range scalar, invalid recovery byte).
-    MalformedSignature(&'static str),
-    /// The key material and the identity disagree (invalid public key
-    /// bytes, or an EIP-191 recovery yielding a different address).
-    IdentityMismatch(&'static str),
+    /// The identity is not a key of its scheme: `initialize` refuses it.
+    InvalidIdentity,
+    /// The signature is not one the scheme can read.
+    MalformedSignature,
     /// The signature does not verify over the recomputed digest.
     SignatureInvalid,
+    /// The advance's `valid_until` is before the slot checked against.
+    Expired,
+    /// The signer lists a nonce account but is given a vector's own nonce, or
+    /// the other way around.
+    NonceMismatch,
+    /// The program refused the signature for its scheme's own reason, as
+    /// this `VectorError` code (a Winternitz key reused, an XMSS leaf used).
+    Rejected(u32),
 }
 
 impl core::fmt::Display for VerifyError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            VerifyError::MalformedSignature(why) | VerifyError::IdentityMismatch(why) => {
-                f.write_str(why)
+            VerifyError::InvalidIdentity => f.write_str("the identity is not a key of its scheme"),
+            VerifyError::MalformedSignature => {
+                f.write_str("the signature is not one its scheme can read")
             }
             VerifyError::SignatureInvalid => f.write_str(
-                "signature does not verify over the recomputed advance digest — the signed \
+                "the signature does not verify over the recomputed advance digest: the signed \
                  payload differs from this instruction layout, nonce, or identity",
             ),
+            VerifyError::Expired => f.write_str("the transaction's valid_until slot has passed"),
+            VerifyError::NonceMismatch => f.write_str(
+                "the signer lists a nonce account but is given none, or the other way around",
+            ),
+            VerifyError::Rejected(code) => write!(f, "the program refuses it: custom error {code}"),
         }
     }
 }
 
 impl std::error::Error for VerifyError {}
 
-/// Verify an Ed25519 `advance` signature offline. `pubkey` is the 32-byte
-/// identity, `signature` the 64-byte wire signature (the advance ix data
-/// after the 1-byte discriminator). Returns the recomputed digest — the
-/// account's next nonce — on success.
+/// The nonce a signature is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignerNonce {
+    /// The vector's own nonce.
+    Vector([u8; 32]),
+    /// A nonce account's nonce, and the vector's own that the signature takes
+    /// in too: [`signed_nonce`] of the two.
+    Account { account: [u8; 32], vector: [u8; 32] },
+    /// What the signature is over already: [`signed_nonce`] of a nonce
+    /// account's nonce, or a vector's own.
+    Signed([u8; 32]),
+}
+
+impl SignerNonce {
+    fn signed(&self) -> [u8; 32] {
+        match self {
+            SignerNonce::Vector(nonce) | SignerNonce::Signed(nonce) => *nonce,
+            SignerNonce::Account { account, vector } => signed_nonce(account, vector),
+        }
+    }
+}
+
+/// One signer of an advance to check: who it is, the nonce it signed over,
+/// and its signature.
+#[derive(Clone, Copy, Debug)]
+pub struct AdvanceEntry<'a> {
+    /// The signer, as it is listed in the advance. If its
+    /// [`nonce_account`](AdvanceSigner::nonce_account) is set, `nonce` must be
+    /// [`SignerNonce::Account`] or [`SignerNonce::Signed`].
+    pub signer: AdvanceSigner<'a>,
+    /// What it signed over.
+    pub nonce: SignerNonce,
+    /// Its signature, as it is in the advance's data.
+    pub signature: &'a [u8],
+    /// Winternitz and XMSS: the key the account holds now, if it has rotated
+    /// since it was created. `None` is the identity.
+    pub current_key: Option<&'a [u8]>,
+}
+
+impl<'a> AdvanceEntry<'a> {
+    /// A signer of its own nonce, whose key is the one it was created with.
+    pub fn new(signer: AdvanceSigner<'a>, nonce: SignerNonce, signature: &'a [u8]) -> Self {
+        Self {
+            signer,
+            nonce,
+            signature,
+            current_key: None,
+        }
+    }
+}
+
+/// Verify every signature of an advance: recompute the one message all
+/// signers approve (it covers `valid_until`), and for each entry its digest, then check its signature
+/// as the program would. Returns each entry's digest, which is the next nonce
+/// of its nonce account, or of its own account. Entries are in the advance's
+/// order, and one account listed twice signs the second time over the nonce
+/// the first returned.
 ///
-/// Offline verification uses `ed25519-dalek` while the on-chain program
-/// uses `brine-ed25519`; see the module docs for the (adversarial-only)
-/// gap between the two.
-pub fn verify_advance_signature_ed25519(
-    pubkey: &[u8; ED25519_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; 64] = signature
-        .try_into()
-        .map_err(|_| VerifyError::MalformedSignature("ed25519 signature must be 64 bytes"))?;
-    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(pubkey)
-        .map_err(|_| VerifyError::IdentityMismatch("identity is not a valid ed25519 public key"))?;
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &ED25519,
-        nonce,
-        pubkey,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    verifying_key
-        .verify(&digest, &ed25519_dalek::Signature::from_bytes(sig_bytes))
-        .map_err(|_| VerifyError::SignatureInvalid)?;
-    Ok(digest)
-}
-
-/// Verify a plain-secp256k1 ECDSA `advance` signature offline.
-/// `compressed_pubkey` is the 33-byte sec1 identity, `signature` the
-/// 64-byte `r || s` wire form. Returns the recomputed digest on success.
+/// `slot` is the slot the transaction would land in. With it, a
+/// `valid_until` before it is [`VerifyError::Expired`]; with `None`, expiry
+/// is not checked.
 ///
-/// High-S signatures are normalized before checking: the on-chain
-/// `solana-secp256k1-ecdsa` verifier accepts both `s` normalizations, so
-/// the offline check must too or PASS/FAIL would diverge.
-pub fn verify_advance_signature_secp256k1_ecdsa(
-    compressed_pubkey: &[u8; SECP256K1_COMPRESSED_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let verifying_key =
-        Secp256k1VerifyingKey::from_sec1_bytes(compressed_pubkey).map_err(|_| {
-            VerifyError::IdentityMismatch(
-                "identity is not a valid sec1-compressed secp256k1 pubkey",
-            )
-        })?;
-    let sig = Secp256k1Signature::from_slice(signature).map_err(|_| {
-        VerifyError::MalformedSignature("secp256k1 signature must be 64 bytes of valid r || s")
-    })?;
-    let sig = sig.normalize_s().unwrap_or(sig);
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &SECP256K1,
-        nonce,
-        compressed_pubkey,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    verifying_key
-        .verify_prehash(&digest, &sig)
-        .map_err(|_| VerifyError::SignatureInvalid)?;
-    Ok(digest)
-}
-
-/// Verify an EIP-191 `advance` signature offline. `eth_address` is the
-/// 20-byte identity, `signature` the 65-byte `r || s || v` wire form with
-/// `v` the raw recovery id (`0..=3`). Returns the recomputed digest on
-/// success.
+/// Not checked, because it takes the chain: that a nonce account is past its
+/// creation slot, that it belongs to the vector, that a vector holds the
+/// nonce given, and an XMSS leaf not used before.
 ///
-/// The key is recovered from the EIP-191 envelope of the digest
-/// ([`eip191_envelope_hash`]) and its derived Ethereum address compared to
-/// the identity. The Ethereum legacy `v = 27/28` form is **rejected**: the
-/// on-chain program passes `v` straight to `sol_secp256k1_recover`, which
-/// errors on recovery ids above 3, so a legacy-form signature would pass
-/// offline yet fail on-chain — subtract 27 at assembly time. High-S
-/// signatures are normalized (with the recovery id's parity flipped to
-/// keep recovering the same key), since `sol_secp256k1_recover` accepts
-/// them.
-pub fn verify_advance_signature_secp256k1_eip191(
-    eth_address: &[u8; EIP191_ETH_ADDRESS_LEN],
+/// `fee_payer` is as in [`advance_vector_digest`](crate::advance_vector_digest).
+pub fn verify_advance(
+    valid_until: u64,
+    entries: &[AdvanceEntry],
+    pre_instructions: &[Instruction],
+    post_instructions: &[Instruction],
+    fee_payer: Option<&Address>,
+    slot: Option<u64>,
+) -> Result<Vec<[u8; 32]>, VerifyError> {
+    if slot.is_some_and(|slot| slot > valid_until) {
+        return Err(VerifyError::Expired);
+    }
+    let signers: Vec<AdvanceSigner> = entries.iter().map(|entry| entry.signer).collect();
+    let message = advance_message(
+        valid_until,
+        &signers,
+        pre_instructions,
+        post_instructions,
+        fee_payer,
+    );
+
+    entries
+        .iter()
+        .map(|entry| verify_entry(entry, &message))
+        .collect()
+}
+
+/// [`verify_advance`] for one signer. `nonce` is what the signature is over:
+/// the vector's own, or for a signer with a nonce account,
+/// [`signed_nonce`] of it (use [`verify_advance`] and [`SignerNonce`] to have
+/// that done for you). Returns the digest.
+pub fn verify_advance_signature(
+    signer: AdvanceSigner,
     nonce: &[u8; 32],
     pre_instructions: &[Instruction],
     post_instructions: &[Instruction],
     fee_payer: Option<&Address>,
     signature: &[u8],
 ) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; 65] = signature.try_into().map_err(|_| {
-        VerifyError::MalformedSignature("eip191 signature must be 65 bytes (r || s || v)")
-    })?;
-    let v = sig_bytes[64];
-    if v == 27 || v == 28 {
-        return Err(VerifyError::MalformedSignature(
-            "eip191 recovery byte is in the Ethereum legacy 27/28 form; the on-chain program \
-             requires the raw 0/1 form — subtract 27 when assembling the advance instruction",
-        ));
-    }
-    let mut recovery_id = RecoveryId::from_byte(v).ok_or(VerifyError::MalformedSignature(
-        "eip191 recovery byte must be 0..=3",
-    ))?;
-    let mut sig = Secp256k1Signature::from_slice(&sig_bytes[..64]).map_err(|_| {
-        VerifyError::MalformedSignature("eip191 signature r || s bytes are not a valid signature")
-    })?;
-    // Normalizing s negates the signature point, so the recovery id's
-    // Y-parity bit flips to keep recovering the same public key.
-    if let Some(normalized) = sig.normalize_s() {
-        sig = normalized;
-        recovery_id = RecoveryId::from_byte(recovery_id.to_byte() ^ 1)
-            .expect("flipping the parity bit keeps the id in 0..=3");
-    }
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &EIP191,
-        nonce,
-        eth_address,
+    let entry = AdvanceEntry::new(signer, SignerNonce::Signed(*nonce), signature);
+    let digests = verify_advance(
+        NEVER_EXPIRES,
+        &[entry],
         pre_instructions,
         post_instructions,
         fee_payer,
-    );
-    let envelope = eip191_envelope_hash(&digest);
+        None,
+    )?;
+    Ok(digests[0])
+}
 
-    let recovered = Secp256k1VerifyingKey::recover_from_prehash(&envelope, &sig, recovery_id)
-        .map_err(|_| VerifyError::SignatureInvalid)?;
-    let uncompressed = recovered.to_encoded_point(false);
-    let hash: [u8; 32] = Keccak256::digest(&uncompressed.as_bytes()[1..]).into();
-    if hash[12..32] != *eth_address {
-        return Err(VerifyError::IdentityMismatch(
-            "recovered Ethereum address does not match the identity",
-        ));
+fn verify_entry(entry: &AdvanceEntry, message: &[u8; 32]) -> Result<[u8; 32], VerifyError> {
+    let AdvanceEntry {
+        signer,
+        nonce,
+        signature,
+        current_key,
+    } = *entry;
+    let scheme = signer.scheme;
+
+    let listed = signer.nonce_account.is_some();
+    match nonce {
+        SignerNonce::Vector(_) if listed => return Err(VerifyError::NonceMismatch),
+        SignerNonce::Account { .. } if !listed => return Err(VerifyError::NonceMismatch),
+        _ => {}
     }
+    if signer.identity.len() != scheme.identity_len {
+        return Err(VerifyError::InvalidIdentity);
+    }
+    if signature.len() != scheme.signature_len || signer.next_key.len() != scheme.next_key_len {
+        return Err(VerifyError::MalformedSignature);
+    }
+    let key = current_key.unwrap_or(signer.identity);
+    if key.len() != scheme.identity_len {
+        return Err(VerifyError::InvalidIdentity);
+    }
+
+    // The account as on chain: 8-byte aligned, the identity after the
+    // header. Falcon-512 and ML-DSA-44 read their prepared key in place.
+    let mut account = vec![0u64; scheme.account_len.div_ceil(8)];
+    // SAFETY: any `u64` buffer is a valid byte buffer of 8 times its length.
+    let account = unsafe {
+        core::slice::from_raw_parts_mut(account.as_mut_ptr().cast::<u8>(), scheme.account_len)
+    };
+    let stored = &mut account[VectorAccount::HEADER_LEN..];
+    (scheme.initialize)(key, stored).map_err(|_| VerifyError::InvalidIdentity)?;
+
+    // The bytes the program reads for this signer.
+    let mut data = Vec::with_capacity(signer.next_key.len() + signature.len());
+    data.extend_from_slice(signer.next_key);
+    data.extend_from_slice(signature);
+
+    let (vector, _) = find_vector_pda(scheme, signer.identity);
+    let mut digest = nonce.signed();
+    (scheme.advance)(
+        stored,
+        &mut digest,
+        message,
+        vector.as_array(),
+        &mut &data[..],
+    )
+    .map_err(|error| match error {
+        pinocchio::error::ProgramError::MissingRequiredSignature => VerifyError::SignatureInvalid,
+        pinocchio::error::ProgramError::Custom(code) => VerifyError::Rejected(code),
+        _ => VerifyError::MalformedSignature,
+    })?;
     Ok(digest)
-}
-
-/// Verify a Falcon-512 `advance` signature offline, given the 897-byte wire
-/// pubkey (the identity, `sha256(wire_pubkey)`, is derived from it).
-/// `signature` is the 666-byte zero-padded wire form. Verification runs
-/// `solana-falcon512`'s host-callable verifier over the raw digest — the
-/// same code path the on-chain program executes. Returns the recomputed
-/// digest on success.
-pub fn verify_advance_signature_falcon512(
-    wire_pubkey: &[u8; FALCON512_WIRE_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; crate::FALCON512_SIGNATURE_LEN] = signature.try_into().map_err(|_| {
-        VerifyError::MalformedSignature("falcon512 signature must be 666 bytes (zero-padded wire)")
-    })?;
-    let identity = falcon512_identity(wire_pubkey);
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &FALCON512,
-        nonce,
-        &identity,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    if Falcon512Signature::from_ref(sig_bytes)
-        .verify(&digest, Falcon512Pubkey::from_ref(wire_pubkey))
-    {
-        Ok(digest)
-    } else {
-        Err(VerifyError::SignatureInvalid)
-    }
-}
-
-/// Verify an ML-DSA-44 `advance` signature offline. `public_key` is the
-/// standard 1312-byte key, `signature` the 2420-byte signature (the advance
-/// ix data after the 1-byte discriminator). Runs the same verifier the
-/// on-chain program uses (`solana-ml-dsa`), with an empty FIPS 204 context.
-/// Returns the recomputed digest — the account's next nonce — on success.
-pub fn verify_advance_signature_mldsa44(
-    public_key: &[u8; MLDSA44_PUBKEY_LEN],
-    nonce: &[u8; 32],
-    pre_instructions: &[Instruction],
-    post_instructions: &[Instruction],
-    fee_payer: Option<&Address>,
-    signature: &[u8],
-) -> Result<[u8; 32], VerifyError> {
-    let sig_bytes: &[u8; MLDSA44_SIGNATURE_LEN] = signature
-        .try_into()
-        .map_err(|_| VerifyError::MalformedSignature("ml-dsa-44 signature must be 2420 bytes"))?;
-
-    let digest = advance_vector_digest_with_fee_payer(
-        &MLDSA44,
-        nonce,
-        public_key,
-        pre_instructions,
-        post_instructions,
-        fee_payer,
-    );
-
-    use solana_ml_dsa::ml_dsa_44::{Signature, VerifyingKey};
-    let key = VerifyingKey::<false>::from_bytes(public_key);
-    match key.verify(&digest, Signature::ref_from_bytes(sig_bytes).unwrap()) {
-        Ok(()) => Ok(digest),
-        Err(_) => Err(VerifyError::SignatureInvalid),
-    }
 }

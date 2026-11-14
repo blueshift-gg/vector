@@ -1,20 +1,19 @@
 /**
- * Shared scaffolding for the per-scheme integration test files.
+ * Shared scaffolding for the integration test files, one per scheme.
  *
- * Importing this module also applies the `Address` shims that
- * `@solana/spl-token@0.4` (v1-API) expects but `@solana/web3.js@3` no longer
- * provides: `toBuffer()` and a sync `findProgramAddressSync(...)`. The shims
- * install on first import; subsequent imports are no-ops.
+ * Importing this module also applies the `PublicKey` shims that
+ * `@solana/spl-token@0.4` (v1-API) expects and `@solana/web3.js@3` may not
+ * provide: `toBuffer()` and a sync `findProgramAddressSync(...)`. They
+ * install only if missing; subsequent imports are no-ops. Needs a validator:
+ * `bun run validator`.
  */
 import { expect } from "vitest";
 import {
-  Address,
+  PublicKey,
   Connection,
   Keypair,
   SystemProgram,
-  Transaction,
   TransactionInstruction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   AuthorityType,
@@ -31,19 +30,21 @@ import {
 
 import {
   Scheme,
+  V1Limits,
   advanceVectorDigest,
+  createV1Transaction,
   fetchVectorAccount,
   createPassthroughInstruction,
 } from "../src/index.js";
 
-// ── Address shims (spl-token@0.4 expects v1 API) ─────────────────────
+// ── PublicKey shims (spl-token@0.4 expects v1 API) ─────────────────────
 
-if (!(Address.prototype as any).toBuffer) {
-  (Address.prototype as any).toBuffer = function () {
+if (!(PublicKey.prototype as any).toBuffer) {
+  (PublicKey.prototype as any).toBuffer = function () {
     return Buffer.from(this.toBytes());
   };
 }
-if (!(Address as any).findProgramAddressSync) {
+if (!(PublicKey as any).findProgramAddressSync) {
   const { createHash } = await import("crypto");
   const { ed25519 } = await import("@noble/curves/ed25519.js");
   const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
@@ -57,10 +58,10 @@ if (!(Address as any).findProgramAddressSync) {
       return false;
     }
   };
-  (Address as any).findProgramAddressSync = (
+  (PublicKey as any).findProgramAddressSync = (
     seeds: Uint8Array[],
-    programId: Address
-  ): [Address, number] => {
+    programId: PublicKey
+  ): [PublicKey, number] => {
     const programBytes = programId.toBytes();
     const totalLen =
       seeds.reduce((n, s) => n + s.length, 0) + 1 + programBytes.length + PDA_MARKER.length;
@@ -78,7 +79,7 @@ if (!(Address as any).findProgramAddressSync) {
       buf[bumpOff] = bump;
       const hash = sha256(buf);
       if (!isOnCurve(hash)) {
-        return [new Address(hash), bump];
+        return [new PublicKey(hash), bump];
       }
     }
     throw new Error("Unable to find a viable PDA bump seed");
@@ -100,12 +101,28 @@ export function explorerLink(signature: string): string {
   return `https://explorer.solana.com/tx/${signature}?cluster=custom&customUrl=${RPC_URL}`;
 }
 
+/**
+ * Send `instructions` as one V1 transaction, signed by `signers` (the first
+ * pays), with the SDK's default limits unless `limits` says otherwise, and
+ * wait until it is confirmed. Throws if it fails, in preflight or after.
+ */
 export async function sendTx(
   connection: Connection,
-  tx: Transaction,
-  signers: Keypair[]
+  instructions: TransactionInstruction[],
+  signers: Keypair[],
+  limits?: V1Limits
 ): Promise<string> {
-  const sig = await sendAndConfirmTransaction(connection, tx, signers);
+  const { blockhash } = await connection.getLatestBlockhash();
+  const tx = createV1Transaction({
+    feePayer: signers[0].publicKey,
+    instructions,
+    recentBlockhash: blockhash,
+    limits,
+  });
+  await tx.sign(signers);
+  const sig = await connection.sendTransaction(tx);
+  const { value } = await connection.confirmTransaction(sig, "confirmed");
+  if (value.err) throw new Error(`${sig} failed: ${JSON.stringify(value.err)}`);
   console.log(explorerLink(sig));
   return sig;
 }
@@ -128,16 +145,16 @@ export async function splMintAuthorityRoundTrip(
   feePayer: Keypair,
   scheme: Scheme,
   identity: Uint8Array,
-  vectorPda: Address,
+  vectorPda: PublicKey,
   currentNonce: Uint8Array,
   signAdvance: (
     nonce: Uint8Array,
     pre: TransactionInstruction[],
     post: TransactionInstruction[]
   ) => TransactionInstruction,
-  // Top-level instructions placed BEFORE `advance` (e.g. a `ComputeBudget`
-  // bump for heavy schemes). Committed to by the digest, so threaded
-  // through both the signer closure and the nextNonce recompute.
+  // Top-level instructions placed BEFORE `advance`. Committed to by the
+  // digest, so threaded through both the signer closure and the nextNonce
+  // recompute.
   extraPreInstructions: TransactionInstruction[] = []
 ): Promise<Uint8Array> {
   // 1. Create a mint with authority = vectorPda.
@@ -145,53 +162,53 @@ export async function splMintAuthorityRoundTrip(
   const rentExempt = await connection.getMinimumBalanceForRentExemption(
     MINT_SIZE
   );
-  const createMintTx = new Transaction().add(
+  const createMintTx = [
     SystemProgram.createAccount({
-      fromPubkey: feePayer.address,
-      newAccountPubkey: mint.address,
+      fromPubkey: feePayer.publicKey,
+      newAccountPubkey: mint.publicKey,
       space: MINT_SIZE,
       lamports: rentExempt,
       programId: TOKEN_PROGRAM_ID,
     }),
-    createInitializeMint2Instruction(mint.address, 6, vectorPda, null)
-  );
-  await sendAndConfirmTransaction(connection, createMintTx, [feePayer, mint]);
+    createInitializeMint2Instruction(mint.publicKey, 6, vectorPda, null)
+  ];
+  await sendTx(connection, createMintTx, [feePayer, mint]);
 
   // 2. Create an associated token account for the fee payer.
   const destination = getAssociatedTokenAddressSync(
-    mint.address,
-    feePayer.address
+    mint.publicKey,
+    feePayer.publicKey
   );
-  await sendAndConfirmTransaction(
+  await sendTx(
     connection,
-    new Transaction().add(
+    [
       createAssociatedTokenAccountInstruction(
-        feePayer.address,
+        feePayer.publicKey,
         destination,
-        feePayer.address,
-        mint.address
+        feePayer.publicKey,
+        mint.publicKey
       )
-    ),
+    ],
     [feePayer]
   );
 
   // 3. Tx layout: [advance, passthrough(set_authority PDA→EOA), mint_to,
   //    set_authority EOA→PDA]
   const pdaToEoa = createSetAuthorityInstruction(
-    mint.address,
+    mint.publicKey,
     vectorPda,
     AuthorityType.MintTokens,
-    feePayer.address
+    feePayer.publicKey
   );
   const mintToIx = createMintToInstruction(
-    mint.address,
+    mint.publicKey,
     destination,
-    feePayer.address,
+    feePayer.publicKey,
     10_000
   );
   const eoaToPda = createSetAuthorityInstruction(
-    mint.address,
-    feePayer.address,
+    mint.publicKey,
+    feePayer.publicKey,
     AuthorityType.MintTokens,
     vectorPda
   );
@@ -207,7 +224,7 @@ export async function splMintAuthorityRoundTrip(
   const advanceIx = signAdvance(currentNonce, extraPreInstructions, postIxs);
   await sendTx(
     connection,
-    new Transaction().add(...extraPreInstructions, advanceIx, ...postIxs),
+    [...extraPreInstructions, advanceIx, ...postIxs],
     [feePayer]
   );
 
@@ -218,7 +235,7 @@ export async function splMintAuthorityRoundTrip(
     identity,
     extraPreInstructions,
     postIxs,
-    feePayer.address
+    feePayer.publicKey
   );
 
   const account = await fetchVectorAccount(connection, scheme, identity);
@@ -227,9 +244,9 @@ export async function splMintAuthorityRoundTrip(
   const tokenInfo = await getAccount(connection, destination);
   expect(tokenInfo.amount).toBe(BigInt(10_000));
 
-  const mintInfo = await getMint(connection, mint.address);
+  const mintInfo = await getMint(connection, mint.publicKey);
   // `getMint` returns `mintAuthority` as a v1-compat `PublicKey` whose
-  // `.equals` reaches into `_bn`; the v3 `Address` has no `_bn`, so compare
+  // `.equals` reaches into `_bn`; the v3 `PublicKey` has no `_bn`, so compare
   // base58 strings instead.
   expect(mintInfo.mintAuthority!.toBase58()).toBe(vectorPda.toBase58());
 
