@@ -48,3 +48,6 @@ mod secp256k1_edge;
 
 #[cfg(test)]
 mod mutation;
+
+#[cfg(test)]
+mod vectors;
