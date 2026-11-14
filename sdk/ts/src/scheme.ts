@@ -37,7 +37,7 @@ export enum VectorError {
   TreeExhausted = 4,
   /** `advance`, `close`: the nonce account belongs to another vector. */
   ForeignNonce = 5,
-  /** `initializeNonce`, `close`, or `withdraw` of every lamport: the vector is Winternitz or XMSS, whose account never closes and signs over its own nonce only. */
+  /** `initializeNonce`: the vector is Winternitz or XMSS, which signs over its own nonce only. */
   KeyRotates = 6,
   /** `advance`, `close`: the nonce account was created in this slot. */
   FreshNonce = 7,
