@@ -415,19 +415,20 @@ fn a_rotated_key_verifies_against_the_key_the_account_holds_now() {
 }
 
 #[test]
-fn winternitz_account_never_closes() {
-    never_closes::<hazmat::SecretKey>(&WINTERNITZ, |signature| signature.as_bytes().to_vec());
+fn winternitz_account_closes() {
+    closes::<hazmat::SecretKey>(&WINTERNITZ, |signature| signature.as_bytes().to_vec());
 }
 
 #[test]
-fn xmss_account_never_closes() {
-    never_closes::<xmss::hazmat::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
+fn xmss_account_closes() {
+    closes::<xmss::hazmat::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
 }
 
-/// Its address is its first key's: created again, it would start over at
-/// that key, which has signed. So neither `Close` nor a `Withdraw` of every
-/// lamport is allowed; a `Withdraw` down to rent-exemption is.
-fn never_closes<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
+/// `Close` and a `Withdraw` of every lamport empty the account like any
+/// other. Created again, it starts over at its first key (and, for XMSS,
+/// leaf 0) with a fresh nonce, so no advance signed before verifies: only a
+/// signer that kept its record of used keys and leaves may sign for it.
+fn closes<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let directory = tempfile::tempdir().unwrap();
     let mollusk = mollusk();
     let lamports = mollusk.sysvars.rent.minimum_balance(scheme.account_len) + 5_000_000;
@@ -462,7 +463,7 @@ fn never_closes<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) 
         );
         let signature = wire(key.sign(&crate::common::signed_hash(&digest)).unwrap());
         let advance = create_rotating_advance_instruction(scheme, &identity, &next_key, &signature);
-        process_transaction(
+        let result = process_transaction(
             &mollusk,
             &[&advance, &passthrough],
             &[
@@ -470,27 +471,54 @@ fn never_closes<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) 
                 (receiver, Account::new(1_000_000, 0, &Address::default())),
             ],
             &[],
-        )
-        .program_result
+        );
+        assert_eq!(result.program_result, TransactionProgramResult::Success);
+        let balance = |address: &Address| {
+            result
+                .resulting_accounts
+                .iter()
+                .find(|(key, _)| key == address)
+                .unwrap()
+                .1
+                .lamports
+        };
+        (identity, stored, balance(&vector), balance(&receiver))
     };
 
-    let refused = TransactionProgramResult::Failure(1, VectorError::KeyRotates.into());
-    assert_eq!(
+    let (identity, stored, emptied, received) =
         attempt("close.key", |scheme, identity, receiver, _| {
             create_close_subinstruction(scheme, identity, receiver)
-        }),
-        refused
+        });
+    assert_eq!((emptied, received), (0, 1_000_000 + lamports));
+    let (_, _, emptied, received) = attempt("all.key", |scheme, identity, receiver, lamports| {
+        create_withdraw_subinstruction(scheme, identity, receiver, lamports)
+    });
+    assert_eq!((emptied, received), (0, 1_000_000 + lamports));
+
+    // Created again: the first key, leaf 0 and a nonce it never held.
+    let (vector, _) = find_vector_pda(scheme, &identity);
+    let (system, system_account) = mollusk_svm::program::keyed_account_for_system_program();
+    let payer = Address::new_unique();
+    let created = mollusk.process_instruction(
+        &vector_core::create_initialize_instruction(&payer, scheme, &identity),
+        &[
+            (payer, Account::new(1_000_000_000, 0, &system)),
+            (vector, Account::default()),
+            (system, system_account),
+        ],
     );
-    assert_eq!(
-        attempt("all.key", |scheme, identity, receiver, lamports| {
-            create_withdraw_subinstruction(scheme, identity, receiver, lamports)
-        }),
-        refused
+    assert!(
+        created.program_result.is_ok(),
+        "{:?}",
+        created.program_result
     );
-    assert_eq!(
-        attempt("rent.key", |scheme, identity, receiver, _| {
-            create_withdraw_subinstruction(scheme, identity, receiver, 5_000_000)
-        }),
-        TransactionProgramResult::Success
-    );
+    let data = &created
+        .resulting_accounts
+        .iter()
+        .find(|(key, _)| *key == vector)
+        .unwrap()
+        .1
+        .data;
+    assert_eq!(&data[76..], &stored[..]);
+    assert_ne!(&data[..32], &NONCE[..]);
 }

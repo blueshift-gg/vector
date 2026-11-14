@@ -68,7 +68,7 @@ describe("vector-rotating", () => {
     (connection as any)._rpcWebSocket?.close();
   });
 
-  test("Winternitz rotates every signature and never closes", async () => {
+  test("Winternitz rotates every signature, closes, and starts over when created again", async () => {
     const keys = [0, 1, 2, 3].map(() => WinternitzSecretKey.generate(fill));
     const pub = keys.map((key) => key.verifyingKey().toBytes());
     const identity = pub[0];
@@ -119,7 +119,7 @@ describe("vector-rotating", () => {
     }
 
     const { nonce } = await fetchVectorAccount(connection, WINTERNITZ, identity);
-    // Key 2's one signature: a close, which the program refuses.
+    // Key 2's one signature: a close.
     const close = createPassthroughInstruction(WINTERNITZ, identity, [
       createCloseSubinstruction(WINTERNITZ, identity, feePayer.publicKey),
     ]);
@@ -132,11 +132,15 @@ describe("vector-rotating", () => {
       [close],
       feePayer.publicKey
     );
-    await expect(
-      sendTx(connection, [advance, close], [feePayer])
-    ).rejects.toThrow(custom(VectorError.KeyRotates));
-    expect((await onChain(connection, pda)).key).toEqual(pub[2]);
-    expect(await connection.getAccountInfo(pda)).not.toBeNull();
+    await sendTx(connection, [advance, close], [feePayer]);
+    expect(await connection.getAccountInfo(pda)).toBeNull();
+
+    // Created again, it starts over at key 0, which has signed: only a
+    // signer that kept its record may sign for it. Its nonce is new, so no
+    // advance signed before verifies.
+    await sendTx(connection, [createInitializeWinternitz(feePayer.publicKey, identity)], [feePayer]);
+    expect((await onChain(connection, pda)).key).toEqual(pub[0]);
+    expect((await fetchVectorAccount(connection, WINTERNITZ, identity)).nonce).not.toEqual(nonce);
   });
 
   // An XMSS advance is over 1,232 bytes on its own (a 1,037-byte signature

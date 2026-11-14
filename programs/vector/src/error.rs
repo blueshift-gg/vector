@@ -21,11 +21,9 @@ pub enum VectorError {
     TreeExhausted,
     /// `Advance` or `Close`: the nonce account belongs to another vector.
     ForeignNonce,
-    /// A Winternitz or XMSS vector: `InitializeNonce`, as it signs over its
-    /// own nonce only (two nonces in flight would be two signatures by one
-    /// key); `Close`, or `Withdraw` of every lamport, as the account stays
-    /// (created again, it would start over at its first key, which has
-    /// signed).
+    /// `InitializeNonce` for a Winternitz or XMSS vector: it signs over its
+    /// own nonce only, as two nonces in flight would be two signatures by
+    /// one key.
     KeyRotates,
     /// `Advance` or `Close`: the nonce account was created in this slot. It
     /// signs and closes from the next, so it is never created again at a
