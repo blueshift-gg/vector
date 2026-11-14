@@ -30,8 +30,8 @@ export function createInitializeXmss(
 }
 
 /**
- * A persistent hash-based signer: `@blueshift-gg/solana-winternitz/signer`'s
- * `xmss.SigningKey`, which records each leaf as used before it returns a
+ * A persistent hash-based signer: `@blueshift-gg/solana-xmss/signer`'s
+ * `SigningKey`, which records each leaf as used before it returns a
  * signature. Never sign with a copy of its key file, or a restored one.
  */
 export interface XmssSigner {

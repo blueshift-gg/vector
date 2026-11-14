@@ -16,11 +16,8 @@ import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { falcon512 as nobleFalcon } from "@noble/post-quantum/falcon.js";
 import { ml_dsa44 } from "@noble/post-quantum/ml-dsa.js";
-import {
-  VerifyingKey as HashSigKey,
-  winternitz as hashSigWinternitz,
-  xmss as hashSigXmss,
-} from "@blueshift-gg/solana-winternitz";
+import * as winternitz from "@blueshift-gg/solana-winternitz";
+import * as xmss from "@blueshift-gg/solana-xmss";
 
 import { bytesEqual, readU64LE, sha256, VALID_UNTIL_LEN } from "./bytes.js";
 import {
@@ -176,8 +173,8 @@ function checkRotation(
   return { key: nextKey };
 }
 
-/** Leaves of an XMSS key (`solana-winternitz`'s `xmss::LEAVES`). */
-const XMSS_LEAVES = hashSigXmss.LEAVES;
+/** Leaves of an XMSS key (`solana-xmss`'s `LEAVES`). */
+const XMSS_LEAVES = xmss.LEAVES;
 
 /**
  * Check `signature` over `digest` with the scheme's verifier. `identity` is
@@ -496,14 +493,14 @@ const VERIFIERS: Record<
     ml_dsa44.verify(signature, signedMessage(digest), identity),
   // Both sign the 32-byte `signedDigest`; `verify` throws when it fails.
   [WINTERNITZ.id]: (key, digest, signature) => {
-    HashSigKey.fromBytes(key).verify(
+    winternitz.VerifyingKey.fromBytes(key).verify(
       signedDigest(digest),
-      hashSigWinternitz.Signature.fromBytes(signature)
+      winternitz.Signature.fromBytes(signature)
     );
     return true;
   },
   [XMSS.id]: (key, digest, signature) => {
-    HashSigKey.fromBytes(key).verify(signedDigest(digest), hashSigXmss.Signature.fromBytes(signature));
+    xmss.VerifyingKey.fromBytes(key).verify(signedDigest(digest), xmss.Signature.fromBytes(signature));
     return true;
   },
 };

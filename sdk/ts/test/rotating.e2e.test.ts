@@ -3,14 +3,16 @@
  * and the program's refusals. Each digest is checked with the offline
  * verifier before it is sent.
  *
- * Signing here uses `@blueshift-gg/solana-winternitz/hazmat` keys, which
- * pick the leaf by hand and record nothing: the tests choose each leaf, and
- * never sign one twice. Real signers use the package's persistent
- * `SigningKey` (Bun), which records a leaf as used before it signs.
+ * Signing here uses the `/hazmat` keys of `@blueshift-gg/solana-winternitz`
+ * and `@blueshift-gg/solana-xmss`, which pick the leaf by hand and record
+ * nothing: the tests choose each leaf, and never sign one twice. Real signers
+ * use the packages' persistent `SigningKey` (Bun), which records a leaf as
+ * used before it signs.
  */
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { Connection, Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
-import * as hazmat from "@blueshift-gg/solana-winternitz/hazmat";
+import { SecretKey as WinternitzSecretKey } from "@blueshift-gg/solana-winternitz/hazmat";
+import { SecretKey as XmssSecretKey } from "@blueshift-gg/solana-xmss/hazmat";
 import {
   WINTERNITZ,
   XMSS,
@@ -67,7 +69,7 @@ describe("vector-rotating", () => {
   });
 
   test("Winternitz rotates every signature and never closes", async () => {
-    const keys = [0, 1, 2, 3].map(() => hazmat.winternitz.SecretKey.generate(fill));
+    const keys = [0, 1, 2, 3].map(() => WinternitzSecretKey.generate(fill));
     const pub = keys.map((key) => key.verifyingKey().toBytes());
     const identity = pub[0];
     const [pda] = findVectorPda(WINTERNITZ, identity);
@@ -140,8 +142,8 @@ describe("vector-rotating", () => {
   // An XMSS advance is over 1,232 bytes on its own (a 1,037-byte signature
   // and a 41-byte next key): it only fits a V1 transaction.
   test("XMSS keeps its key across leaves, refuses a used one, and rotates", async () => {
-    const first = hazmat.xmss.SecretKey.generate(fill);
-    const second = hazmat.xmss.SecretKey.generate(fill);
+    const first = XmssSecretKey.generate(fill);
+    const second = XmssSecretKey.generate(fill);
     const identity = first.verifyingKey().toBytes();
     const next = second.verifyingKey().toBytes();
     const [pda] = findVectorPda(XMSS, identity);

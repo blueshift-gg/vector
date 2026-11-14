@@ -30,7 +30,7 @@ export function createInitializeWinternitz(
 
 /**
  * A persistent hash-based signer: `@blueshift-gg/solana-winternitz/signer`'s
- * `winternitz.SigningKey`, which records each leaf as used before it returns a
+ * `SigningKey`, which records its one use before it returns a
  * signature. Never sign with a copy of its key file, or a restored one.
  */
 export interface WinternitzSigner {

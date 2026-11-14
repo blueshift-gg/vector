@@ -84,7 +84,7 @@ Registration takes about 1.1M CU and a subsequent `Advance` about 262K CU in loc
 
 ### Winternitz and XMSS
 
-Both schemes use [`solana-winternitz`](https://github.com/blueshift-gg/solana-winternitz): DKKW25 target-sum Winternitz and generalized XMSS with Keccak-256. The one-time instance has an 849-byte signature; the height-8 XMSS instance has a 1,037-byte signature and 256 leaves. Both public keys are 41 bytes. This XMSS variant is not compatible with RFC 8391.
+Winternitz uses [`solana-winternitz`](https://github.com/blueshift-gg/solana-winternitz) (DKKW25 target-sum Winternitz with Keccak-256), and XMSS uses [`solana-xmss`](https://github.com/blueshift-gg/solana-winternitz/tree/main/xmss), a generalized XMSS tree of those one-time keys. The one-time instance has an 849-byte signature; the height-8 XMSS instance has a 1,037-byte signature and 256 leaves. Both public keys are 41 bytes. This XMSS variant is not compatible with RFC 8391.
 
 **Transaction size.** An XMSS `Advance` is over the 1,232-byte legacy limit on its own (its signature and next key are 1,078 bytes): it only fits a [V1 transaction](#transactions), the default.
 
@@ -96,7 +96,7 @@ nonce[32] || seed[32] || scheme[1] || bump[1] || current_public_key[41]
 
 `seed = sha256(first_public_key)` is permanent: it is in the header and in the address. Verification uses `current_public_key`, which can change without moving the account or its assets and authorities. This separation also appears in [Winterwallet's account layout](https://github.com/blueshift-gg/winterwallet/blob/672fc6789b1532ee680f24842d235e0be8737b61/program/src/state.rs).
 
-Both SDKs expose `WINTERNITZ` / `XMSS` and initialization helpers. The identity is the first public key: keep using it for every instruction and digest after rotation. Signing belongs to a persistent signer that records each leaf as used before it signs, such as `@blueshift-gg/solana-winternitz/signer`'s `SigningKey` (Bun). The TypeScript SDK takes one: `signAdvanceInstructionWinternitz(signer, identity, nonce, nextKey, pre, post, feePayer?)` and `signAdvanceInstructionXmss(...)`, or `signDigestWinternitz` / `signDigestXmss` for an advance with several signers. Sync an XMSS signer with the account's counter first (`signer.requireNextLeafAtLeast(nextLeaf)`).
+Both SDKs expose `WINTERNITZ` / `XMSS` and initialization helpers. The identity is the first public key: keep using it for every instruction and digest after rotation. Signing belongs to a persistent signer that records each leaf as used before it signs, such as the `SigningKey` of `@blueshift-gg/solana-winternitz/signer` or `@blueshift-gg/solana-xmss/signer` (Bun). The TypeScript SDK takes one: `signAdvanceInstructionWinternitz(signer, identity, nonce, nextKey, pre, post, feePayer?)` and `signAdvanceInstructionXmss(...)`, or `signDigestWinternitz` / `signDigestXmss` for an advance with several signers. Sync an XMSS signer with the account's counter first (`signer.requireNextLeafAtLeast(nextLeaf)`).
 
 ### Key rotation
 
@@ -388,7 +388,7 @@ The TypeScript SDK mirrors the Rust SDK and exposes the same `Scheme` objects (`
 - Every sign, digest and builder function takes an optional trailing `validUntil` (default `NEVER_EXPIRES`); keys sign `signedMessage(digest)`, which is `"vector:" || digest` (`signedDigest` for Winternitz and XMSS). Requires `@solana/web3.js` ^3.2.1 as a peer dependency; the SDK runs in Node and browsers.
 - `ed25519Identity` / `eip191Identity` / `secp256k1Identity` / `eip191EnvelopeHash(digest)` — identity/envelope utilities.
 
-The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1, Falcon-512 and ML-DSA-44, and takes a caller's persistent signer for Winternitz and XMSS (see [Key rotation](#key-rotation)); it verifies all seven with [`@blueshift-gg/solana-winternitz`](https://www.npmjs.com/package/@blueshift-gg/solana-winternitz) for the hash-based two. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
+The TypeScript SDK implements signing for Ed25519, EIP-191, Secp256k1, Falcon-512 and ML-DSA-44, and takes a caller's persistent signer for Winternitz and XMSS (see [Key rotation](#key-rotation)); it verifies all seven, with [`@blueshift-gg/solana-winternitz`](https://www.npmjs.com/package/@blueshift-gg/solana-winternitz) and [`@blueshift-gg/solana-xmss`](https://www.npmjs.com/package/@blueshift-gg/solana-xmss) for the hash-based two. Falcon-512 uses `@noble/post-quantum`'s compressed detached signature zero-padded to the 666-byte wire format `solana-falcon512` reads. The plain Secp256k1 scheme uses [`@noble/curves/secp256k1`](https://github.com/paulmillr/noble-curves) `secp256k1.sign(...).toCompactRawBytes()` for the 64-byte `(r, s)` wire form.
 
 Each scheme is its own importable entrypoint (the npm feature-flag analogue) so a consumer only pulls the crypto it uses: `import { signAdvanceInstructionFalcon512 } from "@blueshift-gg/vector/falcon512"` (Falcon + PQ lib only), `"@blueshift-gg/vector/mldsa44"` likewise vs `import { ... } from "@blueshift-gg/vector"` (everything).
 
