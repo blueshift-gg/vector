@@ -45,3 +45,6 @@ mod hardening;
 
 #[cfg(test)]
 mod secp256k1_edge;
+
+#[cfg(test)]
+mod mutation;
