@@ -1,4 +1,4 @@
-//! DKKW25 one-time Winternitz. Sign through `solana_winternitz::winternitz::SigningKey`:
+//! DKKW25 one-time Winternitz. Sign through `solana_winternitz::SigningKey`:
 //! each key permits one signing attempt, including failed salt sampling.
 
 use solana_address::Address;

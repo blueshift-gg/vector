@@ -222,9 +222,9 @@ fn regenerate_vectors() {
     let (falcon_pk, falcon_sk) = falcon512::keypair();
     let (mldsa_pk, mldsa_sk) = ml_dsa_44::KG::try_keygen().unwrap();
     let mut state = 11;
-    let winternitz = hazmat::winternitz::SecretKey::generate(fill(&mut state)).unwrap();
-    let winternitz_next = hazmat::winternitz::SecretKey::generate(fill(&mut state)).unwrap();
-    let xmss = hazmat::xmss::SecretKey::generate(fill(&mut state)).unwrap();
+    let winternitz = hazmat::SecretKey::generate(fill(&mut state)).unwrap();
+    let winternitz_next = hazmat::SecretKey::generate(fill(&mut state)).unwrap();
+    let xmss = solana_xmss::hazmat::SecretKey::generate(fill(&mut state)).unwrap();
 
     let identities: [Vec<u8>; 7] = [
         ed25519_pubkey(&ed25519).to_vec(),

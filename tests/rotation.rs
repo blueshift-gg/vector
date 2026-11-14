@@ -5,10 +5,8 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_program_error::ProgramError;
-use solana_winternitz::{
-    hazmat::{self, OneTime},
-    xmss, SigningKey,
-};
+use solana_winternitz::hazmat::{self, OneTime, SigningKey};
+use solana_xmss as xmss;
 use vector_core::{
     advance_message, create_close_subinstruction, create_multi_advance_instruction,
     create_passthrough_instruction, create_rotating_advance_instruction,
@@ -22,14 +20,12 @@ use crate::common::{
 
 #[test]
 fn winternitz_rotates_without_moving_the_account() {
-    round_trip::<hazmat::winternitz::SecretKey>(&WINTERNITZ, |signature| {
-        signature.as_bytes().to_vec()
-    });
+    round_trip::<hazmat::SecretKey>(&WINTERNITZ, |signature| signature.as_bytes().to_vec());
 }
 
 #[test]
 fn xmss_rotates_without_moving_the_account() {
-    round_trip::<hazmat::xmss::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
+    round_trip::<xmss::hazmat::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
 }
 
 fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
@@ -38,7 +34,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let mut second = SigningKey::<K>::create(directory.path().join("second.key")).unwrap();
     let third = SigningKey::<K>::create(directory.path().join("third.key")).unwrap();
     // The first key names the account for good.
-    let identity = first.verifying_key().as_bytes().to_vec();
+    let identity = first.verifying_key().as_ref().to_vec();
     let (vector, _) = find_vector_pda(scheme, &identity);
     // XMSS also stores its leaf counter, which a new key starts again.
     let store = |key: &[u8]| match scheme.id == XMSS.id {
@@ -60,7 +56,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let passthrough = create_passthrough_instruction(scheme, &identity, &[withdraw]);
     // The key changes in the `Advance`; the CPI still signs as the same
     // account.
-    let next_key = second.verifying_key().as_bytes().to_vec();
+    let next_key = second.verifying_key().as_ref().to_vec();
     let digest = rotating_advance_vector_digest(
         scheme,
         &NONCE,
@@ -84,7 +80,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     let changed = create_rotating_advance_instruction(
         scheme,
         &identity,
-        third.verifying_key().as_bytes(),
+        third.verifying_key().as_ref(),
         &signature,
     );
     let result = process_transaction(&mollusk, &[&changed, &passthrough], &accounts, &[]);
@@ -103,7 +99,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     );
     assert_eq!(result.program_result, TransactionProgramResult::Success);
     let rotated = result.resulting_accounts;
-    let stored_second = store(second.verifying_key().as_bytes());
+    let stored_second = store(second.verifying_key().as_ref());
     let account = &rotated.iter().find(|(key, _)| *key == vector).unwrap().1;
     assert_eq!(
         account.data,
@@ -137,7 +133,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
     // More than the account holds.
     let withdraw = create_withdraw_subinstruction(scheme, &identity, &receiver, rent + 3_000_000);
     let passthrough = create_passthrough_instruction(scheme, &identity, &[withdraw]);
-    let next_key = third.verifying_key().as_bytes().to_vec();
+    let next_key = third.verifying_key().as_ref().to_vec();
     let next_digest = rotating_advance_vector_digest(
         scheme,
         &digest,
@@ -189,7 +185,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .find(|(key, _)| *key == vector)
         .unwrap()
         .1;
-    let stored_third = store(third.verifying_key().as_bytes());
+    let stored_third = store(third.verifying_key().as_ref());
     assert_eq!(
         account.data,
         expected_advanced_data(next_digest, scheme, &identity, &stored_third)
@@ -205,7 +201,7 @@ fn round_trip<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) {
         .unwrap()
         .1
         .data[76..76 + identity.len()]
-        .copy_from_slice(first.verifying_key().as_bytes());
+        .copy_from_slice(first.verifying_key().as_ref());
     let rejected = process_transaction(
         &mollusk,
         &next_transaction.iter().collect::<Vec<_>>(),
@@ -236,8 +232,8 @@ pub(crate) fn fill(
 #[test]
 fn winternitz_key_signs_once() {
     let mut state = 1;
-    let key = hazmat::winternitz::SecretKey::generate(fill(&mut state)).unwrap();
-    let next = hazmat::winternitz::SecretKey::generate(fill(&mut state)).unwrap();
+    let key = hazmat::SecretKey::generate(fill(&mut state)).unwrap();
+    let next = hazmat::SecretKey::generate(fill(&mut state)).unwrap();
     let identity = key.verifying_key().to_bytes();
     let next_key = next.verifying_key().to_bytes();
     let (vector, _) = find_vector_pda(&WINTERNITZ, &identity);
@@ -317,8 +313,8 @@ fn winternitz_key_signs_once() {
 #[test]
 fn xmss_leaf_signs_once_and_the_last_leaf_must_rotate() {
     let mut state = 2;
-    let key = hazmat::xmss::SecretKey::generate(fill(&mut state)).unwrap();
-    let next = hazmat::xmss::SecretKey::generate(fill(&mut state)).unwrap();
+    let key = xmss::hazmat::SecretKey::generate(fill(&mut state)).unwrap();
+    let next = xmss::hazmat::SecretKey::generate(fill(&mut state)).unwrap();
     let identity = key.verifying_key().to_bytes();
     let (vector, _) = find_vector_pda(&XMSS, &identity);
     let mollusk = mollusk();
@@ -384,16 +380,13 @@ fn a_rotated_key_verifies_against_the_key_the_account_holds_now() {
     use vector_core::{verify_advance, AdvanceEntry, SignerNonce, VerifyError};
 
     let directory = tempfile::tempdir().unwrap();
-    let first = SigningKey::<hazmat::winternitz::SecretKey>::create(directory.path().join("1.key"))
-        .unwrap();
+    let first = SigningKey::<hazmat::SecretKey>::create(directory.path().join("1.key")).unwrap();
     let mut second =
-        SigningKey::<hazmat::winternitz::SecretKey>::create(directory.path().join("2.key"))
-            .unwrap();
-    let third = SigningKey::<hazmat::winternitz::SecretKey>::create(directory.path().join("3.key"))
-        .unwrap();
-    let identity = first.verifying_key().as_bytes().to_vec();
-    let current = second.verifying_key().as_bytes().to_vec();
-    let next_key = third.verifying_key().as_bytes().to_vec();
+        SigningKey::<hazmat::SecretKey>::create(directory.path().join("2.key")).unwrap();
+    let third = SigningKey::<hazmat::SecretKey>::create(directory.path().join("3.key")).unwrap();
+    let identity = first.verifying_key().as_ref().to_vec();
+    let current = second.verifying_key().as_ref().to_vec();
+    let next_key = third.verifying_key().as_ref().to_vec();
     let (vector, _) = find_vector_pda(&WINTERNITZ, &identity);
 
     // The account was rotated to `second`; `second` signs, naming `third`.
@@ -423,14 +416,12 @@ fn a_rotated_key_verifies_against_the_key_the_account_holds_now() {
 
 #[test]
 fn winternitz_account_never_closes() {
-    never_closes::<hazmat::winternitz::SecretKey>(&WINTERNITZ, |signature| {
-        signature.as_bytes().to_vec()
-    });
+    never_closes::<hazmat::SecretKey>(&WINTERNITZ, |signature| signature.as_bytes().to_vec());
 }
 
 #[test]
 fn xmss_account_never_closes() {
-    never_closes::<hazmat::xmss::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
+    never_closes::<xmss::hazmat::SecretKey>(&XMSS, |signature| signature.as_bytes().to_vec());
 }
 
 /// Its address is its first key's: created again, it would start over at
@@ -442,13 +433,13 @@ fn never_closes<K: OneTime>(scheme: &Scheme, wire: fn(K::Signature) -> Vec<u8>) 
     let lamports = mollusk.sysvars.rent.minimum_balance(scheme.account_len) + 5_000_000;
     let receiver = Address::new_unique();
     let next = SigningKey::<K>::create(directory.path().join("next.key")).unwrap();
-    let next_key = next.verifying_key().as_bytes().to_vec();
+    let next_key = next.verifying_key().as_ref().to_vec();
 
     // Each attempt signs with a key of its own, over an account of its own,
     // so no one-time key signs twice.
     let attempt = |name: &str, action: fn(&Scheme, &[u8], &Address, u64) -> Instruction| {
         let mut key = SigningKey::<K>::create(directory.path().join(name)).unwrap();
-        let identity = key.verifying_key().as_bytes().to_vec();
+        let identity = key.verifying_key().as_ref().to_vec();
         let (vector, _) = find_vector_pda(scheme, &identity);
         let stored = match scheme.id == XMSS.id {
             true => xmss_stored(&identity, 0),
