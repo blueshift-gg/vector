@@ -84,7 +84,7 @@ Registration takes about 1.1M CU and a subsequent `Advance` about 262K CU in loc
 
 ### Winternitz and XMSS
 
-Winternitz uses [`solana-winternitz`](https://github.com/blueshift-gg/solana-winternitz) (DKKW25 target-sum Winternitz with Keccak-256), and XMSS uses [`solana-xmss`](https://github.com/blueshift-gg/solana-winternitz/tree/main/xmss), a generalized XMSS tree of those one-time keys. The one-time instance has an 849-byte signature; the height-8 XMSS instance has a 1,037-byte signature and 256 leaves. Both public keys are 41 bytes. This XMSS variant is not compatible with RFC 8391.
+Winternitz uses [`solana-winternitz`](https://github.com/blueshift-gg/solana-winternitz) (DKKW25 target-sum Winternitz with Keccak-256), and XMSS uses [`solana-xmss`](https://github.com/blueshift-gg/solana-xmss), a generalized XMSS tree of those one-time keys. The one-time instance has an 849-byte signature; the height-8 XMSS instance has a 1,037-byte signature and 256 leaves. Both public keys are 41 bytes. This XMSS variant is not compatible with RFC 8391.
 
 **Transaction size.** An XMSS `Advance` is over the 1,232-byte legacy limit on its own (its signature and next key are 1,078 bytes): it only fits a [V1 transaction](#transactions), the default.
 

@@ -1,4 +1,4 @@
-//! DKKW25 generalized XMSS. Sign through `solana_winternitz::xmss::SigningKey`:
+//! DKKW25 generalized XMSS. Sign through `solana_xmss::SigningKey`:
 //! each key permits 256 signing attempts, including failed salt sampling.
 
 use solana_address::Address;

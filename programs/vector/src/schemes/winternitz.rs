@@ -1,5 +1,5 @@
 use pinocchio::error::ProgramError;
-use solana_winternitz::{winternitz::Signature, VerifyingKey};
+use solana_winternitz::{Signature, VerifyingKey};
 
 use solana_nostd_sha256::hash;
 

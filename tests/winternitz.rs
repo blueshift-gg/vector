@@ -7,7 +7,7 @@ use mollusk_svm::{
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
-use solana_winternitz::{hazmat, winternitz};
+use solana_winternitz::{self as winternitz, hazmat};
 use vector_core::{
     create_close_subinstruction, create_initialize_winternitz, create_passthrough_instruction,
     create_rotating_advance_instruction, create_withdraw_subinstruction, find_vector_pda,
@@ -226,7 +226,7 @@ fn signature_binds_withdrawal_and_rejects_replay() {
 /// Signs the advance of `account` (at `nonce`) with `key`, naming `next_key`,
 /// and runs it. Returns the result, the account afterwards and the new nonce.
 fn advance_with(
-    key: &hazmat::winternitz::SecretKey,
+    key: &hazmat::SecretKey,
     state: &mut u64,
     identity: &[u8],
     account: &Account,
@@ -257,8 +257,8 @@ fn advance_with(
 #[test]
 fn rotating_back_to_an_old_key_is_accepted_and_the_signer_must_prevent_it() {
     let mut state = 5;
-    let a = hazmat::winternitz::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
-    let b = hazmat::winternitz::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
+    let a = hazmat::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
+    let b = hazmat::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
     let a_key = a.verifying_key().to_bytes();
     let b_key = b.verifying_key().to_bytes();
     let rent = mollusk()
@@ -284,7 +284,7 @@ fn rotating_back_to_an_old_key_is_accepted_and_the_signer_must_prevent_it() {
 #[test]
 fn wrong_length_next_key_or_signature_is_refused() {
     let mut state = 6;
-    let key = hazmat::winternitz::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
+    let key = hazmat::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
     let identity = key.verifying_key().to_bytes();
     let next_key = [7; 41];
     let mollusk = mollusk();

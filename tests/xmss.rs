@@ -5,7 +5,7 @@ use mollusk_svm::{program::keyed_account_for_system_program, result::Check};
 use solana_account::Account;
 use solana_address::Address;
 use solana_program_error::ProgramError;
-use solana_winternitz::{hazmat, xmss};
+use solana_xmss::{self as xmss, hazmat};
 use vector_core::{
     create_initialize_xmss, create_passthrough_instruction, create_rotating_advance_instruction,
     create_withdraw_subinstruction, find_vector_pda, rotating_advance_vector_digest, VectorError,
@@ -281,7 +281,7 @@ fn advance_binds_and_authorizes_withdrawal() {
 /// Signs `leaf` of `key` over the advance of `account` (at `nonce`) naming
 /// `next_key`, and runs it. Returns the result and the account afterwards.
 fn advance_at(
-    key: &hazmat::xmss::SecretKey,
+    key: &hazmat::SecretKey,
     state: &mut u64,
     identity: &[u8],
     leaf: u32,
@@ -313,8 +313,8 @@ fn advance_at(
 #[test]
 fn rotating_back_to_an_old_key_reopens_its_leaves_and_the_signer_must_prevent_it() {
     let mut state = 3;
-    let a = hazmat::xmss::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
-    let b = hazmat::xmss::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
+    let a = hazmat::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
+    let b = hazmat::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
     let a_key = a.verifying_key().to_bytes();
     let b_key = b.verifying_key().to_bytes();
     let rent = mollusk().sysvars.rent.minimum_balance(XMSS.account_len);
@@ -343,7 +343,7 @@ fn rotating_back_to_an_old_key_reopens_its_leaves_and_the_signer_must_prevent_it
 #[test]
 fn skipped_leaves_may_sign_but_never_a_lower_one() {
     let mut state = 4;
-    let key = hazmat::xmss::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
+    let key = hazmat::SecretKey::generate(crate::rotation::fill(&mut state)).unwrap();
     let identity = key.verifying_key().to_bytes();
     let rent = mollusk().sysvars.rent.minimum_balance(XMSS.account_len);
     let account = build_vector_account(NONCE, &XMSS, &identity, rent, &xmss_stored(&identity, 0));
