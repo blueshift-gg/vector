@@ -57,6 +57,14 @@ export function createInitializeMlDsa44(
 }
 
 /**
+ * Sign one signer's digest ({@link signerDigest}) with an ML-DSA-44 keypair:
+ * `"vector:" || digest`, empty context. For an advance with several signers.
+ */
+export function signDigestMlDsa44(keypair: MlDsa44Keypair, digest: Uint8Array): Uint8Array {
+  return Uint8Array.from(ml_dsa44.sign(signedMessage(digest), keypair.secretKey));
+}
+
+/**
  * Sign the advance digest with an ML-DSA-44 keypair (empty context) and
  * return a ready-to-submit advance instruction. The 2,420-byte signature
  * needs a V1 transaction.
@@ -79,6 +87,10 @@ export function signAdvanceInstructionMlDsa44(
     feePayer,
     validUntil
   );
-  const signature = Uint8Array.from(ml_dsa44.sign(signedMessage(digest), keypair.secretKey));
-  return createAdvanceInstruction(MLDSA44, identity, signature, validUntil);
+  return createAdvanceInstruction(
+    MLDSA44,
+    identity,
+    signDigestMlDsa44(keypair, digest),
+    validUntil
+  );
 }

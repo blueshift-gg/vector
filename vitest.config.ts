@@ -6,7 +6,8 @@ export default defineConfig({
     hookTimeout: 60_000,
     projects: [
       {
-        // No validator needed.
+        // No validator needed. `extends` keeps the timeouts above.
+        extends: true,
         test: {
           name: "offline",
           include: ["sdk/ts/test/**/*.test.ts"],
@@ -15,6 +16,7 @@ export default defineConfig({
       },
       {
         // Needs `bun run validator` running, with the program built.
+        extends: true,
         test: {
           name: "e2e",
           include: ["sdk/ts/test/**/*.e2e.test.ts"],

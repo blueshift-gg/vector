@@ -59,6 +59,25 @@ export function createInitializeFalcon512(
 }
 
 /**
+ * Sign one signer's digest ({@link signerDigest}) with a Falcon-512 keypair:
+ * `"vector:" || digest`, zero-padded to the 666 bytes the program expects.
+ * For an advance with several signers.
+ */
+export function signDigestFalcon512(keypair: Falcon512Keypair, digest: Uint8Array): Uint8Array {
+  const detached = Uint8Array.from(nobleFalcon.sign(signedMessage(digest), keypair.secretKey));
+  if (detached.length > FALCON512.signatureLen) {
+    throw new Error(
+      `Falcon-512 signature ${detached.length} B exceeds wire size ${FALCON512.signatureLen}`
+    );
+  }
+  // Zero-pad the compressed detached signature to the fixed 666-byte wire
+  // format `solana-falcon512` reads (matches PQClean's `CRYPTO_BYTES`).
+  const signature = new Uint8Array(FALCON512.signatureLen);
+  signature.set(detached, 0);
+  return signature;
+}
+
+/**
  * Sign an advance with a Falcon-512 keypair. The signature is zero-padded to
  * the 666 bytes the program expects.
  */
@@ -81,16 +100,10 @@ export function signAdvanceInstructionFalcon512(
     validUntil
   );
 
-  const detached = Uint8Array.from(nobleFalcon.sign(signedMessage(digest), keypair.secretKey));
-  if (detached.length > FALCON512.signatureLen) {
-    throw new Error(
-      `Falcon-512 signature ${detached.length} B exceeds wire size ${FALCON512.signatureLen}`
-    );
-  }
-  // Zero-pad the compressed detached signature to the fixed 666-byte wire
-  // format `solana-falcon512` reads (matches PQClean's `CRYPTO_BYTES`).
-  const signature = new Uint8Array(FALCON512.signatureLen);
-  signature.set(detached, 0);
-
-  return createAdvanceInstruction(FALCON512, identity, signature, validUntil);
+  return createAdvanceInstruction(
+    FALCON512,
+    identity,
+    signDigestFalcon512(keypair, digest),
+    validUntil
+  );
 }

@@ -57,6 +57,20 @@ export function eip191EnvelopeHash(digest: Uint8Array): Uint8Array {
 }
 
 /**
+ * Sign one signer's digest ({@link signerDigest}) as `personal_sign` of
+ * `"vector:" || digest`: `r || s || v`, 65 bytes. For an advance with several
+ * signers.
+ * @param privateKey 32-byte secp256k1 private key
+ */
+export function signDigestEip191(privateKey: Uint8Array, digest: Uint8Array): Uint8Array {
+  const sig = secp256k1.sign(eip191EnvelopeHash(digest), privateKey);
+  const sigBytes = new Uint8Array(65);
+  sigBytes.set(sig.toCompactRawBytes(), 0); // r || s (64 bytes)
+  sigBytes[64] = sig.recovery; // v (1 byte): 0 or 1; the program takes 27 or 28 too
+  return sigBytes;
+}
+
+/**
  * Sign the advance digest with an EIP-191 (Ethereum-style) secp256k1 key and
  * return a ready-to-submit advance instruction.
  * @param privateKey 32-byte secp256k1 private key
@@ -80,13 +94,12 @@ export function signAdvanceInstructionEip191(
     validUntil
   );
 
-  const ethDigest = eip191EnvelopeHash(digest);
-  const sig = secp256k1.sign(ethDigest, privateKey);
-  const sigBytes = new Uint8Array(65);
-  sigBytes.set(sig.toCompactRawBytes(), 0); // r || s (64 bytes)
-  sigBytes[64] = sig.recovery; // v (1 byte): 0 or 1; the program takes 27 or 28 too
-
-  return createAdvanceInstruction(EIP191, identity, sigBytes, validUntil);
+  return createAdvanceInstruction(
+    EIP191,
+    identity,
+    signDigestEip191(privateKey, digest),
+    validUntil
+  );
 }
 
 /**

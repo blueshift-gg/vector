@@ -15,6 +15,8 @@ import {
   SystemProgram,
   Transaction,
   TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
@@ -107,6 +109,35 @@ export async function sendTx(
   signers: Keypair[]
 ): Promise<string> {
   const sig = await sendAndConfirmTransaction(connection, tx, signers);
+  console.log(explorerLink(sig));
+  return sig;
+}
+
+/**
+ * Send `instructions` as one V1 transaction (SIMD-0385): up to 4,096 bytes,
+ * for ML-DSA-44's key and signature or several signers at once. A V1
+ * transaction takes its limits from the message, not from Compute Budget
+ * instructions, and has none without them.
+ */
+export async function sendV1(
+  connection: Connection,
+  instructions: TransactionInstruction[],
+  signers: Keypair[],
+  computeUnitLimit = 1_400_000
+): Promise<string> {
+  const { blockhash } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({
+    payerKey: signers[0].publicKey,
+    instructions,
+    recentBlockhash: blockhash,
+  // A V1 transaction budgets zero for any limit it leaves out: loading the
+  // program and accounts needs this one too. 64 MiB is the runtime's most.
+  }).compileToV1Message({ computeUnitLimit, loadedAccountsDataSizeLimit: 64 * 1024 * 1024 });
+  const tx = new VersionedTransaction(message);
+  await tx.sign(signers);
+  const sig = await connection.sendTransaction(tx);
+  const { value } = await connection.confirmTransaction(sig, "confirmed");
+  if (value.err) throw new Error(`${sig} failed: ${JSON.stringify(value.err)}`);
   console.log(explorerLink(sig));
   return sig;
 }

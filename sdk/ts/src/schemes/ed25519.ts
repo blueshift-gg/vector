@@ -33,6 +33,15 @@ export function createInitializeEd25519(
 }
 
 /**
+ * Sign one signer's digest ({@link signerDigest}): `"vector:" || digest`,
+ * with an Ed25519 key. For an advance with several signers.
+ * @param signingKey 32-byte Ed25519 private key seed
+ */
+export function signDigestEd25519(signingKey: Uint8Array, digest: Uint8Array): Uint8Array {
+  return ed25519.sign(signedMessage(digest), signingKey);
+}
+
+/**
  * Sign `"vector:" || digest` with an Ed25519 key and return a ready-to-submit
  * advance instruction.
  * @param signingKey 32-byte Ed25519 private key seed
@@ -56,8 +65,12 @@ export function signAdvanceInstructionEd25519(
     feePayer,
     validUntil
   );
-  const signature = ed25519.sign(signedMessage(digest), signingKey);
-  return createAdvanceInstruction(ED25519, identity, signature, validUntil);
+  return createAdvanceInstruction(
+    ED25519,
+    identity,
+    signDigestEd25519(signingKey, digest),
+    validUntil
+  );
 }
 
 /**

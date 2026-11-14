@@ -37,6 +37,15 @@ export function createInitializeSecp256k1(
 }
 
 /**
+ * Sign one signer's digest ({@link signerDigest}) with a plain secp256k1
+ * key: the 64-byte `(r, s)` over the SHA-256 of `"vector:" || digest`. For an
+ * advance with several signers.
+ */
+export function signDigestSecp256k1(privateKey: Uint8Array, digest: Uint8Array): Uint8Array {
+  return secp256k1.sign(sha256(signedMessage(digest)), privateKey).toBytes("compact");
+}
+
+/**
  * Sign an advance with a plain secp256k1 key, over the SHA-256 of `"vector:" ||
  * digest`. The signature is the 64-byte `(r, s)`.
  */
@@ -59,10 +68,12 @@ export function signAdvanceInstructionSecp256k1(
     validUntil
   );
 
-  const sig = secp256k1.sign(sha256(signedMessage(digest)), privateKey);
-  const sigBytes = sig.toBytes("compact"); // r || s (64 bytes)
-
-  return createAdvanceInstruction(SECP256K1, identity, sigBytes, validUntil);
+  return createAdvanceInstruction(
+    SECP256K1,
+    identity,
+    signDigestSecp256k1(privateKey, digest),
+    validUntil
+  );
 }
 
 /**
